@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-15
+            target: aarch64-apple-darwin
+            sidecar_ext: ""
+            tauri_args: "--target aarch64-apple-darwin"
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+            sidecar_ext: ""
+            tauri_args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            sidecar_ext: ".exe"
+            tauri_args: "--target x86_64-pc-windows-msvc"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            melody-build
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Melody sidecar
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/Lhy723/melody-build.git melody-build
+          cargo build --release --manifest-path melody-build/Cargo.toml --package melody-pager-bin --bin melody-pager
+          mkdir -p src-tauri/binaries
+          cp "melody-build/target/release/melody-pager${{ matrix.sidecar_ext }}" "src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
+
+      - name: Build and publish installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MELODYWORK_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          MELODYWORK_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+        with:
+          tagName: v__VERSION__
+          releaseName: "MelodyWork v__VERSION__"
+          releaseBody: "Download the installer for your platform. This is a beta release."
+          releaseDraft: true
+          prerelease: false
+          args: "${{ matrix.tauri_args }} --config src-tauri/tauri.release.conf.json"
