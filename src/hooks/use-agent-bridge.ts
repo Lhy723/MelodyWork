@@ -19,33 +19,56 @@ export const useAgentBridge = (session?: SessionRecord) => {
     let disposed = false;
     let unsubscribe: (() => void)[] = [];
 
+    const removeListeners = (listeners: (() => void)[]) => {
+      for (const unlisten of listeners) {
+        unlisten();
+      }
+    };
+
     const connect = async () => {
       if (!session) {
         return;
       }
-      unsubscribe = await subscribeToAcp(receiveAcp, appendStderr);
-      const current = await getAgentStatus();
-      if (disposed) {
-        return;
-      }
-      setStatus(current);
-      let running = current;
-      if (current.phase === "stopped") {
-        running = await startAgent(session.cwd);
-        if (!disposed) {
-          setStatus(running);
+      try {
+        const listeners = await subscribeToAcp(receiveAcp, appendStderr);
+        if (disposed) {
+          removeListeners(listeners);
+          return;
         }
-      }
-      if (
-        !disposed &&
-        (running.phase === "running" || !isTauriRuntime())
-      ) {
-        await beginSession(
-          session.cwd,
-          session.id,
-          session.acpSessionId,
-          session.timelineJson,
-        );
+        unsubscribe = listeners;
+        const current = await getAgentStatus();
+        if (disposed) {
+          return;
+        }
+        setStatus(current);
+        let running = current;
+        if (current.phase === "stopped") {
+          running = await startAgent(session.cwd);
+          if (!disposed) {
+            setStatus(running);
+          }
+        }
+        if (
+          !disposed &&
+          (running.phase === "running" || !isTauriRuntime())
+        ) {
+          await beginSession(
+            session.cwd,
+            session.id,
+            session.acpSessionId,
+            session.timelineJson,
+            session.acpCursor,
+            session.timelineVersion,
+          );
+        }
+      } catch (reason) {
+        if (!disposed) {
+          setStatus({
+            phase: "failed",
+            message:
+              reason instanceof Error ? reason.message : String(reason),
+          });
+        }
       }
     };
 
@@ -53,15 +76,13 @@ export const useAgentBridge = (session?: SessionRecord) => {
 
     return () => {
       disposed = true;
-      for (const unlisten of unsubscribe) {
-        unlisten();
-      }
+      removeListeners(unsubscribe);
     };
   }, [
     appendStderr,
     beginSession,
     receiveAcp,
-    session,
+    session?.id,
     setStatus,
   ]);
 };

@@ -49,7 +49,7 @@ export function TerminalPanel({ cwd, onClose }: TerminalPanelProps) {
         },
       });
       terminal.open(containerRef.current);
-      terminal.write(`MelodyWork terminal\r\n${cwd}\r\n\r\n`);
+      terminal.write(`MelodyWork 终端\r\n${cwd}\r\n\r\n`);
       terminalRef.current = terminal;
       unsubscribe = await subscribeToTerminal(
         (event) => {
@@ -64,7 +64,7 @@ export function TerminalPanel({ cwd, onClose }: TerminalPanelProps) {
         (event) => {
           if (event.terminalId === activeIdRef.current) {
             terminal.write(
-              `\r\n[process exited with code ${event.code ?? "unknown"}]\r\n`,
+              `\r\n[进程已退出，退出码：${event.code ?? "未知"}]\r\n`,
             );
             setRunning(false);
             activeIdRef.current = null;
@@ -94,7 +94,7 @@ export function TerminalPanel({ cwd, onClose }: TerminalPanelProps) {
     if (!isTauriRuntime()) {
       window.setTimeout(() => {
         terminalRef.current?.write(
-          "Browser preview: command execution is available in the desktop app.\r\n",
+          "浏览器预览模式：请在桌面应用中执行命令。\r\n",
         );
         setRunning(false);
       }, 350);
@@ -117,12 +117,12 @@ export function TerminalPanel({ cwd, onClose }: TerminalPanelProps) {
     <section className="absolute inset-x-4 bottom-4 z-30 flex h-[28rem] flex-col overflow-hidden rounded-2xl border bg-background shadow-xl">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         <TerminalSquareIcon className="size-4 text-muted-foreground" />
-        <h2 className="font-medium text-sm">Terminal</h2>
+        <h2 className="font-medium text-sm">终端</h2>
         <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
           {cwd}
         </span>
         <Button
-          aria-label="Close terminal"
+          aria-label="关闭终端"
           onClick={onClose}
           size="icon"
           variant="ghost"
@@ -139,14 +139,14 @@ export function TerminalPanel({ cwd, onClose }: TerminalPanelProps) {
         }}
       >
         <Input
-          aria-label="Terminal command"
+          aria-label="终端命令"
           disabled={running}
           onChange={(event) => setCommand(event.target.value)}
-          placeholder={running ? "Command is running…" : "Run a command"}
+          placeholder={running ? "命令正在运行…" : "输入命令"}
           value={command}
         />
         <Button disabled={running || !command.trim()} type="submit">
-          Run
+          运行
         </Button>
       </form>
     </section>

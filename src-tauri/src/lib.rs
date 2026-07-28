@@ -6,9 +6,14 @@ mod update_runtime;
 mod workspace_runtime;
 
 use agent_runtime::{AgentRuntime, agent_status, send_acp, start_agent, stop_agent};
-use config_runtime::{list_melody_extensions, read_melody_config, write_melody_config};
+use config_runtime::{
+    add_marketplace_source, delete_marketplace_source, list_marketplace_sources,
+    get_melody_plugin_details, install_melody_plugin, list_installed_melody_plugins,
+    list_melody_extensions, read_melody_config, save_marketplace_source,
+    uninstall_melody_plugin, update_melody_config,
+};
 use database::{
-    AppDatabase, create_session, delete_permission_rule, find_permission_rule,
+    AppDatabase, create_session, delete_permission_rule, delete_session, find_permission_rule,
     list_permission_rules, list_projects, list_sessions, update_session, upsert_permission_rule,
     upsert_project,
 };
@@ -55,13 +60,22 @@ pub fn run() {
             list_sessions,
             create_session,
             update_session,
+            delete_session,
             workspace_tree,
             read_workspace_file,
             write_workspace_file,
             run_terminal_command,
             read_melody_config,
-            write_melody_config,
+            update_melody_config,
             list_melody_extensions,
+            list_marketplace_sources,
+            add_marketplace_source,
+            save_marketplace_source,
+            delete_marketplace_source,
+            install_melody_plugin,
+            list_installed_melody_plugins,
+            get_melody_plugin_details,
+            uninstall_melody_plugin,
             list_permission_rules,
             find_permission_rule,
             upsert_permission_rule,

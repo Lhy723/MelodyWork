@@ -109,7 +109,7 @@ export function GitWorkspace({
           <p className="truncate text-muted-foreground text-xs">{cwd}</p>
         </div>
         <Button
-          aria-label="Refresh Git"
+          aria-label="刷新 Git"
           disabled={loading || busy}
           onClick={() => void refresh()}
           size="icon"
@@ -118,7 +118,7 @@ export function GitWorkspace({
           <RefreshCwIcon className={cn(loading && "animate-spin")} />
         </Button>
         <Button
-          aria-label="Close Git"
+          aria-label="关闭 Git"
           onClick={onClose}
           size="icon"
           variant="ghost"
@@ -130,12 +130,12 @@ export function GitWorkspace({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-2">
           {error ? (
-            <p className="col-span-full rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+            <p className="motion-view-enter col-span-full rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm">
               {error}
             </p>
           ) : null}
           {notice ? (
-            <p className="col-span-full rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+            <p className="motion-success col-span-full rounded-xl border bg-muted/40 px-4 py-3 text-sm">
               {notice}
             </p>
           ) : null}
@@ -143,16 +143,17 @@ export function GitWorkspace({
           <section className="rounded-2xl border">
             <div className="flex items-center gap-2 border-b px-4 py-3">
               <GitCommitHorizontalIcon className="size-4 text-muted-foreground" />
-              <h3 className="font-medium text-sm">Changes</h3>
+              <h3 className="font-medium text-sm">更改</h3>
               <span className="ml-auto text-muted-foreground text-xs">
                 {changes.length}
               </span>
             </div>
             <div className="max-h-72 overflow-y-auto p-2">
-              {changes.map((change) => (
+              {changes.map((change, index) => (
                 <div
-                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm"
+                  className="motion-list-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm"
                   key={change.path}
+                  style={{ animationDelay: `${Math.min(index, 6) * 24}ms` }}
                 >
                   <span className="min-w-0 flex-1 truncate">{change.path}</span>
                   <span className="text-emerald-700 text-xs">
@@ -169,19 +170,19 @@ export function GitWorkspace({
                           change.staged
                             ? unstageGitPaths(cwd, [change.path])
                             : stageGitPaths(cwd, [change.path]),
-                        change.staged ? "File unstaged." : "File staged.",
+                        change.staged ? "文件已取消暂存。" : "文件已暂存。",
                       )
                     }
                     size="sm"
                     variant={change.staged ? "secondary" : "outline"}
                   >
-                    {change.staged ? "Unstage" : "Stage"}
+                    {change.staged ? "取消暂存" : "暂存"}
                   </Button>
                 </div>
               ))}
               {changes.length === 0 ? (
-                <p className="px-3 py-8 text-center text-muted-foreground text-sm">
-                  Working tree is clean.
+                <p className="motion-view-enter px-3 py-8 text-center text-muted-foreground text-sm">
+                  工作树是干净的。
                 </p>
               ) : null}
             </div>
@@ -194,22 +195,22 @@ export function GitWorkspace({
                     await commitGitChanges(cwd, commitMessage);
                     setCommitMessage("");
                   },
-                  "Commit created.",
+                  "提交已创建。",
                 );
               }}
             >
               <Input
-                aria-label="Commit message"
+                aria-label="提交说明"
                 disabled={busy}
                 onChange={(event) => setCommitMessage(event.target.value)}
-                placeholder="Commit message"
+                placeholder="提交说明"
                 value={commitMessage}
               />
               <Button
                 disabled={busy || stagedCount === 0 || !commitMessage.trim()}
                 type="submit"
               >
-                Commit
+                提交
               </Button>
             </form>
           </section>
@@ -217,7 +218,7 @@ export function GitWorkspace({
           <section className="rounded-2xl border">
             <div className="flex items-center gap-2 border-b px-4 py-3">
               <GitBranchIcon className="size-4 text-muted-foreground" />
-              <h3 className="font-medium text-sm">Branches</h3>
+              <h3 className="font-medium text-sm">分支</h3>
             </div>
             <div className="max-h-72 overflow-y-auto p-2">
               {branches.map((branch) => (
@@ -228,7 +229,7 @@ export function GitWorkspace({
                   onClick={() =>
                     void runAction(
                       () => checkoutGitBranch(cwd, branch.name),
-                      `Checked out ${branch.name}.`,
+                      `已切换到 ${branch.name}。`,
                     )
                   }
                   type="button"
@@ -250,20 +251,20 @@ export function GitWorkspace({
                     await createGitBranch(cwd, newBranch);
                     setNewBranch("");
                   },
-                  `Created ${newBranch}.`,
+                  `已创建 ${newBranch}。`,
                 );
               }}
             >
               <Input
-                aria-label="New branch name"
+                aria-label="新分支名称"
                 disabled={busy}
                 onChange={(event) => setNewBranch(event.target.value)}
-                placeholder="New branch"
+                placeholder="新分支"
                 value={newBranch}
               />
               <Button disabled={busy || !newBranch.trim()} type="submit">
                 <PlusIcon />
-                Create
+                创建
               </Button>
             </form>
           </section>
@@ -271,18 +272,19 @@ export function GitWorkspace({
           <section className="rounded-2xl border lg:col-span-2">
             <div className="flex items-center gap-2 border-b px-4 py-3">
               <TreesIcon className="size-4 text-muted-foreground" />
-              <h3 className="font-medium text-sm">Worktrees</h3>
+              <h3 className="font-medium text-sm">工作树</h3>
             </div>
             <div className="grid gap-2 p-2 md:grid-cols-2">
-              {worktrees.map((worktree) => (
+              {worktrees.map((worktree, index) => (
                 <div
-                  className="flex items-center gap-3 rounded-xl px-3 py-3 hover:bg-muted/40"
+                  className="motion-list-item flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-muted/40"
                   key={worktree.path}
+                  style={{ animationDelay: `${Math.min(index, 6) * 24}ms` }}
                 >
                   <TreesIcon className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm">
-                      {worktree.branch ?? "Detached HEAD"}
+                      {worktree.branch ?? "分离的 HEAD"}
                     </span>
                     <span className="block truncate text-muted-foreground text-xs">
                       {worktree.path}
@@ -290,7 +292,7 @@ export function GitWorkspace({
                   </span>
                   {worktree.path !== cwd ? (
                     <Button
-                      aria-label={`Remove ${worktree.path}`}
+                      aria-label={`移除 ${worktree.path}`}
                       disabled={busy}
                       onClick={() => {
                         if (pendingRemoval !== worktree.path) {
@@ -300,7 +302,7 @@ export function GitWorkspace({
                         setPendingRemoval(undefined);
                         void runAction(
                           () => removeGitWorktree(cwd, worktree.path),
-                          "Worktree removed.",
+                          "工作树已移除。",
                         );
                       }}
                       size={
@@ -314,7 +316,7 @@ export function GitWorkspace({
                     >
                       <Trash2Icon />
                       {pendingRemoval === worktree.path
-                        ? "Confirm remove"
+                        ? <span className="motion-view-enter">确认移除</span>
                         : null}
                     </Button>
                   ) : null}
@@ -336,22 +338,22 @@ export function GitWorkspace({
                     setWorktreePath("");
                     setWorktreeBranch("");
                   },
-                  "Worktree created.",
+                  "工作树已创建。",
                 );
               }}
             >
               <Input
-                aria-label="Worktree path"
+                aria-label="工作树路径"
                 disabled={busy}
                 onChange={(event) => setWorktreePath(event.target.value)}
-                placeholder="Worktree directory"
+                placeholder="工作树目录"
                 value={worktreePath}
               />
               <Input
-                aria-label="Worktree branch"
+                aria-label="工作树分支"
                 disabled={busy}
                 onChange={(event) => setWorktreeBranch(event.target.value)}
-                placeholder="New branch"
+                placeholder="新分支"
                 value={worktreeBranch}
               />
               <Button
@@ -360,7 +362,7 @@ export function GitWorkspace({
                 }
                 type="submit"
               >
-                Create worktree
+                创建工作树
               </Button>
             </form>
           </section>

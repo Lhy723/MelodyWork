@@ -1,10 +1,9 @@
 import {
-  Confirmation,
-  ConfirmationAction,
-  ConfirmationActions,
-  ConfirmationRequest,
-  ConfirmationTitle,
-} from "@/components/ai-elements/confirmation";
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+} from "@/components/ai-elements/attachments";
 import {
   Conversation,
   ConversationContent,
@@ -15,128 +14,135 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-} from "@/components/ai-elements/tool";
-import type { TimelineEntry } from "@/domain/acp";
+import type {
+  AgentPlanDecision,
+  TimelineEntry,
+} from "@/domain/acp";
+import { groupTurnActivity } from "@/domain/timeline-groups";
+import { MessageCitations } from "@/features/chat/message-citations";
+import { MessageCodeBlock } from "@/features/chat/message-code-block";
+import { PlanTimelineEntry } from "@/features/chat/plan-timeline-entry";
+import { ProjectInlineCitation } from "@/features/chat/project-inline-citation";
+import { TurnActivityGroup } from "@/features/chat/turn-activity-group";
+import { useMemo, type ComponentProps } from "react";
 
 interface AgentTimelineProps {
+  cwd: string;
   entries: TimelineEntry[];
   onPermission: (entryId: string, optionId: string) => void;
+  onPlanDecision: (
+    entryId: string,
+    outcome: AgentPlanDecision,
+    feedback?: string,
+  ) => void;
+  projectRoot: string;
 }
 
-const toolState = (
-  permission: "pending" | "allowed" | "denied" | undefined,
-  status: string | undefined,
-) => {
-  if (permission === "pending") {
-    return "approval-requested" as const;
-  }
-  if (permission === "denied") {
-    return "output-denied" as const;
-  }
-  if (status === "failed") {
-    return "output-error" as const;
-  }
-  if (status === "completed") {
-    return "output-available" as const;
-  }
-  if (permission === "allowed") {
-    return "approval-responded" as const;
-  }
-  return "input-available" as const;
-};
-
 export function AgentTimeline({
+  cwd,
   entries,
   onPermission,
+  onPlanDecision,
+  projectRoot,
 }: AgentTimelineProps) {
+  const messageComponents = useMemo(
+    () => ({
+      code: MessageCodeBlock,
+      inlineCode: (props: ComponentProps<"code"> & { node?: unknown }) => (
+        <ProjectInlineCitation
+          {...props}
+          cwd={cwd}
+          projectRoot={projectRoot}
+        />
+      ),
+    }),
+    [cwd, projectRoot],
+  );
+  const renderEntries = useMemo(
+    () => groupTurnActivity(entries),
+    [entries],
+  );
+
   return (
     <Conversation className="min-h-0">
-      <ConversationContent className="mx-auto w-full max-w-3xl gap-7 px-6 py-8">
-        {entries.map((entry) => {
+      <ConversationContent className="mx-auto w-full max-w-5xl gap-3 px-4 py-8 sm:px-6">
+        {renderEntries.map((entry, index) => {
+          const motionStyle = {
+            animationDelay: `${Math.min(index, 6) * 24}ms`,
+          };
+
           if (entry.kind === "message") {
             return (
-              <Message from={entry.role} key={entry.id}>
+              <Message
+                className="motion-list-item"
+                from={entry.role}
+                key={entry.id}
+                style={motionStyle}
+              >
                 <MessageContent>
-                  <MessageResponse>{entry.content}</MessageResponse>
+                  {entry.attachments?.length ? (
+                    <Attachments
+                      className={entry.role === "user" ? "justify-end" : ""}
+                      variant="inline"
+                    >
+                      {entry.attachments.map((attachment) => (
+                        <Attachment
+                          data={attachment}
+                          key={attachment.id}
+                        >
+                          <AttachmentPreview />
+                          <AttachmentInfo />
+                        </Attachment>
+                      ))}
+                    </Attachments>
+                  ) : null}
+                  <MessageResponse components={messageComponents}>
+                    {entry.content}
+                  </MessageResponse>
+                  {entry.role === "assistant" ? (
+                    <MessageCitations content={entry.content} />
+                  ) : null}
                 </MessageContent>
               </Message>
             );
           }
 
-          const state = toolState(entry.permission, entry.status);
+          if (entry.kind === "plan") {
+            return (
+              <div
+                className="motion-list-item w-full"
+                key={entry.id}
+                style={motionStyle}
+              >
+                <PlanTimelineEntry
+                  entry={entry}
+                  onDecision={onPlanDecision}
+                  renderedContent={
+                    <MessageResponse components={messageComponents}>
+                      {entry.content}
+                    </MessageResponse>
+                  }
+                />
+              </div>
+            );
+          }
+
           return (
-            <Tool className="mb-0 rounded-xl" defaultOpen key={entry.id}>
-              <ToolHeader
-                state={state}
-                title={entry.title}
-                toolName="run_terminal_command"
-                type="dynamic-tool"
+            <div
+              className="motion-list-item w-full"
+              key={entry.id}
+              style={motionStyle}
+            >
+              <TurnActivityGroup
+                cwd={cwd}
+                endedAt={entry.endedAt}
+                items={entry.items}
+                onPermission={onPermission}
+                projectRoot={projectRoot}
+                running={entry.running}
+                startedAt={entry.startedAt}
               />
-              <ToolContent className="flex flex-col gap-4">
-                {entry.command || entry.output ? (
-                  <pre className="overflow-x-auto rounded-lg bg-muted/50 p-4 font-mono text-xs leading-5">
-                    {entry.command ? `$ ${entry.command}\n` : ""}
-                    {entry.output}
-                  </pre>
-                ) : null}
-                {entry.permission === "pending" ? (
-                  <Confirmation approval={{ id: entry.id }} state={state}>
-                    <ConfirmationRequest>
-                      <ConfirmationTitle>
-                        Melody wants permission to continue this tool call.
-                      </ConfirmationTitle>
-                      <ConfirmationActions>
-                        {entry.permissionOptions?.map((option) => (
-                          <ConfirmationAction
-                            key={option.optionId}
-                            onClick={() =>
-                              onPermission(entry.id, option.optionId)
-                            }
-                            variant={
-                              option.kind.startsWith("reject")
-                                ? "ghost"
-                                : option.kind === "allow_once"
-                                  ? "outline"
-                                  : "default"
-                            }
-                          >
-                            {option.name}
-                          </ConfirmationAction>
-                        ))}
-                        {entry.permissionOptions?.some((option) =>
-                          option.kind.startsWith("reject"),
-                        ) ? (
-                          <ConfirmationAction
-                            onClick={() =>
-                              onPermission(entry.id, "project:deny")
-                            }
-                            variant="ghost"
-                          >
-                            Deny for project
-                          </ConfirmationAction>
-                        ) : null}
-                        {entry.permissionOptions?.some((option) =>
-                          option.kind.startsWith("allow"),
-                        ) ? (
-                          <ConfirmationAction
-                            onClick={() =>
-                              onPermission(entry.id, "project:allow")
-                            }
-                            variant="default"
-                          >
-                            Allow for project
-                          </ConfirmationAction>
-                        ) : null}
-                      </ConfirmationActions>
-                    </ConfirmationRequest>
-                  </Confirmation>
-                ) : null}
-              </ToolContent>
-            </Tool>
+            </div>
           );
         })}
       </ConversationContent>

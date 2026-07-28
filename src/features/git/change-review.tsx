@@ -106,13 +106,13 @@ export function ChangeReview({
     <aside className="absolute inset-y-0 right-0 z-20 flex w-[min(42rem,calc(100%-2rem))] flex-col border-l bg-background shadow-xl">
       <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4">
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-sm">Changes</h2>
+          <h2 className="font-semibold text-sm">更改</h2>
           <p className="text-muted-foreground text-xs">
-            {changes.length} changed {changes.length === 1 ? "file" : "files"}
+            {changes.length} 个已更改文件
           </p>
         </div>
         <Button
-          aria-label="Refresh changes"
+          aria-label="刷新更改"
           disabled={loading}
           onClick={onRefresh}
           size="icon"
@@ -121,7 +121,7 @@ export function ChangeReview({
           <RefreshCwIcon className={cn(loading && "animate-spin")} />
         </Button>
         <Button
-          aria-label="Close changes"
+          aria-label="关闭更改"
           onClick={onClose}
           size="icon"
           variant="ghost"
@@ -131,12 +131,14 @@ export function ChangeReview({
       </header>
 
       {error ? (
-        <p className="border-b px-4 py-3 text-destructive text-sm">{error}</p>
+        <p className="motion-view-enter border-b px-4 py-3 text-destructive text-sm">
+          {error}
+        </p>
       ) : null}
 
       <div className="flex min-h-0 flex-1">
         <nav
-          aria-label="Changed files"
+          aria-label="已更改文件"
           className="w-56 shrink-0 overflow-y-auto border-r p-2"
         >
           {changes.map((change) => (
@@ -171,7 +173,7 @@ export function ChangeReview({
           ))}
           {!loading && changes.length === 0 ? (
             <p className="px-3 py-8 text-center text-muted-foreground text-xs">
-              Working tree is clean.
+              工作树是干净的。
             </p>
           ) : null}
         </nav>
@@ -183,12 +185,12 @@ export function ChangeReview({
             </div>
           ) : null}
           {diffLoading ? (
-            <p className="p-6 text-muted-foreground text-sm">Loading diff…</p>
+            <p className="p-6 text-muted-foreground text-sm">正在加载差异…</p>
           ) : diffError ? (
             <p className="p-6 text-destructive text-sm">{diffError}</p>
           ) : diff?.binary ? (
             <p className="p-6 text-muted-foreground text-sm">
-              Binary file preview is not available.
+              暂不支持预览二进制文件。
             </p>
           ) : diffLines.length > 1 ? (
             <pre className="py-3 font-mono text-[11px] leading-5">
@@ -198,11 +200,11 @@ export function ChangeReview({
             </pre>
           ) : selectedPath ? (
             <p className="p-6 text-muted-foreground text-sm">
-              No textual diff is available for this file yet.
+              此文件暂无文本差异。
             </p>
           ) : (
             <p className="p-6 text-muted-foreground text-sm">
-              Select a changed file to review its diff.
+              选择已更改的文件以查看差异。
             </p>
           )}
         </section>

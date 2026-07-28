@@ -119,11 +119,11 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
     <section className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background">
       <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4">
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-base">Files</h2>
+          <h2 className="font-semibold text-base">文件</h2>
           <p className="truncate text-muted-foreground text-xs">{root}</p>
         </div>
         <Button
-          aria-label="Refresh files"
+          aria-label="刷新文件"
           disabled={loading}
           onClick={() => void loadTree()}
           size="icon"
@@ -137,10 +137,10 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
           variant="outline"
         >
           <SaveIcon />
-          {saving ? "Saving" : "Save"}
+          {saving ? "正在保存" : "保存"}
         </Button>
         <Button
-          aria-label="Close files"
+          aria-label="关闭文件"
           onClick={onClose}
           size="icon"
           variant="ghost"
@@ -150,7 +150,7 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
       </header>
 
       {error ? (
-        <p className="border-b bg-destructive/5 px-4 py-2 text-destructive text-sm">
+        <p className="motion-view-enter border-b bg-destructive/5 px-4 py-2 text-destructive text-sm">
           {error}
         </p>
       ) : null}
@@ -159,14 +159,14 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
         <aside className="flex w-64 shrink-0 flex-col border-r">
           <div className="p-3">
             <Input
-              aria-label="Filter files"
+              aria-label="筛选文件"
               onChange={(event) => setFilter(event.target.value)}
-              placeholder="Filter files"
+              placeholder="筛选文件"
               value={filter}
             />
           </div>
           <nav
-            aria-label="File tree"
+            aria-label="文件树"
             className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
           >
             {filteredEntries.map((entry) => (
@@ -205,23 +205,26 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs">
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {selectedPath ?? "Select a file"}
+              {selectedPath ?? "选择文件"}
             </span>
             {content !== savedContent ? (
-              <span className="ml-3 text-amber-700">Unsaved</span>
+              <span className="motion-view-enter ml-3 text-amber-700">
+                未保存
+              </span>
             ) : null}
           </div>
           <div className="min-h-0 flex-1">
             {selectedPath ? (
               <Suspense
                 fallback={
-                  <p className="p-6 text-muted-foreground text-sm">
-                    Loading editor…
+                  <p className="motion-view-enter p-6 text-muted-foreground text-sm">
+                    正在加载编辑器…
                   </p>
                 }
               >
                 <MonacoEditor
                   language={languageFor(selectedPath)}
+                  loading="正在加载编辑器…"
                   onChange={(value) => setContent(value ?? "")}
                   options={{
                     fontFamily:
@@ -239,7 +242,7 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
               </Suspense>
             ) : (
               <div className="grid h-full place-items-center text-muted-foreground text-sm">
-                Select a text file to inspect or edit.
+                选择文本文件以查看或编辑。
               </div>
             )}
           </div>

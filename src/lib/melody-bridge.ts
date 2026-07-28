@@ -1,12 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AcpEnvelope, AgentStatus } from "@/domain/acp";
 import type {
   MelodyConfigDocument,
+  MelodyConfigPatch,
   MelodyConfigScope,
+  MelodyConfigValue,
   MelodyExtension,
+  MarketplaceSource,
+  PluginDetails,
 } from "@/domain/config";
 import type {
   GitBranch,
@@ -44,11 +49,23 @@ export interface AppUpdateStatus {
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+export const openExternalUrl = async (candidate: string): Promise<void> => {
+  const url = new URL(candidate);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("仅支持打开 HTTP 或 HTTPS 链接。");
+  }
+  if (isTauriRuntime()) {
+    await openUrl(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
 export const getAgentStatus = async (): Promise<AgentStatus> => {
   if (!isTauriRuntime()) {
     return {
       phase: "stopped",
-      message: "Browser preview",
+      message: "浏览器预览",
     };
   }
   return invoke<AgentStatus>("agent_status");
@@ -58,7 +75,7 @@ export const startAgent = async (cwd: string): Promise<AgentStatus> => {
   if (!isTauriRuntime()) {
     return {
       phase: "stopped",
-      message: "Browser preview",
+      message: "浏览器预览",
     };
   }
   return invoke<AgentStatus>("start_agent", {
@@ -248,27 +265,30 @@ const previewSessions: SessionRecord[] = [
   {
     id: "implement-acp-bridge",
     projectId: previewProject.id,
-    title: "Implement ACP bridge",
+    title: "实现 ACP 连接",
     cwd: ".",
     timelineJson: "[]",
+    timelineVersion: 0,
     createdAt: Math.floor(Date.now() / 1000) - 120,
     updatedAt: Math.floor(Date.now() / 1000),
   },
   {
     id: "settings-ui",
     projectId: previewProject.id,
-    title: "Design settings editor",
+    title: "设计设置编辑器",
     cwd: ".",
     timelineJson: "[]",
+    timelineVersion: 0,
     createdAt: Math.floor(Date.now() / 1000) - 86_400,
     updatedAt: Math.floor(Date.now() / 1000) - 86_400,
   },
   {
     id: "git-worktree",
     projectId: previewProject.id,
-    title: "Plan Git worktrees",
+    title: "规划 Git 工作树",
     cwd: ".",
     timelineJson: "[]",
+    timelineVersion: 0,
     createdAt: Math.floor(Date.now() / 1000) - 172_800,
     updatedAt: Math.floor(Date.now() / 1000) - 172_800,
   },
@@ -293,7 +313,7 @@ export const pickWorkspaceDirectory = async (): Promise<string | undefined> => {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Open workspace",
+    title: "打开工作区",
   });
   return typeof selected === "string" ? selected : undefined;
 };
@@ -313,9 +333,10 @@ export const createStoredSession = async (
     return {
       id: `preview-${Date.now()}`,
       projectId,
-      title: "New session",
+      title: "新会话",
       cwd,
       timelineJson: "[]",
+      timelineVersion: 0,
       createdAt: Math.floor(Date.now() / 1000),
       updatedAt: Math.floor(Date.now() / 1000),
     };
@@ -333,10 +354,17 @@ export const updateStoredSession = async (
     return {
       ...(existing ?? previewSessions[0]),
       ...request,
+      acpCursor: request.acpCursor ?? existing?.acpCursor,
       updatedAt: Math.floor(Date.now() / 1000),
     };
   }
   return invoke<SessionRecord>("update_session", { request });
+};
+
+export const deleteStoredSession = async (id: string): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("delete_session", { id });
+  }
 };
 
 export const getWorkspaceTree = async (
@@ -447,21 +475,61 @@ export const readMelodyConfig = async (
       exists: scope === "user",
       content:
         scope === "user"
-          ? '[agent]\nmodel = "default"\n\n[mcp_servers.filesystem]\ncommand = "mcp-server-filesystem"\n'
+          ? '[models]\ndefault = "melody-build"\n\n[mcp_servers.filesystem]\ncommand = "mcp-server-filesystem"\n'
           : "# Project-specific Melody configuration\n",
+      values:
+        scope === "user"
+          ? {
+              models: { default: "melody-build" },
+              mcp_servers: {
+                filesystem: { command: "mcp-server-filesystem" },
+              },
+            }
+          : {},
     };
   }
   return invoke<MelodyConfigDocument>("read_melody_config", { scope, cwd });
 };
 
-export const writeMelodyConfig = async (
+const applyPreviewPatch = (
+  target: Record<string, MelodyConfigValue>,
+  patch: MelodyConfigPatch,
+) => {
+  const [leaf] = patch.path.slice(-1);
+  if (!leaf) {
+    return;
+  }
+  let table = target;
+  for (const key of patch.path.slice(0, -1)) {
+    const current = table[key];
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      table[key] = {};
+    }
+    table = table[key] as Record<string, MelodyConfigValue>;
+  }
+  if (patch.value === null) {
+    delete table[leaf];
+  } else {
+    table[leaf] = patch.value;
+  }
+};
+
+export const updateMelodyConfig = async (
   scope: MelodyConfigScope,
   cwd: string,
-  content: string,
-): Promise<void> => {
+  patches: MelodyConfigPatch[],
+): Promise<MelodyConfigDocument> => {
   if (isTauriRuntime()) {
-    await invoke("write_melody_config", { scope, cwd, content });
+    return invoke<MelodyConfigDocument>("update_melody_config", {
+      scope,
+      cwd,
+      patches,
+    });
   }
+  const document = await readMelodyConfig(scope, cwd);
+  const values = structuredClone(document.values);
+  patches.forEach((patch) => applyPreviewPatch(values, patch));
+  return { ...document, exists: true, values };
 };
 
 export const listMelodyExtensions = async (
@@ -475,20 +543,127 @@ export const listMelodyExtensions = async (
           name: "code-review",
           path: "~/.melody/skills/code-review",
           scope: "user",
+          provider: "melody",
+          managed: false,
         },
         {
           kind: "plugins",
           name: "git-tools",
           path: `${cwd}/.melody/plugins/git-tools`,
           scope: "project",
+          provider: "melody",
+          managed: false,
         },
         {
           kind: "hooks",
           name: "after-tool.sh",
           path: `${cwd}/.melody/hooks/after-tool.sh`,
           scope: "project",
+          provider: "melody",
+          managed: false,
         },
       ];
+
+export const listMarketplaceSources = async (): Promise<MarketplaceSource[]> =>
+  isTauriRuntime()
+    ? invoke<MarketplaceSource[]>("list_marketplace_sources")
+    : [
+        {
+          name: "xAI Official",
+          kind: "git",
+          location: "https://github.com/melody-org/plugin-marketplace.git",
+        },
+      ];
+
+export const addMarketplaceSource = async (
+  input: string,
+): Promise<MarketplaceSource[]> =>
+  isTauriRuntime()
+    ? invoke<MarketplaceSource[]>("add_marketplace_source", { input })
+    : [
+        {
+          name: input.split("/").at(-1)?.replace(/\.git$/, "") || "plugins",
+          kind: input.startsWith(".") || input.startsWith("/")
+            ? "local"
+            : "git",
+          location: input,
+        },
+      ];
+
+export const saveMarketplaceSource = async (
+  originalName: string | undefined,
+  source: MarketplaceSource,
+): Promise<MarketplaceSource[]> =>
+  isTauriRuntime()
+    ? invoke<MarketplaceSource[]>("save_marketplace_source", {
+        originalName,
+        source,
+      })
+    : [source];
+
+export const deleteMarketplaceSource = async (
+  name: string,
+): Promise<MarketplaceSource[]> =>
+  isTauriRuntime()
+    ? invoke<MarketplaceSource[]>("delete_marketplace_source", { name })
+    : [];
+
+export interface PluginInstallResult {
+  source: string;
+  message: string;
+}
+
+export const installMelodyPlugin = async (
+  cwd: string,
+  source: string,
+): Promise<PluginInstallResult> =>
+  isTauriRuntime()
+    ? invoke<PluginInstallResult>("install_melody_plugin", { cwd, source })
+    : {
+        source,
+        message: `已从 ${source} 安装插件。`,
+      };
+
+export const listInstalledMelodyPlugins = async (): Promise<
+  MelodyExtension[]
+> =>
+  isTauriRuntime()
+    ? invoke<MelodyExtension[]>("list_installed_melody_plugins")
+    : [];
+
+export const uninstallMelodyPlugin = async (
+  name: string,
+  keepData = false,
+): Promise<string> =>
+  isTauriRuntime()
+    ? invoke<string>("uninstall_melody_plugin", { name, keepData })
+    : `已删除插件 ${name}。`;
+
+export const getMelodyPluginDetails = async (
+  cwd: string,
+  plugin: MelodyExtension,
+): Promise<PluginDetails> =>
+  isTauriRuntime()
+    ? invoke<PluginDetails>("get_melody_plugin_details", {
+        cwd,
+        name: plugin.name,
+        path: plugin.path,
+      })
+    : {
+        name: plugin.name,
+        version: "1.0.0",
+        description: "为 Melody 提供额外的开发能力。",
+        path: plugin.path,
+        manifestPath: `${plugin.path}/plugin.json`,
+        components: [
+          { kind: "skills", items: ["code-review"] },
+          { kind: "commands", items: ["review"] },
+          { kind: "agents", items: ["reviewer"] },
+          { kind: "hooks", items: ["PreToolUse"] },
+          { kind: "mcps", items: ["github"] },
+          { kind: "lsps", items: [] },
+        ],
+      };
 
 export const listPermissionRules = async (
   projectId: string,

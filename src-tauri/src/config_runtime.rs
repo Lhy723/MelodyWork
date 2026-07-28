@@ -3,7 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tokio::process::Command;
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
+
+use crate::agent_runtime;
 
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
@@ -14,6 +19,16 @@ pub struct MelodyConfigDocument {
     path: String,
     exists: bool,
     content: String,
+    values: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parse_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MelodyConfigPatch {
+    path: Vec<String>,
+    value: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -23,15 +38,74 @@ pub struct MelodyExtension {
     name: String,
     path: String,
     scope: String,
+    provider: String,
+    managed: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceSource {
+    name: String,
+    kind: String,
+    location: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallResult {
+    source: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginComponentGroup {
+    kind: String,
+    items: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDetails {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    homepage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<String>,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_path: Option<String>,
+    components: Vec<PluginComponentGroup>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct InstalledPluginEntry {
+    status: String,
+    name: String,
+    path: PathBuf,
+}
+
+fn user_home() -> Result<PathBuf, String> {
+    let home = env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .ok_or_else(|| "Could not locate the user home directory".to_string())?;
+    Ok(PathBuf::from(home))
 }
 
 fn melody_home() -> Result<PathBuf, String> {
     if let Some(path) = env::var_os("MELODY_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
     }
-    let home = env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .ok_or_else(|| "Could not locate the user home directory".to_string())?;
-    Ok(PathBuf::from(home).join(".melody"))
+    Ok(user_home()?.join(".melody"))
 }
 
 fn project_melody_root(cwd: &str) -> Result<PathBuf, String> {
@@ -47,6 +121,31 @@ fn config_path(scope: &str, cwd: &str) -> Result<PathBuf, String> {
         "user" => Ok(melody_home()?.join("config.toml")),
         "project" => Ok(project_melody_root(cwd)?.join("config.toml")),
         _ => Err("Config scope must be user or project".to_string()),
+    }
+}
+
+fn config_document(
+    scope: String,
+    path: PathBuf,
+    exists: bool,
+    content: String,
+) -> MelodyConfigDocument {
+    let parsed = toml::from_str::<toml::Value>(&content);
+    let (values, parse_error) = match parsed {
+        Ok(value) => (
+            serde_json::to_value(value).unwrap_or_else(|_| serde_json::json!({})),
+            None,
+        ),
+        Err(_error) if content.trim().is_empty() => (serde_json::json!({}), None),
+        Err(error) => (serde_json::json!({}), Some(error.to_string())),
+    };
+    MelodyConfigDocument {
+        scope,
+        path: path.to_string_lossy().into_owned(),
+        exists,
+        content,
+        values,
+        parse_error,
     }
 }
 
@@ -66,29 +165,128 @@ pub fn read_melody_config(scope: String, cwd: String) -> Result<MelodyConfigDocu
     } else {
         String::new()
     };
-    Ok(MelodyConfigDocument {
-        scope,
-        path: path.to_string_lossy().into_owned(),
-        exists,
-        content,
-    })
+    Ok(config_document(scope, path, exists, content))
+}
+
+fn json_to_item(value: &serde_json::Value) -> Result<Item, String> {
+    match value {
+        serde_json::Value::Bool(value) => Ok(toml_edit::value(*value)),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                Ok(toml_edit::value(value))
+            } else if let Some(value) = value.as_f64() {
+                Ok(toml_edit::value(value))
+            } else {
+                Err("Configuration number is outside the supported range".to_string())
+            }
+        }
+        serde_json::Value::String(value) => Ok(toml_edit::value(value)),
+        serde_json::Value::Array(values) => {
+            let mut array = Array::new();
+            for value in values {
+                match value {
+                    serde_json::Value::Bool(value) => array.push(*value),
+                    serde_json::Value::Number(value) if value.is_i64() => {
+                        array.push(value.as_i64().unwrap())
+                    }
+                    serde_json::Value::Number(value) => {
+                        array.push(value.as_f64().ok_or_else(|| {
+                            "Configuration number is outside the supported range".to_string()
+                        })?)
+                    }
+                    serde_json::Value::String(value) => array.push(value.as_str()),
+                    _ => {
+                        return Err(
+                            "Only scalar values are supported in configuration arrays".to_string()
+                        );
+                    }
+                }
+            }
+            Ok(Item::Value(Value::Array(array)))
+        }
+        serde_json::Value::Object(values) => {
+            let mut table = Table::new();
+            for (key, value) in values {
+                if !value.is_null() {
+                    table.insert(key, json_to_item(value)?);
+                }
+            }
+            Ok(Item::Table(table))
+        }
+        serde_json::Value::Null => Ok(Item::None),
+    }
+}
+
+fn apply_patch(document: &mut DocumentMut, patch: &MelodyConfigPatch) -> Result<(), String> {
+    let Some((leaf, parents)) = patch.path.split_last() else {
+        return Err("Configuration patch path cannot be empty".to_string());
+    };
+    let mut table = document.as_table_mut();
+    for key in parents {
+        if !table.contains_key(key) {
+            table.insert(key, Item::Table(Table::new()));
+        }
+        table = table
+            .get_mut(key)
+            .and_then(Item::as_table_mut)
+            .ok_or_else(|| format!("Configuration path '{}' is not a table", key))?;
+    }
+    if patch.value.is_null() {
+        table.remove(leaf);
+    } else {
+        table.insert(leaf, json_to_item(&patch.value)?);
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn write_melody_config(scope: String, cwd: String, content: String) -> Result<(), String> {
+pub fn update_melody_config(
+    scope: String,
+    cwd: String,
+    patches: Vec<MelodyConfigPatch>,
+) -> Result<MelodyConfigDocument, String> {
+    let path = config_path(&scope, &cwd)?;
+    let exists = path.is_file();
+    let content = if exists {
+        fs::read_to_string(&path)
+            .map_err(|error| format!("Melody config is not valid UTF-8 text: {error}"))?
+    } else {
+        String::new()
+    };
     if content.len() as u64 > MAX_CONFIG_BYTES {
         return Err("Melody config is larger than the 1 MB editor limit".to_string());
     }
-    let path = config_path(&scope, &cwd)?;
+    let mut document = if content.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        content
+            .parse::<DocumentMut>()
+            .map_err(|error| format!("Melody config contains invalid TOML: {error}"))?
+    };
+    for patch in &patches {
+        apply_patch(&mut document, patch)?;
+    }
+    let updated_content = document.to_string();
+    if updated_content.len() as u64 > MAX_CONFIG_BYTES {
+        return Err("Melody config is larger than the 1 MB editor limit".to_string());
+    }
     let parent = path
         .parent()
         .ok_or_else(|| "Melody config has no parent directory".to_string())?;
     fs::create_dir_all(parent)
         .map_err(|error| format!("Failed to create Melody config directory: {error}"))?;
-    fs::write(&path, content).map_err(|error| format!("Failed to write Melody config: {error}"))
+    fs::write(&path, &updated_content)
+        .map_err(|error| format!("Failed to write Melody config: {error}"))?;
+    Ok(config_document(scope, path, true, updated_content))
 }
 
-fn scan_kind(root: &Path, scope: &str, kind: &str, extensions: &mut Vec<MelodyExtension>) {
+fn scan_kind(
+    root: &Path,
+    scope: &str,
+    kind: &str,
+    provider: &str,
+    extensions: &mut Vec<MelodyExtension>,
+) {
     let directory = root.join(kind);
     let Ok(entries) = fs::read_dir(directory) else {
         return;
@@ -112,6 +310,8 @@ fn scan_kind(root: &Path, scope: &str, kind: &str, extensions: &mut Vec<MelodyEx
             name,
             path: path.to_string_lossy().into_owned(),
             scope: scope.to_string(),
+            provider: provider.to_string(),
+            managed: false,
         });
     }
 }
@@ -123,16 +323,719 @@ pub fn list_melody_extensions(cwd: String) -> Result<Vec<MelodyExtension>, Strin
     let mut extensions = Vec::new();
     for (scope, root) in [("user", user_root), ("project", project_root)] {
         for kind in ["skills", "plugins", "hooks"] {
-            scan_kind(&root, scope, kind, &mut extensions);
+            scan_kind(&root, scope, kind, "melody", &mut extensions);
         }
+    }
+    let user_claude_root = user_home()?.join(".claude");
+    let project_claude_root = PathBuf::from(&cwd).join(".claude");
+    for (scope, root) in [("user", user_claude_root), ("project", project_claude_root)] {
+        scan_kind(&root, scope, "plugins", "claude", &mut extensions);
     }
     extensions.sort_by(|left, right| {
         left.kind
             .cmp(&right.kind)
             .then(left.name.cmp(&right.name))
             .then(left.scope.cmp(&right.scope))
+            .then(left.provider.cmp(&right.provider))
     });
     Ok(extensions)
+}
+
+fn read_user_config_document() -> Result<(PathBuf, DocumentMut), String> {
+    let path = melody_home()?.join("config.toml");
+    let content = if path.is_file() {
+        fs::read_to_string(&path)
+            .map_err(|error| format!("Melody config is not valid UTF-8 text: {error}"))?
+    } else {
+        String::new()
+    };
+    if content.len() as u64 > MAX_CONFIG_BYTES {
+        return Err("Melody config is larger than the 1 MB editor limit".to_string());
+    }
+    let document = if content.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        content
+            .parse::<DocumentMut>()
+            .map_err(|error| format!("Melody config contains invalid TOML: {error}"))?
+    };
+    Ok((path, document))
+}
+
+fn marketplace_sources(document: &DocumentMut) -> Result<Vec<MarketplaceSource>, String> {
+    let Some(marketplace) = document.get("marketplace") else {
+        return Ok(Vec::new());
+    };
+    let marketplace = marketplace
+        .as_table()
+        .ok_or_else(|| "[marketplace] must be a table".to_string())?;
+    let Some(sources) = marketplace.get("sources") else {
+        return Ok(Vec::new());
+    };
+    let sources = sources
+        .as_array_of_tables()
+        .ok_or_else(|| "[[marketplace.sources]] must be an array of tables".to_string())?;
+    Ok(sources
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.get("name")?.as_str()?.to_string();
+            if let Some(location) = entry.get("git").and_then(Item::as_str) {
+                Some(MarketplaceSource {
+                    name,
+                    kind: "git".to_string(),
+                    location: location.to_string(),
+                    branch: entry
+                        .get("branch")
+                        .and_then(Item::as_str)
+                        .map(str::to_string),
+                })
+            } else {
+                entry
+                    .get("path")
+                    .and_then(Item::as_str)
+                    .map(|location| MarketplaceSource {
+                        name,
+                        kind: "local".to_string(),
+                        location: location.to_string(),
+                        branch: None,
+                    })
+            }
+        })
+        .collect())
+}
+
+fn marketplace_sources_mut(document: &mut DocumentMut) -> Result<&mut ArrayOfTables, String> {
+    let marketplace = document
+        .entry("marketplace")
+        .or_insert_with(|| Item::Table(Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "[marketplace] must be a table".to_string())?;
+    marketplace
+        .entry("sources")
+        .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .ok_or_else(|| "[[marketplace.sources]] must be an array of tables".to_string())
+}
+
+fn write_user_config(path: &Path, document: &DocumentMut) -> Result<(), String> {
+    let content = document.to_string();
+    if content.len() as u64 > MAX_CONFIG_BYTES {
+        return Err("Melody config is larger than the 1 MB editor limit".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Melody config has no parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create Melody config directory: {error}"))?;
+    fs::write(path, content).map_err(|error| format!("Failed to write Melody config: {error}"))
+}
+
+fn validate_marketplace_source(source: &mut MarketplaceSource) -> Result<(), String> {
+    source.name = source.name.trim().to_string();
+    source.location = source.location.trim().to_string();
+    source.branch = source
+        .branch
+        .take()
+        .map(|branch| branch.trim().to_string())
+        .filter(|branch| !branch.is_empty());
+    if source.name.is_empty() {
+        return Err("Marketplace name cannot be empty".to_string());
+    }
+    if source.location.is_empty() {
+        return Err("Marketplace source cannot be empty".to_string());
+    }
+    if source.kind != "git" && source.kind != "local" {
+        return Err("Marketplace kind must be git or local".to_string());
+    }
+    if source.kind == "local" {
+        source.branch = None;
+    }
+    Ok(())
+}
+
+fn marketplace_source_from_input(input: &str) -> Result<MarketplaceSource, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("Marketplace link or path cannot be empty".to_string());
+    }
+
+    let windows_path = input
+        .as_bytes()
+        .get(1)
+        .is_some_and(|separator| *separator == b':');
+    let local = input.starts_with('/')
+        || input.starts_with("./")
+        || input.starts_with("../")
+        || input.starts_with("~/")
+        || input.starts_with('\\')
+        || windows_path;
+
+    let mut branch = None;
+    let location = if local {
+        input.to_string()
+    } else if !input.contains("://")
+        && !input.starts_with("git@")
+        && input.matches('/').count() == 1
+    {
+        let (repository, parsed_branch) = input
+            .rsplit_once('@')
+            .map_or((input, None), |(repository, branch)| {
+                (repository, (!branch.is_empty()).then_some(branch))
+            });
+        branch = parsed_branch.map(str::to_string);
+        format!(
+            "https://github.com/{}.git",
+            repository.trim_end_matches(".git")
+        )
+    } else {
+        input.to_string()
+    };
+
+    let name = location
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .rsplit(['/', '\\', ':'])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        return Err("Could not infer a Marketplace name from this source".to_string());
+    }
+
+    Ok(MarketplaceSource {
+        name,
+        kind: if local { "local" } else { "git" }.to_string(),
+        location,
+        branch,
+    })
+}
+
+#[tauri::command]
+pub fn list_marketplace_sources() -> Result<Vec<MarketplaceSource>, String> {
+    let (_, document) = read_user_config_document()?;
+    marketplace_sources(&document)
+}
+
+#[tauri::command]
+pub fn add_marketplace_source(input: String) -> Result<Vec<MarketplaceSource>, String> {
+    let source = marketplace_source_from_input(&input)?;
+    save_marketplace_source(None, source)
+}
+
+#[tauri::command]
+pub fn save_marketplace_source(
+    original_name: Option<String>,
+    mut source: MarketplaceSource,
+) -> Result<Vec<MarketplaceSource>, String> {
+    validate_marketplace_source(&mut source)?;
+    let (path, mut document) = read_user_config_document()?;
+    let sources = marketplace_sources_mut(&mut document)?;
+    if sources.iter().any(|entry| {
+        entry.get("name").and_then(Item::as_str) == Some(source.name.as_str())
+            && original_name.as_deref() != Some(source.name.as_str())
+    }) {
+        return Err(format!(
+            "A marketplace named '{}' already exists",
+            source.name
+        ));
+    }
+    let existing = original_name.as_deref().and_then(|name| {
+        sources
+            .iter()
+            .position(|entry| entry.get("name").and_then(Item::as_str) == Some(name))
+    });
+    let mut entry = Table::new();
+    entry["name"] = toml_edit::value(&source.name);
+    match source.kind.as_str() {
+        "git" => {
+            entry["git"] = toml_edit::value(&source.location);
+            if let Some(branch) = &source.branch {
+                entry["branch"] = toml_edit::value(branch);
+            }
+        }
+        "local" => entry["path"] = toml_edit::value(&source.location),
+        _ => unreachable!("validated marketplace kind"),
+    }
+    if let Some(index) = existing {
+        let existing_entry = sources
+            .iter_mut()
+            .nth(index)
+            .expect("marketplace index came from this collection");
+        *existing_entry = entry;
+    } else {
+        sources.push(entry);
+    }
+    write_user_config(&path, &document)?;
+    marketplace_sources(&document)
+}
+
+#[tauri::command]
+pub fn delete_marketplace_source(name: String) -> Result<Vec<MarketplaceSource>, String> {
+    let (path, mut document) = read_user_config_document()?;
+    let sources = marketplace_sources_mut(&mut document)?;
+    let index = sources
+        .iter()
+        .position(|entry| entry.get("name").and_then(Item::as_str) == Some(name.as_str()))
+        .ok_or_else(|| format!("Marketplace '{}' was not found", name))?;
+    sources.remove(index);
+    write_user_config(&path, &document)?;
+    marketplace_sources(&document)
+}
+
+#[tauri::command]
+pub async fn install_melody_plugin(
+    app: AppHandle,
+    cwd: String,
+    source: String,
+) -> Result<PluginInstallResult, String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err("Plugin source cannot be empty".to_string());
+    }
+    if source.len() > 4096 {
+        return Err("Plugin source is too long".to_string());
+    }
+    let workspace = PathBuf::from(&cwd);
+    if !workspace.is_dir() {
+        return Err(format!("Workspace does not exist: {}", workspace.display()));
+    }
+    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
+        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
+            .to_string()
+    })?;
+    let mut command = Command::new(binary);
+    command
+        .args(["plugin", "install", source, "--trust"])
+        .current_dir(workspace);
+    if let Some(home) = agent_runtime::melody_home() {
+        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("Failed to start Melody plugin installer: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("Plugin installation failed with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+    let message = if stdout.is_empty() {
+        format!("Plugin installed from {source}")
+    } else {
+        stdout
+    };
+    Ok(PluginInstallResult {
+        source: source.to_string(),
+        message,
+    })
+}
+
+#[tauri::command]
+pub async fn list_installed_melody_plugins(app: AppHandle) -> Result<Vec<MelodyExtension>, String> {
+    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
+        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
+            .to_string()
+    })?;
+    let mut command = Command::new(binary);
+    command.args(["plugin", "list", "--json"]);
+    if let Some(home) = agent_runtime::melody_home() {
+        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("Failed to list installed Melody plugins: {error}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if error.is_empty() {
+            format!("Plugin listing failed with status {}", output.status)
+        } else {
+            error
+        });
+    }
+    let entries: Vec<InstalledPluginEntry> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Melody returned an invalid plugin list: {error}"))?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| entry.status == "installed")
+        .map(|entry| MelodyExtension {
+            kind: "plugins".to_string(),
+            name: entry.name,
+            path: entry.path.to_string_lossy().into_owned(),
+            scope: "user".to_string(),
+            provider: "melody".to_string(),
+            managed: true,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn uninstall_melody_plugin(
+    app: AppHandle,
+    name: String,
+    keep_data: bool,
+) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Plugin name cannot be empty".to_string());
+    }
+    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
+        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
+            .to_string()
+    })?;
+    let mut command = Command::new(binary);
+    command.args(["plugin", "uninstall", name, "--confirm"]);
+    if keep_data {
+        command.arg("--keep-data");
+    }
+    if let Some(home) = agent_runtime::melody_home() {
+        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("Failed to start Melody plugin uninstaller: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("Plugin removal failed with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+    Ok(if stdout.is_empty() {
+        format!("Plugin {name} was removed")
+    } else {
+        stdout
+    })
+}
+
+fn manifest_candidates(root: &Path) -> [PathBuf; 3] {
+    [
+        root.join("plugin.json"),
+        root.join(".melody-plugin/plugin.json"),
+        root.join(".claude-plugin/plugin.json"),
+    ]
+}
+
+fn read_json_file(path: &Path) -> Option<serde_json::Value> {
+    let metadata = path.metadata().ok()?;
+    if metadata.len() > MAX_CONFIG_BYTES {
+        return None;
+    }
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+fn find_plugin_manifest(root: &Path, expected_name: &str) -> Option<(PathBuf, serde_json::Value)> {
+    for candidate in manifest_candidates(root) {
+        if let Some(value) = read_json_file(&candidate) {
+            return Some((candidate, value));
+        }
+    }
+
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut fallback = None;
+    let mut visited = 0usize;
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > 4 || visited >= 4096 {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited >= 4096 {
+                break;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !matches!(name.as_ref(), ".git" | "node_modules" | "target") {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let relative = path.strip_prefix(root).ok()?.to_string_lossy();
+            let manifest = relative == "plugin.json"
+                || relative.ends_with("/.melody-plugin/plugin.json")
+                || relative.ends_with("/.claude-plugin/plugin.json");
+            if !manifest {
+                continue;
+            }
+            let Some(value) = read_json_file(&path) else {
+                continue;
+            };
+            if value.get("name").and_then(serde_json::Value::as_str) == Some(expected_name) {
+                return Some((path, value));
+            }
+            fallback.get_or_insert((path, value));
+        }
+    }
+    fallback
+}
+
+fn plugin_root_from_manifest(manifest_path: &Path) -> PathBuf {
+    let Some(parent) = manifest_path.parent() else {
+        return manifest_path.to_path_buf();
+    };
+    if parent
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == ".melody-plugin" || name == ".claude-plugin")
+    {
+        return parent.parent().unwrap_or(parent).to_path_buf();
+    }
+    parent.to_path_buf()
+}
+
+fn manifest_paths(value: Option<&serde_json::Value>, fallback: &str) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::String(path)) => vec![path.clone()],
+        Some(serde_json::Value::Array(paths)) => paths
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        _ => vec![fallback.to_string()],
+    }
+}
+
+fn collect_skill_names(root: &Path, paths: Vec<String>) -> Vec<String> {
+    let mut names = Vec::new();
+    for relative in paths {
+        let directory = root.join(relative);
+        if directory.join("SKILL.md").is_file() {
+            if let Some(name) = directory.file_name().and_then(|name| name.to_str()) {
+                names.push(name.to_string());
+            }
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("SKILL.md").is_file() {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_markdown_names(root: &Path, paths: Vec<String>) -> Vec<String> {
+    let mut names = Vec::new();
+    for relative in paths {
+        let directory = root.join(relative);
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|value| value.to_str()) == Some("md") {
+                if let Some(name) = path.file_stem().and_then(|value| value.to_str()) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn object_keys(value: Option<&serde_json::Value>, wrapper: &str) -> Vec<String> {
+    let value = value.and_then(|value| value.get(wrapper).or(Some(value)));
+    let mut keys = value
+        .and_then(serde_json::Value::as_object)
+        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    keys.sort();
+    keys
+}
+
+fn component_json(
+    root: &Path,
+    manifest: &serde_json::Value,
+    field: &str,
+    fallback: &str,
+) -> Option<serde_json::Value> {
+    match manifest.get(field) {
+        Some(value @ serde_json::Value::Object(_)) => Some(value.clone()),
+        Some(serde_json::Value::String(relative)) => read_json_file(&root.join(relative)),
+        _ => read_json_file(&root.join(fallback)),
+    }
+}
+
+fn manifest_author(manifest: &serde_json::Value) -> Option<String> {
+    match manifest.get("author") {
+        Some(serde_json::Value::String(author)) => Some(author.clone()),
+        Some(serde_json::Value::Object(author)) => author
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+fn plugin_details_from_directory(root: &Path, expected_name: &str) -> PluginDetails {
+    let found = find_plugin_manifest(root, expected_name);
+    let (plugin_root, manifest_path, manifest) = if let Some((path, manifest)) = found {
+        (
+            plugin_root_from_manifest(&path),
+            Some(path.to_string_lossy().into_owned()),
+            manifest,
+        )
+    } else {
+        (root.to_path_buf(), None, serde_json::json!({}))
+    };
+    let groups = vec![
+        PluginComponentGroup {
+            kind: "skills".to_string(),
+            items: collect_skill_names(
+                &plugin_root,
+                manifest_paths(manifest.get("skills"), "skills"),
+            ),
+        },
+        PluginComponentGroup {
+            kind: "commands".to_string(),
+            items: collect_markdown_names(
+                &plugin_root,
+                manifest_paths(manifest.get("commands"), "commands"),
+            ),
+        },
+        PluginComponentGroup {
+            kind: "agents".to_string(),
+            items: collect_markdown_names(
+                &plugin_root,
+                manifest_paths(manifest.get("agents"), "agents"),
+            ),
+        },
+        PluginComponentGroup {
+            kind: "hooks".to_string(),
+            items: object_keys(
+                component_json(&plugin_root, &manifest, "hooks", "hooks/hooks.json").as_ref(),
+                "hooks",
+            ),
+        },
+        PluginComponentGroup {
+            kind: "mcps".to_string(),
+            items: object_keys(
+                component_json(&plugin_root, &manifest, "mcpServers", ".mcp.json").as_ref(),
+                "mcpServers",
+            ),
+        },
+        PluginComponentGroup {
+            kind: "lsps".to_string(),
+            items: object_keys(
+                component_json(&plugin_root, &manifest, "lspServers", ".lsp.json").as_ref(),
+                "lspServers",
+            ),
+        },
+    ];
+    PluginDetails {
+        name: manifest
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(expected_name)
+            .to_string(),
+        version: manifest
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        description: manifest
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        author: manifest_author(&manifest),
+        homepage: manifest
+            .get("homepage")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        repository: manifest
+            .get("repository")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        license: manifest
+            .get("license")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        path: plugin_root.to_string_lossy().into_owned(),
+        manifest_path,
+        components: groups,
+    }
+}
+
+fn allowed_plugin_path(cwd: &str, path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("Plugin path is unavailable: {error}"))?;
+    let workspace = PathBuf::from(cwd)
+        .canonicalize()
+        .map_err(|error| format!("Workspace is unavailable: {error}"))?;
+    let mut roots = vec![
+        melody_home()?,
+        user_home()?.join(".claude"),
+        workspace.join(".melody"),
+        workspace.join(".claude"),
+    ];
+    if let Ok((_, document)) = read_user_config_document()
+        && let Some(install_dir) = document
+            .get("plugins")
+            .and_then(Item::as_table)
+            .and_then(|plugins| plugins.get("install_dir"))
+            .and_then(Item::as_str)
+    {
+        let install_dir = install_dir
+            .strip_prefix("~/")
+            .map(|relative| user_home().map(|home| home.join(relative)))
+            .unwrap_or_else(|| Ok(PathBuf::from(install_dir)))?;
+        roots.push(install_dir);
+    }
+    roots.retain(|root| root.exists());
+    if roots.iter().any(|root| {
+        root.canonicalize()
+            .ok()
+            .is_some_and(|root| canonical.starts_with(root))
+    }) {
+        Ok(canonical)
+    } else {
+        Err("Plugin path is outside the allowed Melody and Claude directories".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_melody_plugin_details(
+    cwd: String,
+    name: String,
+    path: String,
+) -> Result<PluginDetails, String> {
+    let root = allowed_plugin_path(&cwd, Path::new(&path))?;
+    Ok(plugin_details_from_directory(&root, &name))
 }
 
 #[cfg(test)]
@@ -149,13 +1052,180 @@ mod tests {
 
         let mut extensions = Vec::new();
         for kind in ["skills", "plugins", "hooks"] {
-            scan_kind(&root, "project", kind, &mut extensions);
+            scan_kind(&root, "project", kind, "melody", &mut extensions);
         }
 
         assert_eq!(extensions.len(), 3);
         assert!(extensions.iter().any(|item| item.name == "review"));
         assert!(extensions.iter().any(|item| item.name == "git-tools"));
         assert!(extensions.iter().any(|item| item.name == "after-tool.sh"));
+        assert!(extensions.iter().all(|item| item.provider == "melody"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scans_claude_compatible_plugins() {
+        let root = env::temp_dir().join(format!("melody-work-claude-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("plugins/review-tools")).unwrap();
+
+        let mut extensions = Vec::new();
+        scan_kind(&root, "project", "plugins", "claude", &mut extensions);
+
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(extensions[0].name, "review-tools");
+        assert_eq!(extensions[0].provider, "claude");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_git_and_local_marketplace_sources() {
+        let document = r#"
+[[marketplace.sources]]
+name = "Team"
+git = "https://example.com/plugins.git"
+branch = "stable"
+
+[[marketplace.sources]]
+name = "Local"
+path = "~/dev/plugins"
+"#
+        .parse::<DocumentMut>()
+        .unwrap();
+
+        let sources = marketplace_sources(&document).unwrap();
+
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].kind, "git");
+        assert_eq!(sources[0].branch.as_deref(), Some("stable"));
+        assert_eq!(sources[1].kind, "local");
+        assert_eq!(sources[1].location, "~/dev/plugins");
+    }
+
+    #[test]
+    fn creates_marketplace_source_array_without_replacing_other_settings() {
+        let mut document = "[marketplace]\nrequire_sha = true\n"
+            .parse::<DocumentMut>()
+            .unwrap();
+        let sources = marketplace_sources_mut(&mut document).unwrap();
+        let mut entry = Table::new();
+        entry["name"] = toml_edit::value("Team");
+        entry["git"] = toml_edit::value("https://example.com/plugins.git");
+        sources.push(entry);
+
+        let output = document.to_string();
+        assert!(output.contains("require_sha = true"));
+        assert!(output.contains("[[marketplace.sources]]"));
+        assert!(output.contains("name = \"Team\""));
+    }
+
+    #[test]
+    fn infers_marketplace_source_from_common_inputs() {
+        let shorthand = marketplace_source_from_input("acme/team-plugins@stable").unwrap();
+        assert_eq!(shorthand.name, "team-plugins");
+        assert_eq!(shorthand.kind, "git");
+        assert_eq!(
+            shorthand.location,
+            "https://github.com/acme/team-plugins.git"
+        );
+        assert_eq!(shorthand.branch.as_deref(), Some("stable"));
+
+        let git = marketplace_source_from_input("https://example.com/acme/tools.git").unwrap();
+        assert_eq!(git.name, "tools");
+        assert_eq!(git.kind, "git");
+
+        let local = marketplace_source_from_input("~/dev/plugins").unwrap();
+        assert_eq!(local.name, "plugins");
+        assert_eq!(local.kind, "local");
+    }
+
+    #[test]
+    fn reads_plugin_metadata_and_component_inventory() {
+        let root = env::temp_dir().join(format!("melody-work-plugin-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        fs::create_dir_all(root.join("skills/review")).unwrap();
+        fs::create_dir_all(root.join("commands")).unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
+        fs::write(root.join("skills/review/SKILL.md"), "# Review").unwrap();
+        fs::write(root.join("commands/check.md"), "# Check").unwrap();
+        fs::write(root.join("agents/reviewer.md"), "# Reviewer").unwrap();
+        fs::write(
+            root.join(".claude-plugin/plugin.json"),
+            serde_json::json!({
+                "name": "team-tools",
+                "version": "1.2.3",
+                "description": "Team utilities",
+                "author": { "name": "Acme" },
+                "hooks": { "PreToolUse": [] },
+                "mcpServers": { "github": { "command": "server" } },
+                "lspServers": { "rust": { "command": "rust-analyzer" } }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let details = plugin_details_from_directory(&root, "team-tools");
+
+        assert_eq!(details.name, "team-tools");
+        assert_eq!(details.version.as_deref(), Some("1.2.3"));
+        assert_eq!(details.author.as_deref(), Some("Acme"));
+        assert_eq!(details.components[0].items, ["review"]);
+        assert_eq!(details.components[1].items, ["check"]);
+        assert_eq!(details.components[2].items, ["reviewer"]);
+        assert_eq!(details.components[3].items, ["PreToolUse"]);
+        assert_eq!(details.components[4].items, ["github"]);
+        assert_eq!(details.components[5].items, ["rust"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn patches_known_values_without_removing_comments_or_unknown_settings() {
+        let mut document = r#"# Keep this comment
+[models]
+default = "old"
+future_option = "preserved"
+"#
+        .parse::<DocumentMut>()
+        .unwrap();
+        apply_patch(
+            &mut document,
+            &MelodyConfigPatch {
+                path: vec!["models".into(), "default".into()],
+                value: serde_json::json!("new"),
+            },
+        )
+        .unwrap();
+        apply_patch(
+            &mut document,
+            &MelodyConfigPatch {
+                path: vec!["features".into(), "telemetry".into()],
+                value: serde_json::json!(false),
+            },
+        )
+        .unwrap();
+
+        let output = document.to_string();
+        assert!(output.contains("# Keep this comment"));
+        assert!(output.contains("future_option = \"preserved\""));
+        assert!(output.contains("default = \"new\""));
+        assert!(output.contains("telemetry = false"));
+    }
+
+    #[test]
+    fn null_patch_removes_only_the_requested_value() {
+        let mut document = "[ui]\nsimple_mode = true\nvim_mode = true\n"
+            .parse::<DocumentMut>()
+            .unwrap();
+        apply_patch(
+            &mut document,
+            &MelodyConfigPatch {
+                path: vec!["ui".into(), "vim_mode".into()],
+                value: serde_json::Value::Null,
+            },
+        )
+        .unwrap();
+
+        let output = document.to_string();
+        assert!(output.contains("simple_mode = true"));
+        assert!(!output.contains("vim_mode"));
     }
 }

@@ -1,11 +1,25 @@
 export type MelodyConfigScope = "user" | "project";
 export type MelodyExtensionKind = "skills" | "plugins" | "hooks";
+export type MelodyConfigValue =
+  | string
+  | number
+  | boolean
+  | null
+  | MelodyConfigValue[]
+  | { [key: string]: MelodyConfigValue };
+
+export interface MelodyConfigPatch {
+  path: string[];
+  value: MelodyConfigValue;
+}
 
 export interface MelodyConfigDocument {
   scope: MelodyConfigScope;
   path: string;
   exists: boolean;
   content: string;
+  values: Record<string, MelodyConfigValue>;
+  parseError?: string;
 }
 
 export interface MelodyExtension {
@@ -13,4 +27,31 @@ export interface MelodyExtension {
   name: string;
   path: string;
   scope: MelodyConfigScope;
+  provider: "melody" | "claude";
+  managed: boolean;
+}
+
+export interface MarketplaceSource {
+  name: string;
+  kind: "git" | "local";
+  location: string;
+  branch?: string;
+}
+
+export interface PluginComponentGroup {
+  kind: "skills" | "commands" | "agents" | "hooks" | "mcps" | "lsps";
+  items: string[];
+}
+
+export interface PluginDetails {
+  name: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  path: string;
+  manifestPath?: string;
+  components: PluginComponentGroup[];
 }

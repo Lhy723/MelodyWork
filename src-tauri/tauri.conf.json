@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "dev.lhy723.melodywork",
   "build": {
-    "beforeDevCommand": "node scripts/prepare-sidecar.mjs && pnpm dev",
+    "beforeDevCommand": "node scripts/prepare-sidecar.mjs --dev && pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "node scripts/prepare-sidecar.mjs && pnpm build",
     "frontendDist": "../dist"
@@ -17,7 +17,9 @@
         "height": 820,
         "minWidth": 960,
         "minHeight": 640,
-        "center": true
+        "center": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {

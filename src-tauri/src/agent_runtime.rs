@@ -1,4 +1,5 @@
 use std::{
+    env,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Arc, RwLock},
@@ -106,7 +107,7 @@ fn resolve_explicit_binary(explicit: Option<&str>) -> Option<PathBuf> {
         .filter(|path| path.is_file())
 }
 
-fn resolve_binary(app: &AppHandle, explicit: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn resolve_binary(app: &AppHandle, explicit: Option<&str>) -> Option<PathBuf> {
     if let Some(binary) = resolve_explicit_binary(explicit) {
         return Some(binary);
     }
@@ -135,6 +136,16 @@ fn resolve_binary(app: &AppHandle, explicit: Option<&str>) -> Option<PathBuf> {
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+pub(crate) fn melody_home() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("MELODY_HOME") {
+        return Some(PathBuf::from(path));
+    }
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .map(|path| path.join(".melody"))
 }
 
 #[tauri::command]
@@ -179,6 +190,11 @@ pub async fn start_agent(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if let Some(home) = melody_home() {
+        command
+            .env("MELODY_HOME", &home)
+            .env("GROK_HOME", home);
+    }
 
     let mut child = match command.spawn() {
         Ok(child) => child,

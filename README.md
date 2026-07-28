@@ -17,18 +17,29 @@ MelodyWork 是 [Melody Build](https://github.com/Lhy723/melody-build) 的本地�
 
 ## 本地开发
 
-需要 Node.js 22、pnpm、稳定版 Rust 和 Tauri 2 的系统依赖。
+需要 Node.js 22、pnpm、Rust、[DotSlash](https://dotslash-cli.com)、ripgrep
+和 Tauri 2 的系统依赖。`melody-build` 以 Git submodule 固定在
+`vendor/melody-build`；首次检出或上游版本更新后需要初始化：
 
 ```bash
+git submodule update --init --recursive
 pnpm install
+cargo install dotslash --locked
 pnpm tauri dev
 ```
 
+`pnpm tauri dev` 会先增量编译项目内的 `vendor/melody-build` debug
+sidecar，再启动 Tauri 与 Vite；修改前端或 melody-build 源码后重新运行该命令即可。
+设置 `MELODY_PAGER_SOURCE` 时会跳过内置仓库编译并使用指定可执行文件。
+
 开发构建会从以下位置之一准备 sidecar：
 
-1. 已存在的 `src-tauri/binaries/melody-pager-$TARGET_TRIPLE`
-2. `MELODY_PAGER_SOURCE` 指向的本地可执行文件
-3. macOS/Linux 的 `~/.grok/bin/grok` 或 Windows 的 `%USERPROFILE%\.grok\bin\grok.exe`
+1. `MELODY_PAGER_SOURCE` 指向的本地可执行文件
+2. 自动增量编译的项目内 `vendor/melody-build/target/debug` 产物
+3. 兼容旧布局的同级 `melody-build/target/debug` 或 `target/release` 产物
+4. macOS/Linux 的 `~/.melody/bin/melody` 或 Windows 的 `%USERPROFILE%\.melody\bin\melody.exe`
+5. 旧版 `~/.grok/bin/grok`（仅作为兼容回退）
+6. 已存在的 `src-tauri/binaries/melody-pager-$TARGET_TRIPLE`
 
 常用验证命令：
 
@@ -44,7 +55,7 @@ Windows 的 Git 页面依赖系统已安装 `git` 并可从 `PATH` 访问。
 
 推送 `v*` 标签会在 GitHub Actions 中：
 
-1. 分别为 Apple Silicon、Intel macOS 和 x64 Windows 编译官方 `melody-pager-bin`
+1. 从仓库固定的 `vendor/melody-build` 提交分别为 Apple Silicon、Intel macOS 和 x64 Windows 编译 `melody-pager-bin`
 2. 生成 macOS/Windows 安装包
 3. 生成签名更新包和 `latest.json`
 4. 创建 beta 草稿 Release；人工发布后成为 updater 的 latest Release

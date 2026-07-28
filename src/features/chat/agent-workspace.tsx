@@ -3,9 +3,15 @@ import {
   GitCompareArrowsIcon,
   MoreHorizontalIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEventHandler,
+} from "react";
 
 import { Button } from "@/components/ui/button";
+import { Presence } from "@/components/ui/presence";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,12 +19,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FileWorkspace } from "@/features/files/file-workspace";
-import { ChangeReview } from "@/features/git/change-review";
 import { GitWorkspace } from "@/features/git/git-workspace";
 import { AppSidebar } from "@/features/sessions/app-sidebar";
-import { SettingsWorkspace } from "@/features/settings/settings-workspace";
+import { WindowNavigationControls } from "@/features/sessions/window-navigation-controls";
+import {
+  SettingsWorkspace,
+  type SettingsPage,
+} from "@/features/settings/settings-workspace";
 import { TerminalPanel } from "@/features/terminal/terminal-panel";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
+import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
 import { useSessionPersistence } from "@/hooks/use-session-persistence";
 import { useWorkspace } from "@/hooks/use-workspace";
@@ -28,17 +38,53 @@ import {
   checkAppUpdate,
   type AppUpdateStatus,
 } from "@/lib/melody-bridge";
+import { localizedSessionTitle } from "@/lib/localize";
+import { cn } from "@/lib/utils";
 
 import { AgentComposer } from "./agent-composer";
 import { AgentTimeline } from "./agent-timeline";
 
 const statusLabel = {
-  stopped: "Preview",
-  starting: "Starting",
-  running: "Connected",
-  missing: "Sidecar missing",
-  failed: "Bridge error",
+  stopped: "预览",
+  starting: "正在启动",
+  running: "已连接",
+  missing: "未找到内置服务",
+  failed: "连接错误",
 } as const;
+
+const DEFAULT_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH = 224;
+const MAX_SIDEBAR_WIDTH = 420;
+const SIDEBAR_WIDTH_STORAGE_KEY = "melodywork.sidebar.width";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "melodywork.sidebar.collapsed";
+
+const isMacOS =
+  typeof navigator !== "undefined" &&
+  /Macintosh|Mac OS X/.test(navigator.userAgent);
+
+const storedSidebarWidth = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  const stored = Number(
+    window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY),
+  );
+  return Number.isFinite(stored)
+    ? Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, stored),
+      )
+    : DEFAULT_SIDEBAR_WIDTH;
+};
+
+const storedSidebarCollapsed = () =>
+  typeof window !== "undefined" &&
+  window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+
+interface SessionNavigationHistory {
+  entries: string[];
+  index: number;
+}
 
 const sessionStatusLabel = (
   agentPhase: keyof typeof statusLabel,
@@ -47,26 +93,35 @@ const sessionStatusLabel = (
   if (agentPhase !== "running") {
     return statusLabel[agentPhase];
   }
-  if (sessionPhase === "initializing" || sessionPhase === "creating") {
-    return "Starting session";
+  if (
+    sessionPhase === "initializing" ||
+    sessionPhase === "authenticating" ||
+    sessionPhase === "creating"
+  ) {
+    return "正在启动会话";
   }
   if (sessionPhase === "prompting") {
-    return "Working";
+    return "处理中";
   }
-  return sessionPhase === "ready" ? "Connected" : statusLabel.running;
+  return sessionPhase === "ready" ? "已连接" : statusLabel.running;
 };
 
 export function AgentWorkspace() {
+  useAppearanceSettings();
   useWorkspace();
 
   const projects = useWorkspaceStore((state) => state.projects);
-  const sessions = useWorkspaceStore((state) => state.sessions);
+  const sessionsByProject = useWorkspaceStore(
+    (state) => state.sessionsByProject,
+  );
   const activeProject = useWorkspaceStore((state) => state.activeProject);
   const activeSession = useWorkspaceStore((state) => state.activeSession);
   const workspaceLoading = useWorkspaceStore((state) => state.loading);
+  const workspaceError = useWorkspaceStore((state) => state.error);
   const chooseProject = useWorkspaceStore((state) => state.chooseProject);
   const selectProject = useWorkspaceStore((state) => state.selectProject);
   const createSession = useWorkspaceStore((state) => state.createSession);
+  const deleteSession = useWorkspaceStore((state) => state.deleteSession);
   const selectSession = useWorkspaceStore((state) => state.selectSession);
 
   useAgentBridge(activeSession);
@@ -77,24 +132,151 @@ export function AgentWorkspace() {
   const acpPhase = useAgentStore((state) => state.acpPhase);
   const timeline = useAgentStore((state) => state.timeline);
   const chatStatus = useAgentStore((state) => state.chatStatus);
+  const contextUsage = useAgentStore((state) => state.contextUsage);
+  const availableModels = useAgentStore((state) => state.availableModels);
+  const selectedModelId = useAgentStore((state) => state.selectedModelId);
+  const pendingModelId = useAgentStore((state) => state.pendingModelId);
+  const selectedReasoningEffort = useAgentStore(
+    (state) => state.selectedReasoningEffort,
+  );
+  const pendingReasoningEffort = useAgentStore(
+    (state) => state.pendingReasoningEffort,
+  );
+  const availableSessionModes = useAgentStore(
+    (state) => state.availableSessionModes,
+  );
+  const selectedSessionModeId = useAgentStore(
+    (state) => state.selectedSessionModeId,
+  );
+  const pendingSessionModeId = useAgentStore(
+    (state) => state.pendingSessionModeId,
+  );
+  const permissionMode = useAgentStore((state) => state.permissionMode);
+  const runningSessions = useAgentStore((state) => state.runningSessions);
   const submitPrompt = useAgentStore((state) => state.submitPrompt);
+  const selectModel = useAgentStore((state) => state.selectModel);
+  const selectReasoningEffort = useAgentStore(
+    (state) => state.selectReasoningEffort,
+  );
+  const selectSessionMode = useAgentStore(
+    (state) => state.selectSessionMode,
+  );
+  const selectPermissionMode = useAgentStore(
+    (state) => state.selectPermissionMode,
+  );
   const resolvePermission = useAgentStore(
     (state) => state.resolvePermission,
   );
-  const [reviewOpen, setReviewOpen] = useState(false);
+  const resolvePlan = useAgentStore((state) => state.resolvePlan);
   const [gitOpen, setGitOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] =
+    useState<SettingsPage>("configuration");
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>();
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    storedSidebarCollapsed,
+  );
+  const [sidebarResize, setSidebarResize] = useState<{
+    startWidth: number;
+    startX: number;
+  }>();
+  const [sessionNavigation, setSessionNavigation] =
+    useState<SessionNavigationHistory>({
+      entries: [],
+      index: -1,
+    });
+  const historyTraversalTarget = useRef<string | undefined>(undefined);
   const git = useGitChanges(cwd);
+  const agentError =
+    acpPhase === "error" ||
+    status.phase === "missing" ||
+    status.phase === "failed"
+      ? status.message
+      : undefined;
+  const visibleError = workspaceError ?? agentError;
 
   useEffect(() => {
     void checkAppUpdate()
       .then(setAppUpdate)
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      return;
+    }
+
+    if (historyTraversalTarget.current === sessionId) {
+      historyTraversalTarget.current = undefined;
+      return;
+    }
+
+    setSessionNavigation((current) => {
+      if (current.entries[current.index] === sessionId) {
+        return current;
+      }
+      return {
+        entries: [
+          ...current.entries.slice(0, current.index + 1),
+          sessionId,
+        ],
+        index: current.index + 1,
+      };
+    });
+  }, [activeSession?.id]);
+
+  useEffect(() => {
+    if (!sidebarResize) {
+      return;
+    }
+
+    const previousCursor = document.documentElement.style.cursor;
+    const previousUserSelect =
+      document.documentElement.style.userSelect;
+    document.documentElement.style.cursor = "col-resize";
+    document.documentElement.style.userSelect = "none";
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const nextWidth = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(
+          MIN_SIDEBAR_WIDTH,
+          sidebarResize.startWidth +
+            event.clientX -
+            sidebarResize.startX,
+        ),
+      );
+      sidebarWidthRef.current = nextWidth;
+      setSidebarWidth(nextWidth);
+    };
+    const handlePointerUp = () => {
+      window.localStorage.setItem(
+        SIDEBAR_WIDTH_STORAGE_KEY,
+        String(Math.round(sidebarWidthRef.current)),
+      );
+      setSidebarResize(undefined);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, {
+      once: true,
+    });
+
+    return () => {
+      document.documentElement.style.cursor = previousCursor;
+      document.documentElement.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [sidebarResize]);
 
   const installAppUpdate = async () => {
     setInstallingUpdate(true);
@@ -105,117 +287,372 @@ export function AgentWorkspace() {
     }
   };
 
-  return (
-    <main className="flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
-      <AppSidebar
-        activeProject={activeProject}
-        activeSessionId={activeSession?.id}
-        loading={workspaceLoading}
-        onChooseProject={() => void chooseProject()}
-        onNewSession={() => void createSession()}
-        onOpenGit={() => setGitOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onSelectProject={(project) => void selectProject(project)}
-        onSelectSession={selectSession}
-        projects={projects}
-        sessions={sessions}
-      />
-      <section className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b px-6">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-semibold text-base">
-              {activeSession?.title ?? "Opening workspace…"}
-            </h1>
-            <div className="mt-0.5 flex items-center gap-1.5 text-muted-foreground text-xs">
-              <span
-                aria-hidden="true"
-                className="size-1.5 rounded-full bg-current"
-              />
-              {sessionStatusLabel(status.phase, acpPhase)}
-            </div>
-          </div>
-          <Button onClick={() => setReviewOpen(true)} variant="outline">
-            <GitCompareArrowsIcon data-icon="inline-start" />
-            {git.loading ? "Checking changes" : `${git.changes.length} changes`}
-          </Button>
-          {appUpdate?.available ? (
-            <Button
-              disabled={installingUpdate}
-              onClick={() => void installAppUpdate()}
-              variant="outline"
-            >
-              <DownloadIcon />
-              {installingUpdate
-                ? "Installing update"
-                : `Update to ${appUpdate.version}`}
-            </Button>
-          ) : null}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label="Session actions"
-                size="icon"
-                variant="ghost"
-              >
-                <MoreHorizontalIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setFilesOpen(true)}>
-                Open files
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setTerminalOpen(true)}>
-                Open terminal
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setGitOpen(true)}>
-                Open Git
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </header>
+  const openSettings = (page: SettingsPage = "configuration") => {
+    setGitOpen(false);
+    setFilesOpen(false);
+    setTerminalOpen(false);
+    setSettingsPage(page);
+    setSettingsOpen(true);
+  };
 
-        <AgentTimeline
-          entries={timeline}
-          onPermission={resolvePermission}
+  const openGit = () => {
+    setSettingsOpen(false);
+    setFilesOpen(false);
+    setTerminalOpen(false);
+    setGitOpen(true);
+  };
+
+  const returnToConversation = () => {
+    setSettingsOpen(false);
+  };
+
+  const updateSidebarWidth = (nextWidth: number) => {
+    const clampedWidth = Math.min(
+      MAX_SIDEBAR_WIDTH,
+      Math.max(MIN_SIDEBAR_WIDTH, nextWidth),
+    );
+    sidebarWidthRef.current = clampedWidth;
+    setSidebarWidth(clampedWidth);
+    window.localStorage.setItem(
+      SIDEBAR_WIDTH_STORAGE_KEY,
+      String(Math.round(clampedWidth)),
+    );
+  };
+
+  const beginSidebarResize: PointerEventHandler<HTMLDivElement> = (
+    event,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    setSidebarResize({
+      startWidth: sidebarWidthRef.current,
+      startX: event.clientX,
+    });
+  };
+
+  const setSidebarVisibility = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    window.localStorage.setItem(
+      SIDEBAR_COLLAPSED_STORAGE_KEY,
+      String(collapsed),
+    );
+  };
+
+  const findSessionById = (sessionId: string) => {
+    for (const sessions of Object.values(sessionsByProject)) {
+      const session = sessions.find((item) => item.id === sessionId);
+      if (session) {
+        return session;
+      }
+    }
+    return undefined;
+  };
+
+  const nextHistoryIndex = (direction: -1 | 1) => {
+    for (
+      let index = sessionNavigation.index + direction;
+      index >= 0 && index < sessionNavigation.entries.length;
+      index += direction
+    ) {
+      if (findSessionById(sessionNavigation.entries[index])) {
+        return index;
+      }
+    }
+    return undefined;
+  };
+
+  const goThroughSessionHistory = (direction: -1 | 1) => {
+    const targetIndex = nextHistoryIndex(direction);
+    if (targetIndex === undefined) {
+      return;
+    }
+    const sessionId = sessionNavigation.entries[targetIndex];
+    const session = findSessionById(sessionId);
+    if (!session) {
+      return;
+    }
+    historyTraversalTarget.current = sessionId;
+    setSessionNavigation((current) => ({
+      ...current,
+      index: targetIndex,
+    }));
+    returnToConversation();
+    setGitOpen(false);
+    setFilesOpen(false);
+    setTerminalOpen(false);
+    selectSession(session);
+  };
+
+  const canGoBack = nextHistoryIndex(-1) !== undefined;
+  const canGoForward = nextHistoryIndex(1) !== undefined;
+
+  return (
+    <main className="relative flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
+      {!settingsOpen ? (
+        <WindowNavigationControls
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          className="absolute top-0 left-0 z-50"
+          collapsed={sidebarCollapsed}
+          macSafeArea={isMacOS}
+          onGoBack={() => goThroughSessionHistory(-1)}
+          onGoForward={() => goThroughSessionHistory(1)}
+          onToggleSidebar={() =>
+            setSidebarVisibility(!sidebarCollapsed)
+          }
         />
-        <AgentComposer onSubmit={submitPrompt} status={chatStatus} />
-        {reviewOpen ? (
-          <ChangeReview
-            changes={git.changes}
-            cwd={cwd}
-            error={git.error}
-            loading={git.loading}
-            onClose={() => setReviewOpen(false)}
-            onRefresh={() => void git.refresh()}
-          />
-        ) : null}
-        {gitOpen ? (
-          <GitWorkspace
-            changes={git.changes}
-            cwd={cwd}
-            onClose={() => setGitOpen(false)}
-            onRefreshChanges={() => void git.refresh()}
-          />
-        ) : null}
-        {filesOpen ? (
-          <FileWorkspace
-            onClose={() => setFilesOpen(false)}
-            root={cwd}
-          />
-        ) : null}
-        {terminalOpen ? (
-          <TerminalPanel
-            cwd={cwd}
-            onClose={() => setTerminalOpen(false)}
-          />
-        ) : null}
+      ) : null}
+      <div
+        aria-hidden={sidebarCollapsed || settingsOpen}
+        className="sidebar-shell"
+        data-collapsed={sidebarCollapsed || settingsOpen}
+        data-resizing={Boolean(sidebarResize)}
+        inert={sidebarCollapsed || settingsOpen}
+        style={{
+          width: sidebarCollapsed || settingsOpen ? 0 : sidebarWidth,
+        }}
+      >
+        <AppSidebar
+          activeProject={activeProject}
+          activeSessionId={settingsOpen ? undefined : activeSession?.id}
+          loading={workspaceLoading}
+          onChooseProject={() => {
+            returnToConversation();
+            void chooseProject();
+          }}
+          onDeleteSession={(session) => void deleteSession(session)}
+          onNewSession={(project) => {
+            returnToConversation();
+            void createSession(project);
+          }}
+          onOpenExtensions={() => openSettings("skills")}
+          onOpenGit={openGit}
+          onOpenSettings={() => openSettings()}
+          onResetWidth={() =>
+            updateSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
+          }
+          onResizeBy={(delta) =>
+            updateSidebarWidth(sidebarWidthRef.current + delta)
+          }
+          onResizeStart={beginSidebarResize}
+          onSelectProject={(project) => {
+            returnToConversation();
+            void selectProject(project);
+          }}
+          onSelectSession={(session) => {
+            returnToConversation();
+            selectSession(session);
+          }}
+          projects={projects}
+          runningSessions={runningSessions}
+          settingsActive={settingsOpen}
+          sessionsByProject={sessionsByProject}
+          sidebarWidth={sidebarWidth}
+        />
+      </div>
+      <section className="relative flex min-w-0 flex-1 flex-col">
         {settingsOpen ? (
           <SettingsWorkspace
             cwd={cwd}
-            onClose={() => setSettingsOpen(false)}
+            initialPage={settingsPage}
+            macSafeArea={isMacOS}
+            onClose={returnToConversation}
             projectId={activeProject?.id ?? "preview-project"}
           />
         ) : null}
+        <div
+          aria-hidden={settingsOpen}
+          className={cn(
+            "relative flex min-h-0 flex-1 flex-col",
+            settingsOpen && "hidden",
+          )}
+        >
+          <header
+            className={cn(
+              "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
+              sidebarCollapsed
+                ? isMacOS
+                  ? "pl-52"
+                  : "pl-32"
+                : "pl-6",
+            )}
+            data-tauri-drag-region
+          >
+            <div
+              className="flex min-w-0 flex-1 items-center gap-2"
+              data-tauri-drag-region
+            >
+              <h1
+                className="min-w-0 truncate font-semibold text-base"
+                data-tauri-drag-region
+              >
+                {activeSession
+                  ? localizedSessionTitle(activeSession.title)
+                  : "正在打开工作区…"}
+              </h1>
+              <div
+                className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                data-tauri-drag-region
+              >
+                <span
+                  aria-hidden="true"
+                  className="motion-status-dot size-1.5 rounded-full bg-current"
+                  data-tauri-drag-region
+                />
+                {sessionStatusLabel(status.phase, acpPhase)}
+              </div>
+            </div>
+            <Button
+              aria-label={
+                git.loading
+                  ? "正在检查更改"
+                  : `${git.changes.length} 项更改`
+              }
+              className="gap-1 px-2"
+              onClick={() => setGitOpen(true)}
+              size="sm"
+              title={
+                git.loading
+                  ? "正在检查更改"
+                  : `${git.changes.length} 项更改`
+              }
+              variant="outline"
+            >
+              <GitCompareArrowsIcon data-icon="inline-start" />
+              <span className="min-w-2 text-center tabular-nums">
+                {git.loading ? "…" : git.changes.length}
+              </span>
+            </Button>
+            {appUpdate?.available ? (
+              <Button
+                className="motion-view-enter"
+                disabled={installingUpdate}
+                onClick={() => void installAppUpdate()}
+                variant="outline"
+              >
+                <DownloadIcon />
+                {installingUpdate
+                  ? "正在安装更新"
+                  : `更新到 ${appUpdate.version}`}
+              </Button>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  aria-label="会话操作"
+                  size="icon"
+                  variant="ghost"
+                >
+                  <MoreHorizontalIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setFilesOpen(true)}>
+                  打开文件
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setTerminalOpen(true)}>
+                  打开终端
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setGitOpen(true)}>
+                  打开 Git
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </header>
+          <Presence present={Boolean(visibleError)}>
+            {(motionState) => (
+              <div
+                aria-live="polite"
+                className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+                data-motion-state={motionState}
+                role="alert"
+              >
+                {visibleError}
+              </div>
+            )}
+          </Presence>
+
+          <AgentTimeline
+            cwd={cwd}
+            entries={timeline}
+            onPermission={resolvePermission}
+            onPlanDecision={resolvePlan}
+            projectRoot={activeProject?.path ?? cwd}
+          />
+          <AgentComposer
+            contextUsage={contextUsage}
+            modelChanging={Boolean(pendingModelId)}
+            models={availableModels}
+            onModelChange={(modelId) => void selectModel(modelId)}
+            onPermissionModeChange={(mode) =>
+              void selectPermissionMode(mode)
+            }
+            onReasoningEffortChange={(effort) =>
+              void selectReasoningEffort(effort)
+            }
+            onSessionModeChange={(modeId) =>
+              void selectSessionMode(modeId)
+            }
+            onSubmit={submitPrompt}
+            permissionMode={permissionMode}
+            reasoningEffortChanging={Boolean(pendingReasoningEffort)}
+            sessionModeChanging={Boolean(pendingSessionModeId)}
+            sessionModes={availableSessionModes}
+            selectedModelId={selectedModelId}
+            selectedReasoningEffort={selectedReasoningEffort}
+            selectedSessionModeId={selectedSessionModeId}
+            status={chatStatus}
+          />
+          <Presence present={gitOpen}>
+            {(motionState) => (
+              <div
+                className="motion-layer pointer-events-none absolute inset-0 z-20"
+                data-motion-state={motionState}
+              >
+                <div className="pointer-events-auto size-full">
+                  <GitWorkspace
+                    changes={git.changes}
+                    cwd={cwd}
+                    onClose={() => setGitOpen(false)}
+                    onRefreshChanges={() => void git.refresh()}
+                  />
+                </div>
+              </div>
+            )}
+          </Presence>
+          <Presence present={filesOpen}>
+            {(motionState) => (
+              <div
+                className="motion-layer pointer-events-none absolute inset-0 z-20"
+                data-motion-state={motionState}
+              >
+                <div className="pointer-events-auto size-full">
+                  <FileWorkspace
+                    onClose={() => setFilesOpen(false)}
+                    root={cwd}
+                  />
+                </div>
+              </div>
+            )}
+          </Presence>
+          <Presence present={terminalOpen}>
+            {(motionState) => (
+              <div
+                className="motion-sheet-layer pointer-events-none absolute inset-0 z-30"
+                data-motion-state={motionState}
+              >
+                <div className="pointer-events-auto size-full">
+                  <TerminalPanel
+                    cwd={cwd}
+                    onClose={() => setTerminalOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
+          </Presence>
+        </div>
       </section>
     </main>
   );

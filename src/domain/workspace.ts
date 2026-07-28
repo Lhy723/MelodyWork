@@ -12,6 +12,8 @@ export interface SessionRecord {
   cwd: string;
   acpSessionId?: string;
   timelineJson: string;
+  acpCursor?: string;
+  timelineVersion: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -21,6 +23,8 @@ export interface UpdateSessionRequest {
   title?: string;
   acpSessionId?: string;
   timelineJson?: string;
+  acpCursor?: string | null;
+  timelineVersion?: number;
 }
 
 export interface WorkspaceEntry {

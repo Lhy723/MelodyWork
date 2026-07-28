@@ -32,6 +32,8 @@ pub struct SessionRecord {
     cwd: String,
     acp_session_id: Option<String>,
     timeline_json: String,
+    acp_cursor: Option<String>,
+    timeline_version: i64,
     created_at: i64,
     updated_at: i64,
 }
@@ -55,6 +57,8 @@ pub struct UpdateSessionRequest {
     title: Option<String>,
     acp_session_id: Option<String>,
     timeline_json: Option<String>,
+    acp_cursor: Option<Option<String>>,
+    timeline_version: Option<i64>,
 }
 
 fn current_timestamp(connection: &Connection) -> Result<i64, String> {
@@ -88,8 +92,10 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> 
         cwd: row.get(3)?,
         acp_session_id: row.get(4)?,
         timeline_json: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        acp_cursor: row.get(6)?,
+        timeline_version: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -127,6 +133,8 @@ impl AppDatabase {
                 cwd TEXT NOT NULL,
                 acp_session_id TEXT,
                 timeline_json TEXT NOT NULL DEFAULT '[]',
+                acp_cursor TEXT,
+                timeline_version INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -148,6 +156,22 @@ impl AppDatabase {
                 ON permission_rules(project_id, created_at DESC);
             ",
         )?;
+        let session_columns = connection
+            .prepare("PRAGMA table_info(sessions)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !session_columns.iter().any(|column| column == "acp_cursor") {
+            connection.execute("ALTER TABLE sessions ADD COLUMN acp_cursor TEXT", [])?;
+        }
+        if !session_columns
+            .iter()
+            .any(|column| column == "timeline_version")
+        {
+            connection.execute(
+                "ALTER TABLE sessions ADD COLUMN timeline_version INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -173,6 +197,8 @@ impl AppDatabase {
                     cwd TEXT NOT NULL,
                     acp_session_id TEXT,
                     timeline_json TEXT NOT NULL DEFAULT '[]',
+                    acp_cursor TEXT,
+                    timeline_version INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -282,6 +308,7 @@ pub fn list_sessions(
     let mut statement = connection
         .prepare(
             "SELECT id, project_id, title, cwd, acp_session_id, timeline_json,
+                    acp_cursor, timeline_version,
                     created_at, updated_at
              FROM sessions
              WHERE project_id = ?1
@@ -312,13 +339,14 @@ pub fn create_session(
         .execute(
             "INSERT INTO sessions
                 (id, project_id, title, cwd, timeline_json, created_at, updated_at)
-             VALUES (?1, ?2, 'New session', ?3, '[]', ?4, ?4)",
+             VALUES (?1, ?2, '新会话', ?3, '[]', ?4, ?4)",
             params![id, project_id, cwd, now],
         )
         .map_err(|error| error.to_string())?;
     connection
         .query_row(
             "SELECT id, project_id, title, cwd, acp_session_id, timeline_json,
+                    acp_cursor, timeline_version,
                     created_at, updated_at
              FROM sessions WHERE id = ?1",
             [&id],
@@ -343,13 +371,18 @@ pub fn update_session(
                 title = COALESCE(?2, title),
                 acp_session_id = COALESCE(?3, acp_session_id),
                 timeline_json = COALESCE(?4, timeline_json),
-                updated_at = ?5
+                acp_cursor = CASE WHEN ?5 THEN ?6 ELSE acp_cursor END,
+                timeline_version = COALESCE(?7, timeline_version),
+                updated_at = ?8
              WHERE id = ?1",
             params![
                 request.id,
                 request.title,
                 request.acp_session_id,
                 request.timeline_json,
+                request.acp_cursor.is_some(),
+                request.acp_cursor.flatten(),
+                request.timeline_version,
                 now
             ],
         )
@@ -357,12 +390,28 @@ pub fn update_session(
     connection
         .query_row(
             "SELECT id, project_id, title, cwd, acp_session_id, timeline_json,
+                    acp_cursor, timeline_version,
                     created_at, updated_at
              FROM sessions WHERE id = ?1",
             [&request.id],
             session_from_row,
         )
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn delete_session(database: State<'_, AppDatabase>, id: String) -> Result<(), String> {
+    let connection = database
+        .connection
+        .lock()
+        .map_err(|_| "Database lock poisoned".to_string())?;
+    let deleted = connection
+        .execute("DELETE FROM sessions WHERE id = ?1", [&id])
+        .map_err(|error| error.to_string())?;
+    if deleted == 0 {
+        return Err("Session does not exist".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -492,7 +541,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO sessions VALUES
-                 ('s1', 'p1', 'Test session', '/tmp/demo', NULL, '[]', 1, 1)",
+                 ('s1', 'p1', 'Test session', '/tmp/demo', NULL, '[]', NULL, 0, 1, 1)",
                 [],
             )
             .unwrap();
@@ -502,6 +551,16 @@ mod tests {
             })
             .unwrap();
         assert_eq!(title, "Test session");
+        assert_eq!(
+            connection
+                .execute("DELETE FROM sessions WHERE id = 's1'", [])
+                .unwrap(),
+            1
+        );
+        let session_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(session_count, 0);
 
         connection
             .execute(

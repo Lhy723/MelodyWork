@@ -30,6 +30,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: pnpm/action-setup@v4
         with:
@@ -40,26 +42,29 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.92.0"
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             src-tauri
-            melody-build
+            vendor/melody-build
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Melody build tools
+        run: cargo install dotslash --locked
+
       - name: Build Melody sidecar
         shell: bash
         run: |
-          git clone --depth 1 https://github.com/Lhy723/melody-build.git melody-build
-          cargo build --release --manifest-path melody-build/Cargo.toml --package melody-pager-bin --bin melody-pager
+          cargo build --locked --release --manifest-path vendor/melody-build/Cargo.toml --package melody-pager-bin --bin melody-pager
           mkdir -p src-tauri/binaries
-          cp "melody-build/target/release/melody-pager${{ matrix.sidecar_ext }}" "src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
+          cp "vendor/melody-build/target/release/melody-pager${{ matrix.sidecar_ext }}" "src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
 
       - name: Build and publish installers
         uses: tauri-apps/tauri-action@v0
