@@ -7,15 +7,16 @@ mod workspace_runtime;
 
 use agent_runtime::{AgentRuntime, agent_status, send_acp, start_agent, stop_agent};
 use config_runtime::{
-    add_marketplace_source, delete_marketplace_source, list_marketplace_sources,
-    get_melody_plugin_details, install_melody_plugin, list_installed_melody_plugins,
-    list_melody_extensions, read_melody_config, save_marketplace_source,
+    add_marketplace_source, delete_marketplace_source, delete_melody_skill,
+    get_melody_plugin_details, get_melody_skill_details, install_melody_plugin,
+    list_installed_melody_plugins, list_marketplace_sources, list_melody_extensions,
+    read_melody_config, save_marketplace_source, set_melody_extension_enabled,
     uninstall_melody_plugin, update_melody_config,
 };
 use database::{
     AppDatabase, create_session, delete_permission_rule, delete_session, find_permission_rule,
-    list_permission_rules, list_projects, list_sessions, update_session, upsert_permission_rule,
-    upsert_project,
+    get_usage_statistics, list_permission_rules, list_projects, list_sessions, update_session,
+    upsert_permission_rule, upsert_project,
 };
 use git_runtime::{
     git_branches, git_changes, git_checkout_branch, git_commit, git_create_branch,
@@ -61,6 +62,7 @@ pub fn run() {
             create_session,
             update_session,
             delete_session,
+            get_usage_statistics,
             workspace_tree,
             read_workspace_file,
             write_workspace_file,
@@ -68,6 +70,7 @@ pub fn run() {
             read_melody_config,
             update_melody_config,
             list_melody_extensions,
+            set_melody_extension_enabled,
             list_marketplace_sources,
             add_marketplace_source,
             save_marketplace_source,
@@ -75,7 +78,9 @@ pub fn run() {
             install_melody_plugin,
             list_installed_melody_plugins,
             get_melody_plugin_details,
+            get_melody_skill_details,
             uninstall_melody_plugin,
+            delete_melody_skill,
             list_permission_rules,
             find_permission_rule,
             upsert_permission_rule,

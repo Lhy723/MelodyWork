@@ -55,6 +55,18 @@ export interface AgentContextUsage {
   };
 }
 
+export interface AgentBillingUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens: number;
+  reasoningTokens: number;
+  modelCalls: number;
+  apiDurationMs: number;
+  usageIsIncomplete: boolean;
+  costIsPartial: boolean;
+  costUsdTicks?: number;
+}
+
 export type AgentToolOperation =
   | "read"
   | "search"
@@ -145,6 +157,13 @@ export type TimelineEntry =
       attachments?: AgentTimelineAttachment[];
       streaming?: boolean;
       sourcePromptIndex?: number;
+      tokenUsage?: {
+        usedTokens: number;
+        maxTokens: number;
+      };
+      billingUsage?: AgentBillingUsage;
+      reasoningEffort?: string;
+      sessionModeId?: string;
     }
   | {
       id: string;

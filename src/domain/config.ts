@@ -29,6 +29,7 @@ export interface MelodyExtension {
   scope: MelodyConfigScope;
   provider: "melody" | "claude";
   managed: boolean;
+  enabled: boolean;
 }
 
 export interface MarketplaceSource {
@@ -54,4 +55,15 @@ export interface PluginDetails {
   path: string;
   manifestPath?: string;
   components: PluginComponentGroup[];
+}
+
+export interface SkillDetails {
+  name: string;
+  description?: string;
+  license?: string;
+  compatibility?: string;
+  path: string;
+  skillPath: string;
+  files: string[];
+  content: string;
 }

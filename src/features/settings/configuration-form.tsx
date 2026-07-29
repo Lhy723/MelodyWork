@@ -1761,38 +1761,68 @@ function DynamicSection({
         </Button>
       </div>
       <div className="flex flex-col gap-3">
-        {entries.map(([name]) => (
-          <details className="group overflow-hidden rounded-xl border bg-card" key={name}>
-            <summary className="flex h-11 cursor-pointer list-none items-center gap-2 px-4">
-              <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
-              <span className="min-w-0 flex-1 truncate font-medium text-sm">{name}</span>
-              <Button
-                aria-label={`删除 ${name}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  onChange([...root, name], null);
-                }}
-                size="icon-sm"
-                variant="ghost"
-              >
-                <Trash2Icon />
-              </Button>
-            </summary>
-            <div className="border-t">
-              <SettingsList
-                onChange={onChange}
-                section={{
-                  id: name,
-                  label: name,
-                  description: "",
-                  icon: NetworkIcon,
-                  settings: definitions(name),
-                }}
-                values={values}
-              />
-            </div>
-          </details>
-        ))}
+        {entries.map(([name]) => {
+          const enabledValue =
+            kind === "mcp"
+              ? valueAt(values, [...root, name, "enabled"])
+              : undefined;
+          const enabled =
+            typeof enabledValue === "boolean" ? enabledValue : true;
+          return (
+            <details
+              className="group overflow-hidden rounded-xl border bg-card"
+              key={name}
+            >
+              <summary className="flex h-11 cursor-pointer list-none items-center gap-2 px-4">
+                <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                <span className="min-w-0 flex-1 truncate font-medium text-sm">
+                  {name}
+                </span>
+                {kind === "mcp" ? (
+                  <span
+                    className="flex items-center"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                  >
+                    <Switch
+                      aria-label={`${enabled ? "停用" : "启用"} MCP 服务器 ${name}`}
+                      checked={enabled}
+                      onCheckedChange={(checked) =>
+                        onChange([...root, name, "enabled"], checked)
+                      }
+                    />
+                  </span>
+                ) : null}
+                <Button
+                  aria-label={`删除 ${name}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onChange([...root, name], null);
+                  }}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <Trash2Icon />
+                </Button>
+              </summary>
+              <div className="border-t">
+                <SettingsList
+                  onChange={onChange}
+                  section={{
+                    id: name,
+                    label: name,
+                    description: "",
+                    icon: NetworkIcon,
+                    settings: definitions(name),
+                  }}
+                  values={values}
+                />
+              </div>
+            </details>
+          );
+        })}
         {entries.length === 0 ? (
           <div className="rounded-xl border border-dashed py-10 text-center text-muted-foreground text-sm">
             暂无{kind === "models" ? "自定义模型" : " MCP 服务器"}

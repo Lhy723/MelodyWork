@@ -12,6 +12,7 @@ import type {
   MelodyExtension,
   MarketplaceSource,
   PluginDetails,
+  SkillDetails,
 } from "@/domain/config";
 import type {
   GitBranch,
@@ -23,6 +24,7 @@ import type {
   PermissionDecision,
   PermissionRule,
 } from "@/domain/permission";
+import type { UsageStatistics } from "@/domain/statistics";
 import type {
   ProjectRecord,
   SessionRecord,
@@ -48,6 +50,34 @@ export interface AppUpdateStatus {
 
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export const getUsageStatistics = async (): Promise<UsageStatistics> => {
+  if (!isTauriRuntime()) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return {
+      totalTokens: 0,
+      peakTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedReadTokens: 0,
+      reasoningTokens: 0,
+      modelCalls: 0,
+      apiDurationMs: 0,
+      usageIncompleteTasks: 0,
+      longestTaskMs: 0,
+      currentStreakDays: 0,
+      longestStreakDays: 0,
+      totalTasks: 0,
+      quickModeTasks: 0,
+      activity: [],
+      reasoningEfforts: [],
+      plugins: [],
+      usedSkills: 0,
+    };
+  }
+  return invoke<UsageStatistics>("get_usage_statistics");
+};
 
 export const openExternalUrl = async (candidate: string): Promise<void> => {
   const url = new URL(candidate);
@@ -545,6 +575,7 @@ export const listMelodyExtensions = async (
           scope: "user",
           provider: "melody",
           managed: false,
+          enabled: true,
         },
         {
           kind: "plugins",
@@ -553,6 +584,7 @@ export const listMelodyExtensions = async (
           scope: "project",
           provider: "melody",
           managed: false,
+          enabled: true,
         },
         {
           kind: "hooks",
@@ -561,6 +593,7 @@ export const listMelodyExtensions = async (
           scope: "project",
           provider: "melody",
           managed: false,
+          enabled: true,
         },
       ];
 
@@ -624,12 +657,29 @@ export const installMelodyPlugin = async (
         message: `已从 ${source} 安装插件。`,
       };
 
-export const listInstalledMelodyPlugins = async (): Promise<
+export const listInstalledMelodyPlugins = async (cwd: string): Promise<
   MelodyExtension[]
 > =>
   isTauriRuntime()
-    ? invoke<MelodyExtension[]>("list_installed_melody_plugins")
+    ? invoke<MelodyExtension[]>("list_installed_melody_plugins", { cwd })
     : [];
+
+export const setMelodyExtensionEnabled = async (
+  cwd: string,
+  extension: MelodyExtension,
+  enabled: boolean,
+): Promise<void> => {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  await invoke("set_melody_extension_enabled", {
+    scope: extension.scope,
+    cwd,
+    kind: extension.kind,
+    name: extension.name,
+    enabled,
+  });
+};
 
 export const uninstallMelodyPlugin = async (
   name: string,
@@ -664,6 +714,40 @@ export const getMelodyPluginDetails = async (
           { kind: "lsps", items: [] },
         ],
       };
+
+export const getMelodySkillDetails = async (
+  cwd: string,
+  skill: MelodyExtension,
+): Promise<SkillDetails> =>
+  isTauriRuntime()
+    ? invoke<SkillDetails>("get_melody_skill_details", {
+        cwd,
+        name: skill.name,
+        path: skill.path,
+      })
+    : {
+        name: skill.name,
+        description: "检查代码质量并给出可执行的改进建议。",
+        license: "MIT",
+        compatibility: "Melody 0.0.1+",
+        path: skill.path,
+        skillPath: `${skill.path}/SKILL.md`,
+        files: ["SKILL.md", "references/checklist.md"],
+        content:
+          "---\nname: code-review\ndescription: 检查代码质量并给出可执行的改进建议。\n---\n\n# Code Review\n\n读取变更并检查正确性、风险和测试覆盖。",
+      };
+
+export const deleteMelodySkill = async (
+  cwd: string,
+  skill: MelodyExtension,
+): Promise<string> =>
+  isTauriRuntime()
+    ? invoke<string>("delete_melody_skill", {
+        cwd,
+        name: skill.name,
+        path: skill.path,
+      })
+    : `已删除技能 ${skill.name}。`;
 
 export const listPermissionRules = async (
   projectId: string,

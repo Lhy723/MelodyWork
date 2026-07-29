@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   AcpEnvelope,
   AcpSessionPhase,
+  AgentBillingUsage,
   AgentContextUsage,
   AgentModelOption,
   AgentPlanDecision,
@@ -269,6 +270,56 @@ const settleStreamingEntries = (timeline: TimelineEntry[]): TimelineEntry[] => {
   return timeline.map((entry) =>
     (entry.kind === "message" || entry.kind === "thought") && entry.streaming
       ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
+      : entry,
+  );
+};
+
+const stampLatestTurnAnalytics = (
+  timeline: TimelineEntry[],
+  usage: AgentContextUsage | undefined,
+  billingUsage: AgentBillingUsage | undefined,
+  reasoningEffort: string | undefined,
+  sessionModeId: string | undefined,
+): TimelineEntry[] => {
+  const settled = settleStreamingEntries(timeline);
+  let lastUserIndex = -1;
+  let assistantIndex = -1;
+  for (let index = settled.length - 1; index >= 0; index -= 1) {
+    const entry = settled[index];
+    if (
+      assistantIndex < 0 &&
+      entry?.kind === "message" &&
+      entry.role === "assistant"
+    ) {
+      assistantIndex = index;
+    }
+    if (entry?.kind === "message" && entry.role === "user") {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  if (assistantIndex <= lastUserIndex) {
+    assistantIndex = -1;
+  }
+  if (assistantIndex < 0) {
+    return settled;
+  }
+  return settled.map((entry, index) =>
+    index === assistantIndex && entry.kind === "message"
+      ? {
+          ...entry,
+          ...(usage
+            ? {
+                tokenUsage: {
+                  usedTokens: usage.usedTokens,
+                  maxTokens: usage.maxTokens,
+                },
+              }
+            : {}),
+          ...(billingUsage ? { billingUsage } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+          ...(sessionModeId ? { sessionModeId } : {}),
+        }
       : entry,
   );
 };
@@ -699,6 +750,46 @@ const contextUsageFromResult = (
   return undefined;
 };
 
+const billingUsageValue = (
+  value: Record<string, unknown> | undefined,
+): AgentBillingUsage | undefined => {
+  const inputTokens = numberValue(value?.inputTokens);
+  const outputTokens = numberValue(value?.outputTokens);
+  if (
+    inputTokens === undefined ||
+    outputTokens === undefined ||
+    inputTokens < 0 ||
+    outputTokens < 0
+  ) {
+    return undefined;
+  }
+  const cachedReadTokens = numberValue(value?.cachedReadTokens) ?? 0;
+  const reasoningTokens = numberValue(value?.reasoningTokens) ?? 0;
+  const modelCalls = numberValue(value?.modelCalls) ?? 0;
+  const apiDurationMs = numberValue(value?.apiDurationMs) ?? 0;
+  const costUsdTicks = numberValue(value?.costUsdTicks);
+  return {
+    inputTokens,
+    outputTokens,
+    cachedReadTokens: Math.max(0, cachedReadTokens),
+    reasoningTokens: Math.max(0, reasoningTokens),
+    modelCalls: Math.max(0, modelCalls),
+    apiDurationMs: Math.max(0, apiDurationMs),
+    usageIsIncomplete: value?.usageIsIncomplete === true,
+    costIsPartial: value?.costIsPartial === true,
+    ...(costUsdTicks !== undefined && costUsdTicks >= 0
+      ? { costUsdTicks }
+      : {}),
+  };
+};
+
+const billingUsageFromResult = (
+  result: Record<string, unknown> | undefined,
+): AgentBillingUsage | undefined => {
+  const meta = objectValue(result?._meta);
+  return billingUsageValue(objectValue(meta?.usage));
+};
+
 const contextUsageForModel = (
   models: AgentModelOption[],
   modelId: string | undefined,
@@ -795,6 +886,7 @@ const applySessionUpdate = (
   }
 
   if (updateType === "turn_completed") {
+    const billingUsage = billingUsageValue(objectValue(update?.usage));
     const stopReason =
       stringValue(update?.stopReason) ??
       stringValue(update?.stop_reason);
@@ -804,11 +896,25 @@ const applySessionUpdate = (
     if (stopReason === "error") {
       const failure = detail ?? "本轮 Melody 对话发生错误。";
       return {
-        timeline: appendAgentError(timeline, failure),
+        timeline: stampLatestTurnAnalytics(
+          appendAgentError(timeline, failure),
+          undefined,
+          billingUsage,
+          undefined,
+          undefined,
+        ),
         error: failure,
       };
     }
-    return { timeline: settleStreamingEntries(timeline) };
+    return {
+      timeline: stampLatestTurnAnalytics(
+        timeline,
+        undefined,
+        billingUsage,
+        undefined,
+        undefined,
+      ),
+    };
   }
 
   if (updateType === "tool_call" || updateType === "tool_call_update") {
@@ -1412,6 +1518,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           message.result,
           get().backgroundContextUsage[promptSessionId],
         );
+        const promptBillingUsage = billingUsageFromResult(message.result);
         const promptError = message.error
           ? errorMessage(message, "Melody 请求失败")
           : undefined;
@@ -1429,8 +1536,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
                   state.backgroundTimelines[promptSessionId] ?? [],
                   promptError,
                 )
-              : settleStreamingEntries(
+              : stampLatestTurnAnalytics(
                   state.backgroundTimelines[promptSessionId] ?? [],
+                  promptUsage,
+                  promptBillingUsage,
+                  undefined,
+                  undefined,
                 ),
           },
           backgroundContextUsage: promptUsage
@@ -1454,6 +1565,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         message.result,
         get().contextUsage,
       );
+      const promptBillingUsage = billingUsageFromResult(message.result);
       set((state) => ({
         runningSessions: pendingPrompt
           ? {
@@ -1468,7 +1580,13 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           : state.status,
         timeline: promptError
           ? appendAgentError(state.timeline, promptError)
-          : settleStreamingEntries(state.timeline),
+          : stampLatestTurnAnalytics(
+              state.timeline,
+              promptUsage,
+              promptBillingUsage,
+              state.selectedReasoningEffort,
+              state.selectedSessionModeId,
+            ),
         ...(promptUsage ? { contextUsage: promptUsage } : {}),
       }));
       return;
@@ -1702,6 +1820,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           kind: "message",
           role: "user",
           content: timelineContent,
+          startedAt: Date.now(),
           attachments:
             attachments.length > 0
               ? timelineAttachments(attachments)

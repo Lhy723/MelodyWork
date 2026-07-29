@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  ChartNoAxesCombinedIcon,
   ChevronRightIcon,
   CodeXmlIcon,
   PuzzleIcon,
@@ -10,10 +11,18 @@ import {
   Trash2Icon,
   WebhookIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import type {
   MelodyConfigDocument,
   MelodyConfigPatch,
@@ -29,6 +38,7 @@ import {
   listMelodyExtensions,
   listPermissionRules,
   readMelodyConfig,
+  setMelodyExtensionEnabled,
   updateMelodyConfig,
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
@@ -40,6 +50,13 @@ import {
 import { MarketplaceSettings } from "./marketplace-settings";
 import { PluginInstaller } from "./plugin-installer";
 import { PluginDetailsView } from "./plugin-details";
+import { SkillDetailsView } from "./skill-details";
+
+const StatisticsPage = lazy(() =>
+  import("./statistics-page").then((module) => ({
+    default: module.StatisticsPage,
+  })),
+);
 
 interface SettingsWorkspaceProps {
   cwd: string;
@@ -51,6 +68,7 @@ interface SettingsWorkspaceProps {
 
 export type SettingsPage =
   | "configuration"
+  | "statistics"
   | "skills"
   | "plugins"
   | "hooks"
@@ -93,6 +111,9 @@ export function SettingsWorkspace({
   >({});
   const [extensions, setExtensions] = useState<MelodyExtension[]>([]);
   const [selectedPlugin, setSelectedPlugin] = useState<MelodyExtension>();
+  const [togglingExtensions, setTogglingExtensions] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [rules, setRules] = useState<PermissionRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -152,7 +173,7 @@ export function SettingsWorkspace({
     try {
       const [discovered, installed] = await Promise.all([
         listMelodyExtensions(cwd),
-        page === "plugins" ? listInstalledMelodyPlugins() : [],
+        page === "plugins" ? listInstalledMelodyPlugins(cwd) : [],
       ]);
       const merged = [...installed, ...discovered].filter(
         (extension, index, all) =>
@@ -209,6 +230,44 @@ export function SettingsWorkspace({
       setRules((current) => current.filter((rule) => rule.id !== id));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const toggleExtension = async (
+    extension: MelodyExtension,
+    enabled: boolean,
+  ) => {
+    const key = `${extension.scope}:${extension.kind}:${extension.path}`;
+    setError(undefined);
+    setTogglingExtensions((current) => new Set(current).add(key));
+    setExtensions((current) =>
+      current.map((item) =>
+        item.path === extension.path &&
+        item.scope === extension.scope &&
+        item.kind === extension.kind
+          ? { ...item, enabled }
+          : item,
+      ),
+    );
+    try {
+      await setMelodyExtensionEnabled(cwd, extension, enabled);
+    } catch (reason) {
+      setExtensions((current) =>
+        current.map((item) =>
+          item.path === extension.path &&
+          item.scope === extension.scope &&
+          item.kind === extension.kind
+            ? { ...item, enabled: extension.enabled }
+            : item,
+        ),
+      );
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setTogglingExtensions((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -362,6 +421,23 @@ export function SettingsWorkspace({
       <div className="flex min-h-0 flex-1">
         <aside className="w-56 shrink-0 overflow-y-auto border-r px-3 py-4">
           <nav aria-label="设置分类">
+            <button
+              aria-current={page === "statistics" ? "page" : undefined}
+              className={cn(
+                "mb-4 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                page === "statistics"
+                  ? "bg-[#eff0f0] text-foreground dark:bg-muted"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              onClick={() => {
+                setPage("statistics");
+                setSelectedPlugin(undefined);
+              }}
+              type="button"
+            >
+              <ChartNoAxesCombinedIcon className="size-3.5" />
+              统计
+            </button>
             <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground">
               <CodeXmlIcon className="size-3.5" />
               <p className="font-medium text-xs">配置</p>
@@ -476,7 +552,17 @@ export function SettingsWorkspace({
           </nav>
         </aside>
 
-        {page === "configuration" ? (
+        {page === "statistics" ? (
+          <Suspense
+            fallback={
+              <p className="min-w-0 flex-1 p-8 text-muted-foreground text-sm">
+                正在加载统计…
+              </p>
+            }
+          >
+            <StatisticsPage cwd={cwd} />
+          </Suspense>
+        ) : page === "configuration" ? (
           <section
             className="motion-view-enter flex min-w-0 flex-1 flex-col"
             key="configuration"
@@ -574,6 +660,16 @@ export function SettingsWorkspace({
                   }}
                   plugin={selectedPlugin}
                 />
+              ) : extensionKind === "skills" && selectedPlugin ? (
+                <SkillDetailsView
+                  cwd={cwd}
+                  onBack={() => setSelectedPlugin(undefined)}
+                  onDeleted={async () => {
+                    setSelectedPlugin(undefined);
+                    await loadExtensions();
+                  }}
+                  skill={selectedPlugin}
+                />
               ) : (
                 <>
               <div className="flex items-start gap-3">
@@ -608,47 +704,70 @@ export function SettingsWorkspace({
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {visibleExtensions.map((item, index) => (
-                  <button
-                    className={cn(
-                      "motion-list-item min-w-0 rounded-xl border bg-card px-4 py-3 text-left",
-                      extensionKind === "plugins" &&
-                        "transition-colors hover:bg-muted/50",
-                    )}
-                    disabled={extensionKind !== "plugins"}
-                    key={`${item.scope}:${item.path}`}
-                    onClick={() => setSelectedPlugin(item)}
-                    style={{
-                      animationDelay: `${Math.min(index, 6) * 24}ms`,
-                    }}
-                    title={item.path}
-                    type="button"
-                  >
-                    <div className="flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate font-medium text-sm">
-                        {item.name}
-                      </p>
-                      {extensionKind === "plugins" ? (
-                        <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+                {visibleExtensions.map((item, index) => {
+                  const toggleKey = `${item.scope}:${item.kind}:${item.path}`;
+                  const canToggle =
+                    extensionKind === "plugins" ||
+                    extensionKind === "skills";
+                  return (
+                    <article
+                      className={cn(
+                        "motion-list-item flex min-w-0 items-start gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-colors",
+                        !item.enabled && "bg-muted/30 text-muted-foreground",
+                      )}
+                      key={`${item.scope}:${item.path}`}
+                      style={{
+                        animationDelay: `${Math.min(index, 6) * 24}ms`,
+                      }}
+                      title={item.path}
+                    >
+                      <button
+                        className="min-w-0 flex-1 text-left"
+                        disabled={!canToggle}
+                        onClick={() => setSelectedPlugin(item)}
+                        type="button"
+                      >
+                        <div className="flex items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate font-medium text-sm">
+                            {item.name}
+                          </p>
+                          {canToggle ? (
+                            <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+                          ) : null}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <Badge variant="outline">
+                            {item.scope === "user" ? "用户" : "项目"}
+                          </Badge>
+                          {extensionKind === "plugins" ? (
+                            <Badge variant="secondary">
+                              {item.provider === "claude"
+                                ? "Claude Code"
+                                : "Melody"}
+                            </Badge>
+                          ) : null}
+                          {!item.enabled ? (
+                            <Badge variant="secondary">已停用</Badge>
+                          ) : null}
+                          <p className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+                            {item.path}
+                          </p>
+                        </div>
+                      </button>
+                      {canToggle ? (
+                        <Switch
+                          aria-label={`${item.enabled ? "停用" : "启用"}${kindLabel[extensionKind]} ${item.name}`}
+                          checked={item.enabled}
+                          className="mt-0.5"
+                          disabled={togglingExtensions.has(toggleKey)}
+                          onCheckedChange={(checked) =>
+                            void toggleExtension(item, checked)
+                          }
+                        />
                       ) : null}
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <Badge variant="outline">
-                        {item.scope === "user" ? "用户" : "项目"}
-                      </Badge>
-                      {extensionKind === "plugins" ? (
-                        <Badge variant="secondary">
-                          {item.provider === "claude"
-                            ? "Claude Code"
-                            : "Melody"}
-                        </Badge>
-                      ) : null}
-                      <p className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-                        {item.path}
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                    </article>
+                  );
+                })}
               </div>
               {!loading && visibleExtensions.length === 0 ? (
                 <div className="motion-view-enter mt-6 rounded-2xl border border-dashed py-16 text-center">

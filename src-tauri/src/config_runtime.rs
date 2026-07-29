@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -40,6 +41,7 @@ pub struct MelodyExtension {
     scope: String,
     provider: String,
     managed: bool,
+    enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -86,6 +88,22 @@ pub struct PluginDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     manifest_path: Option<String>,
     components: Vec<PluginComponentGroup>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDetails {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility: Option<String>,
+    path: String,
+    skill_path: String,
+    files: Vec<String>,
+    content: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -285,6 +303,7 @@ fn scan_kind(
     scope: &str,
     kind: &str,
     provider: &str,
+    disabled: &HashSet<String>,
     extensions: &mut Vec<MelodyExtension>,
 ) {
     let directory = root.join(kind);
@@ -295,6 +314,8 @@ fn scan_kind(
         let path = entry.path();
         let valid = if kind == "hooks" {
             path.is_file() || path.is_dir()
+        } else if kind == "skills" {
+            path.is_dir() && path.join("SKILL.md").is_file()
         } else {
             path.is_dir()
         };
@@ -305,6 +326,7 @@ fn scan_kind(
         if name.starts_with('.') {
             continue;
         }
+        let enabled = !disabled.contains(&name);
         extensions.push(MelodyExtension {
             kind: kind.to_string(),
             name,
@@ -312,8 +334,74 @@ fn scan_kind(
             scope: scope.to_string(),
             provider: provider.to_string(),
             managed: false,
+            enabled,
         });
     }
+}
+
+fn extension_config_names(
+    scope: &str,
+    cwd: &str,
+    kind: &str,
+    field: &str,
+) -> Result<HashSet<String>, String> {
+    let document = read_melody_config(scope.to_string(), cwd.to_string())?;
+    Ok(document
+        .values
+        .get(kind)
+        .and_then(serde_json::Value::as_object)
+        .and_then(|section| section.get(field))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect())
+}
+
+#[tauri::command]
+pub fn set_melody_extension_enabled(
+    scope: String,
+    cwd: String,
+    kind: String,
+    name: String,
+    enabled: bool,
+) -> Result<MelodyConfigDocument, String> {
+    if !matches!(kind.as_str(), "skills" | "plugins") {
+        return Err("Only skills and plugins can be enabled or disabled".to_string());
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Extension name cannot be empty".to_string());
+    }
+    let mut disabled = extension_config_names(&scope, &cwd, &kind, "disabled")?;
+    let mut patches = Vec::with_capacity(if kind == "plugins" { 2 } else { 1 });
+    if enabled {
+        disabled.remove(name);
+    } else {
+        disabled.insert(name.to_string());
+    }
+    let mut disabled = disabled.into_iter().collect::<Vec<_>>();
+    disabled.sort();
+    patches.push(MelodyConfigPatch {
+        path: vec![kind.clone(), "disabled".to_string()],
+        value: serde_json::json!(disabled),
+    });
+    if kind == "plugins" {
+        let mut explicitly_enabled = extension_config_names(&scope, &cwd, &kind, "enabled")?;
+        if enabled {
+            explicitly_enabled.insert(name.to_string());
+        } else {
+            explicitly_enabled.remove(name);
+        }
+        let mut explicitly_enabled = explicitly_enabled.into_iter().collect::<Vec<_>>();
+        explicitly_enabled.sort();
+        patches.push(MelodyConfigPatch {
+            path: vec![kind, "enabled".to_string()],
+            value: serde_json::json!(explicitly_enabled),
+        });
+    }
+    update_melody_config(scope, cwd, patches)
 }
 
 #[tauri::command]
@@ -323,13 +411,26 @@ pub fn list_melody_extensions(cwd: String) -> Result<Vec<MelodyExtension>, Strin
     let mut extensions = Vec::new();
     for (scope, root) in [("user", user_root), ("project", project_root)] {
         for kind in ["skills", "plugins", "hooks"] {
-            scan_kind(&root, scope, kind, "melody", &mut extensions);
+            let disabled = if matches!(kind, "skills" | "plugins") {
+                extension_config_names(scope, &cwd, kind, "disabled")?
+            } else {
+                HashSet::new()
+            };
+            scan_kind(&root, scope, kind, "melody", &disabled, &mut extensions);
         }
     }
     let user_claude_root = user_home()?.join(".claude");
     let project_claude_root = PathBuf::from(&cwd).join(".claude");
     for (scope, root) in [("user", user_claude_root), ("project", project_claude_root)] {
-        scan_kind(&root, scope, "plugins", "claude", &mut extensions);
+        let disabled = extension_config_names(scope, &cwd, "plugins", "disabled")?;
+        scan_kind(
+            &root,
+            scope,
+            "plugins",
+            "claude",
+            &disabled,
+            &mut extensions,
+        );
     }
     extensions.sort_by(|left, right| {
         left.kind
@@ -640,7 +741,10 @@ pub async fn install_melody_plugin(
 }
 
 #[tauri::command]
-pub async fn list_installed_melody_plugins(app: AppHandle) -> Result<Vec<MelodyExtension>, String> {
+pub async fn list_installed_melody_plugins(
+    app: AppHandle,
+    cwd: String,
+) -> Result<Vec<MelodyExtension>, String> {
     let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
         "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
             .to_string()
@@ -664,16 +768,21 @@ pub async fn list_installed_melody_plugins(app: AppHandle) -> Result<Vec<MelodyE
     }
     let entries: Vec<InstalledPluginEntry> = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("Melody returned an invalid plugin list: {error}"))?;
+    let disabled = extension_config_names("user", &cwd, "plugins", "disabled")?;
     Ok(entries
         .into_iter()
         .filter(|entry| entry.status == "installed")
-        .map(|entry| MelodyExtension {
-            kind: "plugins".to_string(),
-            name: entry.name,
-            path: entry.path.to_string_lossy().into_owned(),
-            scope: "user".to_string(),
-            provider: "melody".to_string(),
-            managed: true,
+        .map(|entry| {
+            let enabled = !disabled.contains(&entry.name);
+            MelodyExtension {
+                kind: "plugins".to_string(),
+                name: entry.name,
+                path: entry.path.to_string_lossy().into_owned(),
+                scope: "user".to_string(),
+                provider: "melody".to_string(),
+                managed: true,
+                enabled,
+            }
         })
         .collect())
 }
@@ -1038,6 +1147,136 @@ pub fn get_melody_plugin_details(
     Ok(plugin_details_from_directory(&root, &name))
 }
 
+fn skill_frontmatter_value(content: &str, key: &str) -> Option<String> {
+    let normalized = content.replace("\r\n", "\n");
+    let frontmatter = normalized.strip_prefix("---\n")?.split_once("\n---\n")?.0;
+    frontmatter.lines().find_map(|line| {
+        let (candidate, value) = line.split_once(':')?;
+        if candidate.trim() != key {
+            return None;
+        }
+        let value = value.trim();
+        if value.is_empty() || matches!(value, "|" | ">") {
+            return None;
+        }
+        Some(
+            value
+                .trim_matches(|character| character == '"' || character == '\'')
+                .to_string(),
+        )
+    })
+}
+
+fn collect_skill_files(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > 6 || files.len() >= 256 {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push((path, depth + 1));
+            } else if file_type.is_file()
+                && let Ok(relative) = path.strip_prefix(root)
+            {
+                files.push(relative.to_string_lossy().into_owned());
+            }
+        }
+    }
+    files.sort();
+    files.truncate(256);
+    files
+}
+
+fn skill_details_from_directory(root: &Path, expected_name: &str) -> Result<SkillDetails, String> {
+    let skill_path = root.join("SKILL.md");
+    let metadata = skill_path
+        .metadata()
+        .map_err(|error| format!("Skill definition is unavailable: {error}"))?;
+    if !metadata.is_file() {
+        return Err("Skill directory does not contain SKILL.md".to_string());
+    }
+    if metadata.len() > MAX_CONFIG_BYTES {
+        return Err("SKILL.md is larger than the 1 MB details limit".to_string());
+    }
+    let content = fs::read_to_string(&skill_path)
+        .map_err(|error| format!("SKILL.md is not valid UTF-8 text: {error}"))?;
+    Ok(SkillDetails {
+        name: skill_frontmatter_value(&content, "name")
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| expected_name.to_string()),
+        description: skill_frontmatter_value(&content, "description"),
+        license: skill_frontmatter_value(&content, "license"),
+        compatibility: skill_frontmatter_value(&content, "compatibility"),
+        path: root.to_string_lossy().into_owned(),
+        skill_path: skill_path.to_string_lossy().into_owned(),
+        files: collect_skill_files(root),
+        content,
+    })
+}
+
+fn allowed_skill_path_in_roots(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("Skill path is unavailable: {error}"))?;
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| "Skill path has no parent directory".to_string())?;
+    let allowed = roots.iter().any(|root| {
+        root.canonicalize()
+            .ok()
+            .is_some_and(|root| parent == root && canonical.starts_with(root))
+    });
+    if !allowed {
+        return Err("Skill path is outside the allowed Melody skill directories".to_string());
+    }
+    if !canonical.join("SKILL.md").is_file() {
+        return Err("Skill directory does not contain SKILL.md".to_string());
+    }
+    Ok(canonical)
+}
+
+fn allowed_skill_path(cwd: &str, path: &Path) -> Result<PathBuf, String> {
+    let workspace = PathBuf::from(cwd)
+        .canonicalize()
+        .map_err(|error| format!("Workspace is unavailable: {error}"))?;
+    allowed_skill_path_in_roots(
+        path,
+        &[
+            melody_home()?.join("skills"),
+            workspace.join(".melody/skills"),
+        ],
+    )
+}
+
+#[tauri::command]
+pub fn get_melody_skill_details(
+    cwd: String,
+    name: String,
+    path: String,
+) -> Result<SkillDetails, String> {
+    let root = allowed_skill_path(&cwd, Path::new(&path))?;
+    skill_details_from_directory(&root, &name)
+}
+
+#[tauri::command]
+pub fn delete_melody_skill(cwd: String, name: String, path: String) -> Result<String, String> {
+    let root = allowed_skill_path(&cwd, Path::new(&path))?;
+    fs::remove_dir_all(&root).map_err(|error| format!("Failed to delete skill: {error}"))?;
+    Ok(format!("Skill {} was deleted", name.trim()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,11 +1287,13 @@ mod tests {
         fs::create_dir_all(root.join("skills/review")).unwrap();
         fs::create_dir_all(root.join("plugins/git-tools")).unwrap();
         fs::create_dir_all(root.join("hooks")).unwrap();
+        fs::write(root.join("skills/review/SKILL.md"), "# Review").unwrap();
         fs::write(root.join("hooks/after-tool.sh"), "#!/bin/sh").unwrap();
 
         let mut extensions = Vec::new();
+        let disabled = HashSet::new();
         for kind in ["skills", "plugins", "hooks"] {
-            scan_kind(&root, "project", kind, "melody", &mut extensions);
+            scan_kind(&root, "project", kind, "melody", &disabled, &mut extensions);
         }
 
         assert_eq!(extensions.len(), 3);
@@ -1069,11 +1310,20 @@ mod tests {
         fs::create_dir_all(root.join("plugins/review-tools")).unwrap();
 
         let mut extensions = Vec::new();
-        scan_kind(&root, "project", "plugins", "claude", &mut extensions);
+        let disabled = HashSet::from(["review-tools".to_string()]);
+        scan_kind(
+            &root,
+            "project",
+            "plugins",
+            "claude",
+            &disabled,
+            &mut extensions,
+        );
 
         assert_eq!(extensions.len(), 1);
         assert_eq!(extensions[0].name, "review-tools");
         assert_eq!(extensions[0].provider, "claude");
+        assert!(!extensions[0].enabled);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1174,6 +1424,43 @@ path = "~/dev/plugins"
         assert_eq!(details.components[3].items, ["PreToolUse"]);
         assert_eq!(details.components[4].items, ["github"]);
         assert_eq!(details.components[5].items, ["rust"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_skill_metadata_content_and_files() {
+        let root = env::temp_dir().join(format!("melody-work-skill-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("references")).unwrap();
+        fs::write(
+            root.join("SKILL.md"),
+            "---\nname: review\ndescription: Review code safely\nlicense: MIT\ncompatibility: Melody 0.0.1+\n---\n\n# Review\n",
+        )
+        .unwrap();
+        fs::write(root.join("references/checklist.md"), "# Checklist").unwrap();
+
+        let details = skill_details_from_directory(&root, "fallback").unwrap();
+
+        assert_eq!(details.name, "review");
+        assert_eq!(details.description.as_deref(), Some("Review code safely"));
+        assert_eq!(details.license.as_deref(), Some("MIT"));
+        assert_eq!(details.compatibility.as_deref(), Some("Melody 0.0.1+"));
+        assert!(details.content.contains("# Review"));
+        assert_eq!(details.files, ["SKILL.md", "references/checklist.md"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn skill_paths_must_be_direct_children_of_an_allowed_root() {
+        let root = env::temp_dir().join(format!("melody-work-skills-{}", uuid::Uuid::new_v4()));
+        let allowed = root.join("skills");
+        let valid = allowed.join("review");
+        let nested = valid.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(valid.join("SKILL.md"), "# Review").unwrap();
+        fs::write(nested.join("SKILL.md"), "# Nested").unwrap();
+
+        assert!(allowed_skill_path_in_roots(&valid, &[allowed.clone()]).is_ok());
+        assert!(allowed_skill_path_in_roots(&nested, &[allowed]).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -134,7 +134,7 @@ export function AppSidebar({
       data-app-sidebar
       style={{ width: sidebarWidth }}
     >
-      <div className="h-6 shrink-0" data-tauri-drag-region />
+      <div className="h-8 shrink-0" data-tauri-drag-region />
 
       <div
         className="flex h-10 shrink-0 items-center gap-1.5 px-1"
