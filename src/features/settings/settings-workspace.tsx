@@ -3,6 +3,7 @@ import {
   ChartNoAxesCombinedIcon,
   ChevronRightIcon,
   CodeXmlIcon,
+  InfoIcon,
   PuzzleIcon,
   RefreshCwIcon,
   SettingsIcon,
@@ -47,6 +48,7 @@ import {
   ConfigurationForm,
   getConfigurationNavigation,
 } from "./configuration-form";
+import { AboutPage } from "./about-page";
 import { MarketplaceSettings } from "./marketplace-settings";
 import { PluginInstaller } from "./plugin-installer";
 import { PluginDetailsView } from "./plugin-details";
@@ -72,7 +74,8 @@ export type SettingsPage =
   | "skills"
   | "plugins"
   | "hooks"
-  | "permissions";
+  | "permissions"
+  | "about";
 
 const kindLabel: Record<MelodyExtensionKind, string> = {
   skills: "技能",
@@ -549,6 +552,27 @@ export function SettingsWorkspace({
               <ShieldCheckIcon className="size-3.5" />
               权限
             </button>
+
+            <p className="mt-5 px-2 pb-1.5 font-medium text-muted-foreground text-xs">
+              关于
+            </p>
+            <button
+              aria-current={page === "about" ? "page" : undefined}
+              className={cn(
+                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                page === "about"
+                  ? "bg-[#eff0f0] text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              onClick={() => {
+                setPage("about");
+                setSelectedPlugin(undefined);
+              }}
+              type="button"
+            >
+              <InfoIcon className="size-3.5" />
+              关于 MelodyWork
+            </button>
           </nav>
         </aside>
 
@@ -643,6 +667,13 @@ export function SettingsWorkspace({
                 values={configValues}
               />
             )}
+          </section>
+        ) : page === "about" ? (
+          <section
+            className="motion-view-enter min-w-0 flex-1 overflow-y-auto"
+            key="about"
+          >
+            <AboutPage />
           </section>
         ) : extensionKind ? (
           <section
