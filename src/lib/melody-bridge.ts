@@ -11,6 +11,7 @@ import type {
   MelodyConfigValue,
   MelodyExtension,
   MarketplaceSource,
+  MarketplacePlugin,
   PluginDetails,
   SkillDetails,
 } from "@/domain/config";
@@ -529,12 +530,12 @@ export const readMelodyConfig = async (
       exists: scope === "user",
       content:
         scope === "user"
-          ? '[models]\ndefault = "melody-build"\n\n[mcp_servers.filesystem]\ncommand = "mcp-server-filesystem"\n'
+          ? '[models]\ndefault = "grok-4.5"\n\n[mcp_servers.filesystem]\ncommand = "mcp-server-filesystem"\n'
           : "# Project-specific Melody configuration\n",
       values:
         scope === "user"
           ? {
-              models: { default: "melody-build" },
+              models: { default: "grok-4.5" },
               mcp_servers: {
                 filesystem: { command: "mcp-server-filesystem" },
               },
@@ -679,6 +680,50 @@ export const installMelodyPlugin = async (
     : {
         source,
         message: `已从 ${source} 安装插件。`,
+      };
+
+export const scanMarketplacePlugins = async (
+  cwd: string,
+  refresh = false,
+): Promise<MarketplacePlugin[]> =>
+  isTauriRuntime()
+    ? invoke<MarketplacePlugin[]>("scan_marketplace_plugins", {
+        cwd,
+        refresh,
+      })
+    : [
+        {
+          name: "code-review",
+          marketplace: "xAI Official",
+          status: "installed",
+          installedVersion: "1.2.0",
+          skillCount: 1,
+          hasHooks: false,
+          hasAgents: true,
+          hasMcp: false,
+        },
+        {
+          name: "web-tools",
+          marketplace: "xAI Official",
+          status: "available",
+          version: "0.8.1",
+          description: "网页搜索与内容提取工具。",
+          skillCount: 2,
+          hasHooks: false,
+          hasAgents: false,
+          hasMcp: true,
+        },
+      ];
+
+export const updateMelodyPlugin = async (
+  cwd: string,
+  name: string,
+): Promise<PluginInstallResult> =>
+  isTauriRuntime()
+    ? invoke<PluginInstallResult>("update_melody_plugin", { cwd, name })
+    : {
+        source: name,
+        message: `${name} 已是最新版本。`,
       };
 
 export const listInstalledMelodyPlugins = async (cwd: string): Promise<

@@ -9,6 +9,7 @@ import {
 import { useEffect, useState } from "react";
 
 import appPackage from "../../../package.json";
+import appIcon from "../../../src-tauri/icons/128x128.png";
 import { Button } from "@/components/ui/button";
 import {
   checkAppUpdate,
@@ -116,9 +117,11 @@ export function AboutPage() {
   return (
     <div className="mx-auto max-w-2xl p-8">
       <div className="flex flex-col items-center text-center">
-        <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10">
-          <span className="font-bold text-primary text-3xl">M</span>
-        </div>
+        <img
+          alt="MelodyWork"
+          className="size-20 rounded-2xl object-cover ring-1 ring-foreground/10"
+          src={appIcon}
+        />
         <h2 className="mt-5 font-semibold text-2xl">MelodyWork</h2>
         <p className="mt-1 text-muted-foreground text-sm">
           对话优先的 Melody Build 桌面客户端

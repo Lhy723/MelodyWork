@@ -10,8 +10,9 @@ use config_runtime::{
     add_marketplace_source, delete_marketplace_source, delete_melody_skill,
     get_melody_plugin_details, get_melody_skill_details, install_melody_plugin,
     list_installed_melody_plugins, list_marketplace_sources, list_melody_extensions,
-    read_melody_config, save_marketplace_source, set_melody_extension_enabled,
-    uninstall_melody_plugin, update_melody_config,
+    read_melody_config, save_marketplace_source, scan_marketplace_plugins,
+    set_melody_extension_enabled, uninstall_melody_plugin, update_melody_config,
+    update_melody_plugin,
 };
 use database::{
     AppDatabase, create_session, delete_permission_rule, delete_session, find_permission_rule,
@@ -82,6 +83,8 @@ pub fn run() {
             save_marketplace_source,
             delete_marketplace_source,
             install_melody_plugin,
+            scan_marketplace_plugins,
+            update_melody_plugin,
             list_installed_melody_plugins,
             get_melody_plugin_details,
             get_melody_skill_details,

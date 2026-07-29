@@ -6,6 +6,7 @@ import {
 import {
   useEffect,
   useCallback,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -14,6 +15,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
+import type { AgentSubagent } from "@/domain/acp";
 import { AppSidebar } from "@/features/sessions/app-sidebar";
 import { WindowNavigationControls } from "@/features/sessions/window-navigation-controls";
 import {
@@ -41,6 +43,7 @@ import { cn } from "@/lib/utils";
 
 import { AgentComposer } from "./agent-composer";
 import { AgentTimeline } from "./agent-timeline";
+import { SubagentTray } from "./subagent-tray";
 
 const statusLabel = {
   stopped: "预览",
@@ -112,6 +115,37 @@ interface SessionNavigationHistory {
   index: number;
 }
 
+const subagentsForSession = (
+  subagents: Record<string, AgentSubagent>,
+  rootSessionId?: string,
+) => {
+  if (!rootSessionId) {
+    return [];
+  }
+  const descendants: AgentSubagent[] = [];
+  const pending = [rootSessionId];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const parentSessionId = pending.shift();
+    if (!parentSessionId || visited.has(parentSessionId)) {
+      continue;
+    }
+    visited.add(parentSessionId);
+    for (const subagent of Object.values(subagents)) {
+      if (subagent.parentSessionId === parentSessionId) {
+        descendants.push(subagent);
+        pending.push(subagent.childSessionId);
+      }
+    }
+  }
+  return descendants.sort(
+    (left, right) =>
+      Number(left.status !== "running") -
+        Number(right.status !== "running") ||
+      right.updatedAt - left.updatedAt,
+  );
+};
+
 const sessionStatusLabel = (
   agentPhase: keyof typeof statusLabel,
   sessionPhase: ReturnType<typeof useAgentStore.getState>["acpPhase"],
@@ -156,6 +190,7 @@ export function AgentWorkspace() {
   const cwd = activeSession?.cwd ?? activeProject?.path ?? ".";
   const status = useAgentStore((state) => state.status);
   const acpPhase = useAgentStore((state) => state.acpPhase);
+  const acpSessionId = useAgentStore((state) => state.acpSessionId);
   const timeline = useAgentStore((state) => state.timeline);
   const chatStatus = useAgentStore((state) => state.chatStatus);
   const contextUsage = useAgentStore((state) => state.contextUsage);
@@ -179,6 +214,7 @@ export function AgentWorkspace() {
   );
   const permissionMode = useAgentStore((state) => state.permissionMode);
   const runningSessions = useAgentStore((state) => state.runningSessions);
+  const subagents = useAgentStore((state) => state.subagents);
   const submitPrompt = useAgentStore((state) => state.submitPrompt);
   const selectModel = useAgentStore((state) => state.selectModel);
   const selectReasoningEffort = useAgentStore(
@@ -235,6 +271,10 @@ export function AgentWorkspace() {
       ? status.message
       : undefined;
   const visibleError = workspaceError ?? agentError;
+  const visibleSubagents = useMemo(
+    () => subagentsForSession(subagents, acpSessionId),
+    [subagents, acpSessionId],
+  );
 
   useEffect(() => {
     void checkAppUpdate()
@@ -416,6 +456,18 @@ export function AgentWorkspace() {
         kind: "file",
         label: path.split("/").at(-1) ?? path,
         path,
+      }),
+    [openWorkspaceTab],
+  );
+
+  const openSubagent = useCallback(
+    (subagent: AgentSubagent) =>
+      openWorkspaceTab({
+        id: `subagent:${subagent.subagentId}`,
+        kind: "subagent",
+        label: subagent.description,
+        subagentId: subagent.subagentId,
+        childSessionId: subagent.childSessionId,
       }),
     [openWorkspaceTab],
   );
@@ -763,6 +815,10 @@ export function AgentWorkspace() {
               onOpenProjectReference={openProjectReference}
               projectRoot={activeProject?.path ?? cwd}
             />
+            <SubagentTray
+              onOpenSubagent={openSubagent}
+              subagents={visibleSubagents}
+            />
             <AgentComposer
               contextUsage={contextUsage}
               modelChanging={Boolean(pendingModelId)}
@@ -811,6 +867,7 @@ export function AgentWorkspace() {
               onCloseTab={closeWorkspaceTab}
               onNewTab={newWorkspaceToolTab}
               onOpenFile={openFilePreview}
+              onOpenProjectReference={openProjectReference}
               onRefreshGit={() => void git.refresh()}
               onResetWidth={() =>
                 updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
@@ -822,6 +879,7 @@ export function AgentWorkspace() {
               }
               onResizeStart={beginWorkspacePanelResize}
               root={activeProject?.path ?? cwd}
+              subagents={subagents}
               tabs={workspaceTabs}
             />
           </div>

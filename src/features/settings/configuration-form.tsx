@@ -1,12 +1,15 @@
 import {
   BotIcon,
   BrainCircuitIcon,
+  CheckIcon,
   ChevronRightIcon,
   CircleGaugeIcon,
   DatabaseIcon,
+  KeyRoundIcon,
   MonitorIcon,
   NetworkIcon,
   PlusIcon,
+  ServerIcon,
   Settings2Icon,
   ShieldIcon,
   Trash2Icon,
@@ -14,7 +17,16 @@ import {
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -24,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type { AgentModelOption } from "@/domain/acp";
 import type {
   MelodyConfigScope,
   MelodyConfigValue,
@@ -35,8 +48,82 @@ import {
 } from "@/stores/app-settings-store";
 
 type ConfigValues = Record<string, MelodyConfigValue>;
+type ConfigObject = Record<string, MelodyConfigValue>;
+
+const providerTemplates = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    description: "Responses API，使用 OPENAI_API_KEY。",
+    baseUrl: "https://api.openai.com/v1",
+    backend: "responses",
+    envKey: "OPENAI_API_KEY",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    description: "Messages API，使用 ANTHROPIC_API_KEY。",
+    baseUrl: "https://api.anthropic.com/v1",
+    backend: "messages",
+    envKey: "ANTHROPIC_API_KEY",
+  },
+  {
+    id: "compatible",
+    name: "OpenAI 兼容",
+    description: "适用于第三方网关和自托管服务。",
+    baseUrl: "",
+    backend: "chat_completions",
+    envKey: "",
+  },
+] as const;
+
+const inheritedModelFields = [
+  {
+    key: "temperature",
+    label: "温度",
+    description: "控制回复的随机性。",
+    fallback: 1,
+    min: 0,
+    max: 2,
+    step: 0.1,
+  },
+  {
+    key: "top_p",
+    label: "Top P",
+    description: "限制候选词的概率范围。",
+    fallback: 1,
+    min: 0,
+    max: 1,
+    step: 0.05,
+  },
+  {
+    key: "max_completion_tokens",
+    label: "最大输出 Token",
+    description: "限制单次回复的最大长度。",
+    fallback: 8192,
+    min: 1,
+    step: 1,
+  },
+  {
+    key: "max_retries",
+    label: "最大重试次数",
+    description: "请求失败后的自动重试上限。",
+    fallback: 8,
+    min: 0,
+    step: 1,
+  },
+  {
+    key: "inference_idle_timeout_secs",
+    label: "推理空闲超时",
+    description: "流式响应无新内容后等待的秒数。",
+    fallback: 600,
+    min: 1,
+    step: 1,
+  },
+] as const;
 
 interface ConfigurationFormProps {
+  availableModels: AgentModelOption[];
   sectionId: string;
   scope: MelodyConfigScope;
   values: ConfigValues;
@@ -68,6 +155,7 @@ interface SettingDefinition {
   max?: number;
   step?: number;
   options?: { label: string; value: string }[];
+  clearValue?: string;
   secret?: boolean;
   numberValues?: boolean;
 }
@@ -82,24 +170,16 @@ interface SettingSection {
 
 const userSections: SettingSection[] = [
   {
-    id: "model-defaults",
-    label: "模型默认值",
-    description: "更新、默认模型和生成行为。",
-    icon: Settings2Icon,
+    id: "models",
+    label: "模型",
+    description: "选择默认模型、调整生成行为并管理自定义模型。",
+    icon: BotIcon,
     settings: [
-      {
-        path: ["cli", "auto_update"],
-        label: "自动检查更新",
-        description: "启动 Melody 时检查并安装可用更新。",
-        kind: "boolean",
-        defaultValue: true,
-      },
       {
         path: ["models", "default"],
         label: "默认模型",
         description: "新会话默认使用的模型或自定义模型名称。",
         kind: "string",
-        defaultValue: "melody-build",
       },
       {
         path: ["models", "web_search"],
@@ -706,10 +786,20 @@ function SettingControl({
   }
 
   if (definition.kind === "select") {
+    const selectedValue =
+      typeof explicit === "string"
+        ? explicit
+        : definition.clearValue ??
+          (typeof value === "string" ? value : "");
     return (
       <Select
-        onValueChange={(next) => onChange(definition.path, next)}
-        value={typeof value === "string" ? value : ""}
+        onValueChange={(next) =>
+          onChange(
+            definition.path,
+            next === definition.clearValue ? null : next,
+          )
+        }
+        value={selectedValue}
       >
         <SelectTrigger className="w-44">
           <SelectValue placeholder="使用默认值" />
@@ -980,11 +1070,18 @@ function PreferenceSwitch<Key extends keyof AppSettings>({
   );
 }
 
-function ApplicationGeneralSettings() {
+function ApplicationGeneralSettings({
+  values,
+  onChange,
+}: {
+  values: ConfigValues;
+  onChange: ConfigurationFormProps["onChange"];
+}) {
   const popupShortcut = useAppSettingsStore((state) => state.popupShortcut);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   const importInput = useRef<HTMLInputElement>(null);
   const [actionMessage, setActionMessage] = useState<string>();
+  const autoUpdate = valueAt(values, ["cli", "auto_update"]);
 
   const importSettings = async (file?: File) => {
     if (!file) {
@@ -1031,6 +1128,18 @@ function ApplicationGeneralSettings() {
       </PreferenceGroup>
 
       <PreferenceGroup title="常规">
+        <PreferenceRow
+          description="启动 Melody 时检查并安装可用更新。"
+          label="自动检查 Melody 更新"
+        >
+          <Switch
+            aria-label="自动检查 Melody 更新"
+            checked={typeof autoUpdate === "boolean" ? autoUpdate : true}
+            onCheckedChange={(checked) =>
+              onChange(["cli", "auto_update"], checked)
+            }
+          />
+        </PreferenceRow>
         <PreferenceRow
           description="从消息或工具活动中打开文件时使用的应用。"
           label="默认文件打开目标"
@@ -1378,7 +1487,6 @@ function AppearanceThemeGroup({
 function ApplicationAppearanceSettings() {
   const uiFontSize = useAppSettingsStore((state) => state.uiFontSize);
   const codeFontSize = useAppSettingsStore((state) => state.codeFontSize);
-  const popupTheme = useAppSettingsStore((state) => state.dockIcon);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
 
   return (
@@ -1425,29 +1533,6 @@ function ApplicationAppearanceSettings() {
           label="使用指针光标"
         >
           <PreferenceSwitch settingKey="pointerCursor" />
-        </PreferenceRow>
-        <PreferenceRow
-          description="选择应用在 Dock 中使用的图标风格。"
-          label="Dock 图标"
-        >
-          <div className="flex gap-1">
-            {(["classic", "gradient"] as const).map((icon) => (
-              <button
-                aria-label={icon === "classic" ? "经典图标" : "渐变图标"}
-                className={cn(
-                  "flex size-9 items-center justify-center rounded-lg border text-sm font-semibold",
-                  popupTheme === icon && "border-foreground bg-muted",
-                  icon === "gradient" &&
-                    "bg-gradient-to-br from-violet-400 to-blue-500 text-white",
-                )}
-                key={icon}
-                onClick={() => setSetting("dockIcon", icon)}
-                type="button"
-              >
-                M
-              </button>
-            ))}
-          </div>
         </PreferenceRow>
         <PreferenceRow
           description="减少动画效果或匹配系统辅助功能设置。"
@@ -1526,6 +1611,29 @@ function objectEntries(values: ConfigValues, path: string[]) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? Object.entries(value)
     : [];
+}
+
+function configObject(value: MelodyConfigValue | undefined): ConfigObject {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...value }
+    : {};
+}
+
+function stringConfigValue(object: ConfigObject, key: string) {
+  const value = object[key];
+  return typeof value === "string" ? value : "";
+}
+
+function modelProviderLabel(model: ConfigObject) {
+  const backend = stringConfigValue(model, "api_backend");
+  const baseUrl = stringConfigValue(model, "base_url");
+  if (backend === "messages" || baseUrl.includes("anthropic.com")) {
+    return "Anthropic";
+  }
+  if (baseUrl.includes("api.openai.com")) {
+    return "OpenAI";
+  }
+  return backend === "responses" ? "Responses API" : "OpenAI 兼容";
 }
 
 function DynamicSection({
@@ -1833,6 +1941,729 @@ function DynamicSection({
   );
 }
 
+function ModelOverrideField({
+  definition,
+  draft,
+  globalValues,
+  onChange,
+}: {
+  definition: (typeof inheritedModelFields)[number];
+  draft: ConfigObject;
+  globalValues: ConfigValues;
+  onChange: (key: string, value: MelodyConfigValue | undefined) => void;
+}) {
+  const enabled = draft[definition.key] !== undefined;
+  const inherited =
+    valueAt(globalValues, ["models", definition.key]) ?? definition.fallback;
+  const value = draft[definition.key];
+
+  return (
+    <div className="flex min-h-16 items-center gap-4 border-t px-4 py-3 first:border-t-0">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="font-medium text-sm">{definition.label}</p>
+          <Badge variant={enabled ? "secondary" : "outline"}>
+            {enabled ? "单独设置" : `继承：${String(inherited)}`}
+          </Badge>
+        </div>
+        <p className="mt-0.5 text-muted-foreground text-xs">
+          {definition.description}
+        </p>
+      </div>
+      {enabled ? (
+        <Input
+          className="w-24"
+          max={"max" in definition ? definition.max : undefined}
+          min={definition.min}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (Number.isFinite(next)) {
+              onChange(definition.key, next);
+            }
+          }}
+          step={definition.step}
+          type="number"
+          value={typeof value === "number" ? value : definition.fallback}
+        />
+      ) : null}
+      <Switch
+        aria-label={`${enabled ? "取消" : "启用"}${definition.label}单独设置`}
+        checked={enabled}
+        onCheckedChange={(checked) =>
+          onChange(
+            definition.key,
+            checked && typeof inherited === "number"
+              ? inherited
+              : checked
+                ? definition.fallback
+                : undefined,
+          )
+        }
+      />
+    </div>
+  );
+}
+
+function ModelEditorDialog({
+  existingNames,
+  globalValues,
+  modelName,
+  modelValue,
+  onOpenChange,
+  onSave,
+  open,
+}: {
+  existingNames: string[];
+  globalValues: ConfigValues;
+  modelName?: string;
+  modelValue?: MelodyConfigValue;
+  onOpenChange: (open: boolean) => void;
+  onSave: (name: string, value: ConfigObject) => void;
+  open: boolean;
+}) {
+  const editing = Boolean(modelName);
+  const [step, setStep] = useState<"provider" | "details">(
+    editing ? "details" : "provider",
+  );
+  const [alias, setAlias] = useState(modelName ?? "");
+  const [draft, setDraft] = useState<ConfigObject>(() =>
+    configObject(modelValue),
+  );
+  const [authMode, setAuthMode] = useState<"environment" | "key">(() =>
+    stringConfigValue(configObject(modelValue), "api_key")
+      ? "key"
+      : "environment",
+  );
+
+  const setField = (key: string, value: MelodyConfigValue | undefined) => {
+    setDraft((current) => {
+      const next = { ...current };
+      if (
+        value === undefined ||
+        value === null ||
+        value === "" ||
+        (Array.isArray(value) && value.length === 0)
+      ) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+      return next;
+    });
+  };
+
+  const chooseProvider = (template: (typeof providerTemplates)[number]) => {
+    setDraft((current) => ({
+      ...current,
+      api_backend: template.backend,
+      ...(template.baseUrl ? { base_url: template.baseUrl } : {}),
+      ...(template.envKey ? { env_key: [template.envKey] } : {}),
+    }));
+    setAuthMode("environment");
+    setStep("details");
+  };
+
+  const modelId = stringConfigValue(draft, "model");
+  const baseUrl = stringConfigValue(draft, "base_url");
+  const envKeys = Array.isArray(draft.env_key)
+    ? draft.env_key
+        .filter((item): item is string => typeof item === "string")
+        .join(", ")
+    : "";
+  const nameConflict =
+    !editing && existingNames.includes(alias.trim());
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[min(760px,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {editing
+              ? `编辑 ${stringConfigValue(draft, "name") || modelName}`
+              : step === "provider"
+                ? "添加模型"
+                : "配置模型"}
+          </DialogTitle>
+          <DialogDescription>
+            {step === "provider"
+              ? "选择接口类型，我们会预填常用连接参数。"
+              : "先完成必要信息；其余参数可以继承全局默认值。"}
+          </DialogDescription>
+        </DialogHeader>
+
+        {step === "provider" ? (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {providerTemplates.map((template) => (
+              <button
+                className="group rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/40"
+                key={template.id}
+                onClick={() => chooseProvider(template)}
+                type="button"
+              >
+                <span className="mb-3 flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-foreground">
+                  <ServerIcon className="size-4" />
+                </span>
+                <span className="block font-medium text-sm">
+                  {template.name}
+                </span>
+                <span className="mt-1 block text-muted-foreground text-xs leading-relaxed">
+                  {template.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-5">
+            <section>
+              <h4 className="mb-2 font-medium text-sm">基础信息</h4>
+              <div className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-xs">
+                  <span className="font-medium">配置名称</span>
+                  <Input
+                    disabled={editing}
+                    onChange={(event) => setAlias(event.target.value)}
+                    placeholder="例如 gpt-work"
+                    value={alias}
+                  />
+                  <span
+                    className={
+                      nameConflict
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {nameConflict
+                      ? "该配置名称已经存在。"
+                      : "用于默认模型和代理路由。"}
+                  </span>
+                </label>
+                <label className="grid gap-1.5 text-xs">
+                  <span className="font-medium">显示名称</span>
+                  <Input
+                    onChange={(event) =>
+                      setField("name", event.target.value)
+                    }
+                    placeholder="例如 GPT 工作模型"
+                    value={stringConfigValue(draft, "name")}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs sm:col-span-2">
+                  <span className="font-medium">模型 ID</span>
+                  <Input
+                    onChange={(event) =>
+                      setField("model", event.target.value)
+                    }
+                    placeholder="例如 gpt-5.2"
+                    value={modelId}
+                  />
+                  <span className="text-muted-foreground">
+                    发送给模型提供商的实际模型名称。
+                  </span>
+                </label>
+                <label className="grid gap-1.5 text-xs sm:col-span-2">
+                  <span className="font-medium">说明</span>
+                  <Input
+                    onChange={(event) =>
+                      setField("description", event.target.value)
+                    }
+                    placeholder="这个模型适合什么任务"
+                    value={stringConfigValue(draft, "description")}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section>
+              <h4 className="mb-2 font-medium text-sm">连接与认证</h4>
+              <div className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-xs sm:col-span-2">
+                  <span className="font-medium">接口地址</span>
+                  <Input
+                    onChange={(event) =>
+                      setField("base_url", event.target.value)
+                    }
+                    placeholder="https://api.example.com/v1"
+                    value={baseUrl}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs">
+                  <span className="font-medium">接口类型</span>
+                  <Select
+                    onValueChange={(value) =>
+                      setField("api_backend", value)
+                    }
+                    value={
+                      stringConfigValue(draft, "api_backend") ||
+                      "chat_completions"
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="chat_completions">
+                        Chat Completions
+                      </SelectItem>
+                      <SelectItem value="responses">Responses</SelectItem>
+                      <SelectItem value="messages">Messages</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs">
+                  <span className="font-medium">认证方式</span>
+                  <Select
+                    onValueChange={(value) => {
+                      const next = value as "environment" | "key";
+                      setAuthMode(next);
+                      if (next === "environment") {
+                        setField("api_key", undefined);
+                      } else {
+                        setField("env_key", undefined);
+                      }
+                    }}
+                    value={authMode}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="environment">环境变量</SelectItem>
+                      <SelectItem value="key">直接填写 API Key</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                {authMode === "environment" ? (
+                  <label className="grid gap-1.5 text-xs sm:col-span-2">
+                    <span className="font-medium">密钥环境变量</span>
+                    <Input
+                      onChange={(event) =>
+                        setField(
+                          "env_key",
+                          event.target.value
+                            .split(",")
+                            .map((item) => item.trim())
+                            .filter(Boolean),
+                        )
+                      }
+                      placeholder="OPENAI_API_KEY"
+                      value={envKeys}
+                    />
+                  </label>
+                ) : (
+                  <label className="grid gap-1.5 text-xs sm:col-span-2">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <KeyRoundIcon className="size-3.5" />
+                      API Key
+                    </span>
+                    <Input
+                      autoComplete="off"
+                      onChange={(event) =>
+                        setField("api_key", event.target.value)
+                      }
+                      placeholder="输入密钥"
+                      type="password"
+                      value={stringConfigValue(draft, "api_key")}
+                    />
+                    <span className="text-muted-foreground">
+                      推荐使用环境变量，避免把密钥写入配置文件。
+                    </span>
+                  </label>
+                )}
+              </div>
+            </section>
+
+            <details className="group overflow-hidden rounded-xl border bg-card">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3">
+                <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-sm">高级设置</p>
+                  <p className="text-muted-foreground text-xs">
+                    上下文能力和单模型生成参数覆盖
+                  </p>
+                </div>
+              </summary>
+              <div className="border-t">
+                <div className="grid gap-4 p-4 sm:grid-cols-2">
+                  <label className="grid gap-1.5 text-xs">
+                    <span className="font-medium">上下文窗口</span>
+                    <Input
+                      min={1}
+                      onChange={(event) =>
+                        setField(
+                          "context_window",
+                          event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        )
+                      }
+                      placeholder="由提供商决定"
+                      type="number"
+                      value={
+                        typeof draft.context_window === "number"
+                          ? draft.context_window
+                          : ""
+                      }
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-4 rounded-lg bg-muted/40 px-3 py-2">
+                    <span>
+                      <span className="block font-medium text-xs">
+                        服务端搜索
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        声明模型支持提供商侧搜索
+                      </span>
+                    </span>
+                    <Switch
+                      checked={draft.supports_backend_search === true}
+                      onCheckedChange={(checked) =>
+                        setField("supports_backend_search", checked)
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="border-t">
+                  {inheritedModelFields.map((definition) => (
+                    <ModelOverrideField
+                      definition={definition}
+                      draft={draft}
+                      globalValues={globalValues}
+                      key={definition.key}
+                      onChange={setField}
+                    />
+                  ))}
+                  <div className="flex min-h-16 items-center gap-4 border-t px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">流式工具调用</p>
+                        <Badge
+                          variant={
+                            draft.stream_tool_calls === undefined
+                              ? "outline"
+                              : "secondary"
+                          }
+                        >
+                          {draft.stream_tool_calls === undefined
+                            ? `继承：${String(valueAt(globalValues, ["models", "stream_tool_calls"]) ?? true)}`
+                            : "单独设置"}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 text-muted-foreground text-xs">
+                        在模型输出结束前解析工具调用。
+                      </p>
+                    </div>
+                    {draft.stream_tool_calls !== undefined ? (
+                      <>
+                        <Switch
+                          aria-label="流式工具调用"
+                          checked={draft.stream_tool_calls === true}
+                          onCheckedChange={(checked) =>
+                            setField("stream_tool_calls", checked)
+                          }
+                        />
+                        <Button
+                          onClick={() =>
+                            setField("stream_tool_calls", undefined)
+                          }
+                          size="sm"
+                          variant="ghost"
+                        >
+                          恢复继承
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        onClick={() =>
+                          setField(
+                            "stream_tool_calls",
+                            valueAt(globalValues, [
+                              "models",
+                              "stream_tool_calls",
+                            ]) ?? true,
+                          )
+                        }
+                        size="sm"
+                        variant="outline"
+                      >
+                        单独设置
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        )}
+
+        <DialogFooter>
+          {step === "details" ? (
+            <>
+              <Button onClick={() => onOpenChange(false)} variant="outline">
+                取消
+              </Button>
+              <Button
+                disabled={
+                  !alias.trim() || !modelId.trim() || nameConflict
+                }
+                onClick={() => {
+                  onSave(alias.trim(), draft);
+                  onOpenChange(false);
+                }}
+              >
+                <CheckIcon />
+                {editing ? "保存更改" : "添加模型"}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => onOpenChange(false)} variant="outline">
+              取消
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CustomModelManager({
+  values,
+  onChange,
+}: {
+  values: ConfigValues;
+  onChange: ConfigurationFormProps["onChange"];
+}) {
+  const entries = objectEntries(values, ["model"]);
+  const currentDefault = valueAt(values, ["models", "default"]);
+  const [editingModel, setEditingModel] = useState<string | null>();
+  const [pendingDelete, setPendingDelete] = useState<string>();
+
+  return (
+    <div>
+      <div className="mb-3 flex items-start justify-between gap-4">
+        <div>
+          <h4 className="font-medium text-sm">自定义模型</h4>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            管理第三方提供商、自托管模型和模型专用参数。
+          </p>
+        </div>
+        <Button onClick={() => setEditingModel(null)} size="sm">
+          <PlusIcon />
+          添加模型
+        </Button>
+      </div>
+
+      {entries.length > 0 ? (
+        <div className="overflow-hidden rounded-xl border bg-card">
+          {entries.map(([name, value], index) => {
+            const model = configObject(value);
+            const displayName = stringConfigValue(model, "name") || name;
+            const modelId = stringConfigValue(model, "model") || name;
+            const baseUrl = stringConfigValue(model, "base_url");
+            const isDefault = currentDefault === name;
+            return (
+              <div
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3",
+                  index > 0 && "border-t",
+                )}
+                key={name}
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <BotIcon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate font-medium text-sm">
+                      {displayName}
+                    </p>
+                    {isDefault ? <Badge>默认</Badge> : null}
+                    <Badge variant="outline">
+                      {modelProviderLabel(model)}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 truncate text-muted-foreground text-xs">
+                    {modelId}
+                    {baseUrl
+                      ? ` · ${baseUrl.replace(/^https?:\/\//, "")}`
+                      : " · 使用默认接口"}
+                  </p>
+                </div>
+                {!isDefault ? (
+                  <Button
+                    onClick={() =>
+                      onChange(["models", "default"], name)
+                    }
+                    size="sm"
+                    variant="ghost"
+                  >
+                    设为默认
+                  </Button>
+                ) : null}
+                <Button
+                  onClick={() => setEditingModel(name)}
+                  size="sm"
+                  variant="outline"
+                >
+                  编辑
+                </Button>
+                <Button
+                  aria-label={`删除 ${displayName}`}
+                  onClick={() => setPendingDelete(name)}
+                  size="icon-sm"
+                  variant="ghost"
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed px-6 py-10 text-center">
+          <span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <ServerIcon className="size-4" />
+          </span>
+          <p className="mt-3 font-medium text-sm">还没有自定义模型</p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            添加模型提供商或连接自己的兼容接口。
+          </p>
+        </div>
+      )}
+
+      {editingModel !== undefined ? (
+        <ModelEditorDialog
+          existingNames={entries.map(([name]) => name)}
+          globalValues={values}
+          key={editingModel ?? "new"}
+          modelName={editingModel ?? undefined}
+          modelValue={
+            editingModel
+              ? valueAt(values, ["model", editingModel])
+              : undefined
+          }
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingModel(undefined);
+            }
+          }}
+          onSave={(name, model) =>
+            onChange(["model", name], model)
+          }
+          open
+        />
+      ) : null}
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDelete(undefined);
+          }
+        }}
+        open={Boolean(pendingDelete)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除模型配置？</DialogTitle>
+            <DialogDescription>
+              这会从 Melody 配置中删除“{pendingDelete}”。该操作不会删除提供商上的模型。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              onClick={() => setPendingDelete(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                if (pendingDelete) {
+                  onChange(["model", pendingDelete], null);
+                  if (currentDefault === pendingDelete) {
+                    onChange(["models", "default"], null);
+                  }
+                }
+                setPendingDelete(undefined);
+              }}
+              variant="destructive"
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ModelSettings({
+  availableModels,
+  section,
+  values,
+  onChange,
+}: {
+  availableModels: AgentModelOption[];
+  section: SettingSection;
+  values: ConfigValues;
+  onChange: ConfigurationFormProps["onChange"];
+}) {
+  const configuredModels = objectEntries(values, ["model"]).map(
+    ([name]) => name,
+  );
+  const currentDefault = valueAt(values, ["models", "default"]);
+  const modelOptions = new Map(
+    availableModels.map((model) => [
+      model.id,
+      model.name === model.id ? model.id : `${model.name} (${model.id})`,
+    ]),
+  );
+  for (const name of configuredModels) {
+    if (!modelOptions.has(name)) {
+      modelOptions.set(name, name);
+    }
+  }
+  if (
+    typeof currentDefault === "string" &&
+    !modelOptions.has(currentDefault)
+  ) {
+    modelOptions.set(currentDefault, `${currentDefault}（当前配置）`);
+  }
+  const inheritValue = "__melody_inherit_default__";
+  const defaultSettings = section.settings.map((definition) =>
+    definition.path[0] === "models" && definition.path[1] === "default"
+      ? {
+          ...definition,
+          kind: "select" as const,
+          clearValue: inheritValue,
+          options: [
+            { label: "跟随 Melody 默认值", value: inheritValue },
+            ...Array.from(modelOptions, ([value, label]) => ({
+              label,
+              value,
+            })),
+          ],
+        }
+      : definition,
+  );
+
+  return (
+    <div className="grid gap-7">
+      <section>
+        <h4 className="font-medium text-sm">默认值与生成行为</h4>
+        <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
+          应用于新会话；自定义模型中的同名参数可以单独覆盖这些值。
+        </p>
+        <SettingsList
+          onChange={onChange}
+          section={{ ...section, settings: defaultSettings }}
+          values={values}
+        />
+      </section>
+      <CustomModelManager onChange={onChange} values={values} />
+    </div>
+  );
+}
+
 const configurationSections = (
   scope: MelodyConfigScope,
 ): SettingSection[] =>
@@ -1850,7 +2681,7 @@ const configurationSections = (
         {
           id: "general",
           label: "常规",
-          description: "应用权限、编辑器、窗口与通知偏好。",
+          description: "应用权限、更新、编辑器、窗口与通知偏好。",
           icon: Settings2Icon,
           settings: [],
         },
@@ -1861,15 +2692,7 @@ const configurationSections = (
           icon: MonitorIcon,
           settings: [],
         },
-        ...userSections.slice(0, 1),
-        {
-          id: "models",
-          label: "自定义模型",
-          description: "添加兼容的模型提供商和模型参数。",
-          icon: BotIcon,
-          settings: [],
-        },
-        ...userSections.slice(1, 7),
+        ...userSections.slice(0, 7),
         {
           id: "mcp",
           label: "MCP",
@@ -1890,6 +2713,7 @@ export const getConfigurationNavigation = (
   }));
 
 export function ConfigurationForm({
+  availableModels,
   sectionId,
   scope,
   values,
@@ -1912,13 +2736,17 @@ export function ConfigurationForm({
         </p>
         <div className="mt-5">
           {active.id === "general" ? (
-            <ApplicationGeneralSettings />
+            <ApplicationGeneralSettings
+              onChange={onChange}
+              values={values}
+            />
           ) : active.id === "appearance" ? (
             <ApplicationAppearanceSettings />
           ) : active.id === "models" ? (
-            <DynamicSection
-              kind="models"
+            <ModelSettings
+              availableModels={availableModels}
               onChange={onChange}
+              section={active}
               values={values}
             />
           ) : active.id === "mcp" ? (

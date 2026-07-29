@@ -67,6 +67,38 @@ export interface AgentBillingUsage {
   costUsdTicks?: number;
 }
 
+export type AgentSubagentStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface AgentSubagent {
+  subagentId: string;
+  parentSessionId: string;
+  childSessionId: string;
+  subagentType: string;
+  description: string;
+  status: AgentSubagentStatus;
+  startedAt: number;
+  updatedAt: number;
+  durationMs?: number;
+  turnCount?: number;
+  toolCallCount?: number;
+  tokensUsed?: number;
+  contextWindowTokens?: number;
+  contextUsagePct?: number;
+  toolsUsed: string[];
+  errorCount?: number;
+  error?: string;
+  output?: string;
+  model?: string;
+  persona?: string;
+  role?: string;
+  capabilityMode?: string;
+  resumedFrom?: string;
+}
+
 export type AgentToolOperation =
   | "read"
   | "search"

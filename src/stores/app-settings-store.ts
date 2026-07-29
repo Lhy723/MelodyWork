@@ -15,7 +15,6 @@ export interface AppSettings {
   lightContrast: number;
   darkContrast: number;
   pointerCursor: boolean;
-  dockIcon: "classic" | "gradient";
   reducedMotion: "system" | "on" | "off";
   uiFontSize: number;
   codeFontSize: number;
@@ -62,7 +61,6 @@ const defaultSettings: AppSettings = {
   lightContrast: 45,
   darkContrast: 60,
   pointerCursor: false,
-  dockIcon: "classic",
   reducedMotion: "system",
   uiFontSize: 14,
   codeFontSize: 12,
@@ -96,6 +94,14 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
     }),
     {
       name: "melodywork.app-settings",
+      merge: (persistedState, currentState) => {
+        const { dockIcon: _dockIcon, ...persistedSettings } =
+          (persistedState ?? {}) as Record<string, unknown>;
+        return {
+          ...currentState,
+          ...persistedSettings,
+        } as AppSettingsStore;
+      },
       partialize: ({ setSetting: _setSetting, ...settings }) => settings,
     },
   ),

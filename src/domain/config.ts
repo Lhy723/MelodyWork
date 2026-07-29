@@ -39,6 +39,19 @@ export interface MarketplaceSource {
   branch?: string;
 }
 
+export interface MarketplacePlugin {
+  name: string;
+  marketplace: string;
+  status: "installed" | "available";
+  version?: string;
+  installedVersion?: string;
+  description?: string;
+  skillCount: number;
+  hasHooks: boolean;
+  hasAgents: boolean;
+  hasMcp: boolean;
+}
+
 export interface PluginComponentGroup {
   kind: "skills" | "commands" | "agents" | "hooks" | "mcps" | "lsps";
   items: string[];

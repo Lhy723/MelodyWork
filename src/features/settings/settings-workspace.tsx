@@ -43,6 +43,7 @@ import {
   updateMelodyConfig,
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
+import { useAgentStore } from "@/stores/agent-store";
 
 import {
   ConfigurationForm,
@@ -102,6 +103,7 @@ export function SettingsWorkspace({
   macSafeArea = false,
   onClose,
 }: SettingsWorkspaceProps) {
+  const availableModels = useAgentStore((state) => state.availableModels);
   const [page, setPage] = useState<SettingsPage>(initialPage);
   const [scope, setScope] = useState<MelodyConfigScope>("user");
   const [configSection, setConfigSection] = useState("general");
@@ -661,6 +663,7 @@ export function SettingsWorkspace({
               <p className="p-6 text-muted-foreground text-sm">正在加载设置…</p>
             ) : (
               <ConfigurationForm
+                availableModels={availableModels}
                 onChange={changeConfig}
                 sectionId={activeConfigSection}
                 scope={scope}
@@ -813,7 +816,12 @@ export function SettingsWorkspace({
                   </p>
                 </div>
               ) : null}
-              {extensionKind === "plugins" ? <MarketplaceSettings /> : null}
+              {extensionKind === "plugins" ? (
+                <MarketplaceSettings
+                  cwd={cwd}
+                  onPluginsChanged={loadExtensions}
+                />
+              ) : null}
                 </>
               )}
             </div>

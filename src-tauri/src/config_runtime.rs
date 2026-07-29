@@ -63,6 +63,24 @@ pub struct PluginInstallResult {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MarketplacePlugin {
+    name: String,
+    marketplace: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    installed_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    skill_count: usize,
+    has_hooks: bool,
+    has_agents: bool,
+    has_mcp: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginComponentGroup {
     kind: String,
     items: Vec<String>,
@@ -737,6 +755,134 @@ pub async fn install_melody_plugin(
     Ok(PluginInstallResult {
         source: source.to_string(),
         message,
+    })
+}
+
+async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result<String, String> {
+    let workspace = PathBuf::from(cwd);
+    if !workspace.is_dir() {
+        return Err(format!("Workspace does not exist: {}", workspace.display()));
+    }
+    let binary = agent_runtime::resolve_binary(app, None).ok_or_else(|| {
+        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
+            .to_string()
+    })?;
+    let mut command = Command::new(binary);
+    command.args(args).current_dir(workspace);
+    if let Some(home) = agent_runtime::melody_home() {
+        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("Failed to run Melody plugin command: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(if stderr.is_empty() {
+            if stdout.is_empty() {
+                format!("Plugin command failed with status {}", output.status)
+            } else {
+                stdout
+            }
+        } else {
+            stderr
+        });
+    }
+    Ok(stdout)
+}
+
+#[tauri::command]
+pub async fn scan_marketplace_plugins(
+    app: AppHandle,
+    cwd: String,
+    refresh: bool,
+) -> Result<Vec<MarketplacePlugin>, String> {
+    if refresh {
+        run_plugin_command(&app, &cwd, &["plugin", "marketplace", "update"]).await?;
+    }
+    let output =
+        run_plugin_command(&app, &cwd, &["plugin", "list", "--json", "--available"]).await?;
+    marketplace_plugins_from_json(&output)
+}
+
+fn marketplace_plugins_from_json(output: &str) -> Result<Vec<MarketplacePlugin>, String> {
+    let entries = serde_json::from_str::<Vec<serde_json::Value>>(output)
+        .map_err(|error| format!("Melody returned an invalid Marketplace catalog: {error}"))?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| {
+            let status = entry.get("status")?.as_str()?;
+            let marketplace = entry.get("marketplace")?.as_str()?.to_string();
+            let name = entry.get("name")?.as_str()?.to_string();
+            let version = entry
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            match status {
+                "installed" => Some(MarketplacePlugin {
+                    name,
+                    marketplace,
+                    status: "installed".to_string(),
+                    version: None,
+                    installed_version: version,
+                    description: None,
+                    skill_count: 0,
+                    has_hooks: false,
+                    has_agents: false,
+                    has_mcp: false,
+                }),
+                "available" => Some(MarketplacePlugin {
+                    name,
+                    marketplace,
+                    status: "available".to_string(),
+                    version,
+                    installed_version: None,
+                    description: entry
+                        .get("description")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    skill_count: entry
+                        .get("skill_count")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0) as usize,
+                    has_hooks: entry
+                        .get("has_hooks")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    has_agents: entry
+                        .get("has_agents")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    has_mcp: entry
+                        .get("has_mcp")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                }),
+                _ => None,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn update_melody_plugin(
+    app: AppHandle,
+    cwd: String,
+    name: String,
+) -> Result<PluginInstallResult, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Plugin name cannot be empty".to_string());
+    }
+    let message = run_plugin_command(&app, &cwd, &["plugin", "update", name]).await?;
+    Ok(PluginInstallResult {
+        source: name.to_string(),
+        message: if message.is_empty() {
+            format!("Plugin {name} is already up to date")
+        } else {
+            message
+        },
     })
 }
 
@@ -1514,5 +1660,46 @@ future_option = "preserved"
         let output = document.to_string();
         assert!(output.contains("simple_mode = true"));
         assert!(!output.contains("vim_mode"));
+    }
+
+    #[test]
+    fn parses_available_and_installed_marketplace_plugins() {
+        let plugins = marketplace_plugins_from_json(
+            r#"[
+                {
+                    "status": "available",
+                    "name": "web-tools",
+                    "version": "1.2.0",
+                    "description": "Web tools",
+                    "marketplace": "Official",
+                    "skill_count": 2,
+                    "has_hooks": true,
+                    "has_agents": false,
+                    "has_mcp": true
+                },
+                {
+                    "status": "installed",
+                    "name": "reviewer",
+                    "version": "0.4.0",
+                    "marketplace": "Official"
+                },
+                {
+                    "status": "installed",
+                    "name": "direct-install",
+                    "version": "1.0.0",
+                    "marketplace": null
+                }
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(plugins.len(), 2);
+        assert_eq!(plugins[0].name, "web-tools");
+        assert_eq!(plugins[0].version.as_deref(), Some("1.2.0"));
+        assert_eq!(plugins[0].skill_count, 2);
+        assert!(plugins[0].has_hooks);
+        assert!(plugins[0].has_mcp);
+        assert_eq!(plugins[1].status, "installed");
+        assert_eq!(plugins[1].installed_version.as_deref(), Some("0.4.0"));
     }
 }

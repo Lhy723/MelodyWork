@@ -1,4 +1,5 @@
 import {
+  BotIcon,
   FileCode2Icon,
   FilesIcon,
   GitCompareArrowsIcon,
@@ -22,10 +23,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { AgentSubagent } from "@/domain/acp";
 import type { GitChange } from "@/domain/git";
+import type { ProjectReference } from "@/domain/message-citations";
 import { FileWorkspace } from "@/features/files/file-workspace";
 import { ChangeReview } from "@/features/git/change-review";
 import { TerminalPanel } from "@/features/terminal/terminal-panel";
+import { SubagentConversation } from "@/features/workspace/subagent-conversation";
 import { readWorkspaceFile } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +44,13 @@ export type WorkspaceTab =
       kind: "file";
       label: string;
       path: string;
+    }
+  | {
+      id: string;
+      kind: "subagent";
+      label: string;
+      subagentId: string;
+      childSessionId: string;
     };
 
 interface WorkspaceSidePanelProps {
@@ -52,11 +63,13 @@ interface WorkspaceSidePanelProps {
   onCloseTab: (tabId: string) => void;
   onNewTab: (kind: "files" | "terminal" | "review") => void;
   onOpenFile: (path: string) => void;
+  onOpenProjectReference: (reference: ProjectReference) => void;
   onResizeBy: (delta: number) => void;
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
   onRefreshGit: () => void;
   root: string;
+  subagents: Record<string, AgentSubagent>;
   tabs: WorkspaceTab[];
 }
 
@@ -91,6 +104,9 @@ const tabIcon = (tab: WorkspaceTab) => {
   }
   if (tab.kind === "review") {
     return <GitCompareArrowsIcon />;
+  }
+  if (tab.kind === "subagent") {
+    return <BotIcon />;
   }
   return <FileCode2Icon />;
 };
@@ -210,11 +226,13 @@ export function WorkspaceSidePanel({
   onCloseTab,
   onNewTab,
   onOpenFile,
+  onOpenProjectReference,
   onResizeBy,
   onResizeStart,
   onResetWidth,
   onRefreshGit,
   root,
+  subagents,
   tabs,
 }: WorkspaceSidePanelProps) {
   return (
@@ -378,8 +396,26 @@ export function WorkspaceSidePanel({
                 loading={gitLoading}
                 onRefresh={onRefreshGit}
               />
-            ) : (
+            ) : tab.kind === "file" ? (
               <FilePreview path={tab.path} root={root} />
+            ) : subagents[tab.subagentId] ? (
+              <SubagentConversation
+                active={activeTabId === tab.id}
+                cwd={cwd}
+                onOpenProjectReference={onOpenProjectReference}
+                projectRoot={root}
+                subagent={subagents[tab.subagentId]}
+              />
+            ) : (
+              <div className="grid size-full place-items-center p-6 text-center">
+                <div>
+                  <BotIcon className="mx-auto mb-3 size-5 text-muted-foreground" />
+                  <p className="font-medium text-sm">Subagent 不可用</p>
+                  <p className="mt-1 text-muted-foreground text-xs">
+                    该子会话可能属于另一个对话。
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         ))}
