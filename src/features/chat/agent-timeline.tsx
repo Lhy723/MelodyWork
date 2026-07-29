@@ -18,6 +18,7 @@ import type {
   AgentPlanDecision,
   TimelineEntry,
 } from "@/domain/acp";
+import type { ProjectReference } from "@/domain/message-citations";
 import { groupTurnActivity } from "@/domain/timeline-groups";
 import { MessageCitations } from "@/features/chat/message-citations";
 import { MessageCodeBlock } from "@/features/chat/message-code-block";
@@ -35,6 +36,7 @@ interface AgentTimelineProps {
     outcome: AgentPlanDecision,
     feedback?: string,
   ) => void;
+  onOpenProjectReference: (reference: ProjectReference) => void;
   projectRoot: string;
 }
 
@@ -43,6 +45,7 @@ export function AgentTimeline({
   entries,
   onPermission,
   onPlanDecision,
+  onOpenProjectReference,
   projectRoot,
 }: AgentTimelineProps) {
   const messageComponents = useMemo(
@@ -52,11 +55,12 @@ export function AgentTimeline({
         <ProjectInlineCitation
           {...props}
           cwd={cwd}
+          onOpenReference={onOpenProjectReference}
           projectRoot={projectRoot}
         />
       ),
     }),
-    [cwd, projectRoot],
+    [cwd, onOpenProjectReference, projectRoot],
   );
   const renderEntries = useMemo(
     () => groupTurnActivity(entries),

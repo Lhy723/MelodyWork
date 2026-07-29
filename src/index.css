@@ -282,6 +282,43 @@ body {
     pointer-events: none;
   }
 
+  .motion-workspace-layer {
+    contain: inline-size;
+    min-width: 0;
+    overflow: hidden;
+    opacity: 1;
+    transition:
+      width var(--motion-duration-base) var(--motion-ease-drawer),
+      opacity var(--motion-duration-fast) var(--motion-ease-out);
+    will-change: width, opacity;
+  }
+
+  .motion-workspace-panel {
+    contain: layout paint;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    transition:
+      opacity var(--motion-duration-fast) var(--motion-ease-out),
+      transform var(--motion-duration-base) var(--motion-ease-drawer);
+    will-change: transform, opacity;
+    width: var(--workspace-panel-width, 35rem);
+  }
+
+  .motion-workspace-layer[data-collapsed="true"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .motion-workspace-layer[data-collapsed="true"] > .motion-workspace-panel {
+    opacity: 0;
+    transform: translate3d(8px, 0, 0);
+  }
+
+  .motion-workspace-layer[data-resizing="true"],
+  .motion-workspace-layer[data-resizing="true"] > .motion-workspace-panel {
+    transition: none;
+  }
+
   .motion-banner[data-motion-state="closed"] {
     opacity: 0;
     transform: translate3d(0, -6px, 0);
@@ -578,6 +615,7 @@ body {
   .motion-collapsible-content,
   .motion-layer,
   .motion-sheet-layer,
+  .motion-workspace-layer,
   .motion-banner {
     transform: none !important;
     transition-duration: 200ms !important;

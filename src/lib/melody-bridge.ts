@@ -474,6 +474,30 @@ export const runTerminalCommand = async (
   return invoke<string>("run_terminal_command", { cwd, command });
 };
 
+export const createTerminalSession = async (
+  cwd: string,
+): Promise<string> =>
+  isTauriRuntime()
+    ? invoke<string>("create_terminal_session", { cwd })
+    : `preview-terminal-${Date.now()}`;
+
+export const writeTerminalInput = async (
+  terminalId: string,
+  data: string,
+): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("write_terminal_input", { terminalId, data });
+  }
+};
+
+export const closeTerminalSession = async (
+  terminalId: string,
+): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("close_terminal_session", { terminalId });
+  }
+};
+
 export const subscribeToTerminal = async (
   onOutput: (event: TerminalOutputEvent) => void,
   onExit: (event: TerminalExitEvent) => void,

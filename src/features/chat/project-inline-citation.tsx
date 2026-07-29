@@ -16,6 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 interface ProjectInlineCitationProps extends ComponentProps<"code"> {
   children?: ReactNode;
   cwd: string;
+  onOpenReference?: (reference: ProjectReference) => void;
   projectRoot: string;
 }
 
@@ -42,6 +43,7 @@ export function ProjectInlineCitation({
   className,
   cwd,
   node: _node,
+  onOpenReference,
   projectRoot,
   ...props
 }: ProjectInlineCitationProps & { node?: unknown }) {
@@ -64,12 +66,19 @@ export function ProjectInlineCitation({
   return (
     <InlineCitation>
       <InlineCitationText>
-        <code
-          className={`rounded bg-muted px-1.5 py-0.5 font-mono text-sm ${className ?? ""}`}
-          {...props}
+        <button
+          aria-label={`在侧边栏中打开 ${reference.displayPath}`}
+          className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onOpenReference?.(reference)}
+          type="button"
         >
-          {children}
-        </code>
+          <code
+            className={`rounded bg-muted px-1.5 py-0.5 font-mono text-sm hover:bg-muted/80 ${className ?? ""}`}
+            {...props}
+          >
+            {children}
+          </code>
+        </button>
       </InlineCitationText>
       <InlineCitationCard>
         <InlineCitationCardTrigger

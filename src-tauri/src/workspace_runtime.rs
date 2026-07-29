@@ -1,17 +1,28 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
 };
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-use tokio::{io::AsyncReadExt, process::Command};
+use tauri::{AppHandle, Emitter, State};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::{ChildStdin, Command},
+    sync::Mutex,
+};
 use uuid::Uuid;
 
 const MAX_TREE_ENTRIES: usize = 2_000;
 const MAX_TREE_DEPTH: usize = 8;
 const MAX_TEXT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Clone, Default)]
+pub struct TerminalRuntime {
+    inputs: Arc<Mutex<HashMap<String, ChildStdin>>>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -182,6 +193,102 @@ async fn forward_terminal_stream<R>(
     }
 }
 
+fn persistent_shell(cwd: &Path) -> Command {
+    let mut process = if cfg!(windows) {
+        Command::new("cmd")
+    } else {
+        Command::new(std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()))
+    };
+    process
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    process
+}
+
+#[tauri::command]
+pub async fn create_terminal_session(
+    app: AppHandle,
+    runtime: State<'_, TerminalRuntime>,
+    cwd: String,
+) -> Result<String, String> {
+    let cwd = canonical_root(&cwd)?;
+    let terminal_id = Uuid::new_v4().to_string();
+    let mut child = persistent_shell(&cwd)
+        .spawn()
+        .map_err(|error| format!("Failed to start terminal: {error}"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Terminal stdin was not piped".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Terminal stdout was not piped".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Terminal stderr was not piped".to_string())?;
+    runtime
+        .inputs
+        .lock()
+        .await
+        .insert(terminal_id.clone(), stdin);
+
+    let stdout_app = app.clone();
+    let stdout_id = terminal_id.clone();
+    let stderr_app = app.clone();
+    let stderr_id = terminal_id.clone();
+    let exit_id = terminal_id.clone();
+    let inputs = runtime.inputs.clone();
+    tauri::async_runtime::spawn(async move {
+        let stdout_task = forward_terminal_stream(stdout_app, stdout_id, "stdout", stdout);
+        let stderr_task = forward_terminal_stream(stderr_app, stderr_id, "stderr", stderr);
+        let (status, _, _) = tokio::join!(child.wait(), stdout_task, stderr_task);
+        inputs.lock().await.remove(&exit_id);
+        let _ = app.emit(
+            "melody://terminal-exit",
+            TerminalExit {
+                terminal_id: exit_id,
+                code: status.ok().and_then(|status| status.code()),
+            },
+        );
+    });
+
+    Ok(terminal_id)
+}
+
+#[tauri::command]
+pub async fn write_terminal_input(
+    runtime: State<'_, TerminalRuntime>,
+    terminal_id: String,
+    data: String,
+) -> Result<(), String> {
+    let mut inputs = runtime.inputs.lock().await;
+    let input = inputs
+        .get_mut(&terminal_id)
+        .ok_or_else(|| "Terminal session is no longer running".to_string())?;
+    input
+        .write_all(data.as_bytes())
+        .await
+        .map_err(|error| format!("Failed to write to terminal: {error}"))?;
+    input
+        .flush()
+        .await
+        .map_err(|error| format!("Failed to flush terminal input: {error}"))
+}
+
+#[tauri::command]
+pub async fn close_terminal_session(
+    runtime: State<'_, TerminalRuntime>,
+    terminal_id: String,
+) -> Result<(), String> {
+    runtime.inputs.lock().await.remove(&terminal_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn run_terminal_command(
     app: AppHandle,
@@ -243,11 +350,44 @@ pub async fn run_terminal_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn ignores_large_generated_directories() {
         assert!(is_ignored_directory("node_modules"));
         assert!(is_ignored_directory(".git"));
         assert!(!is_ignored_directory("src"));
+    }
+
+    #[tokio::test]
+    async fn persistent_shell_accepts_input_and_returns_output() {
+        let cwd = std::env::current_dir().expect("current directory should be available");
+        let mut child = persistent_shell(&cwd)
+            .spawn()
+            .expect("persistent shell should start");
+        let mut stdin = child.stdin.take().expect("stdin should be piped");
+        let mut stdout = child.stdout.take().expect("stdout should be piped");
+
+        #[cfg(windows)]
+        let input = "echo melody-terminal-ok\r\nexit\r\n";
+        #[cfg(not(windows))]
+        let input = "printf 'melody-terminal-ok\\n'\nexit\n";
+
+        stdin
+            .write_all(input.as_bytes())
+            .await
+            .expect("terminal input should be writable");
+        stdin.flush().await.expect("terminal input should flush");
+        drop(stdin);
+
+        let mut output = String::new();
+        stdout
+            .read_to_string(&mut output)
+            .await
+            .expect("terminal output should be readable");
+        let status = child.wait().await.expect("shell should exit");
+
+        assert!(status.success());
+        assert!(output.contains("melody-terminal-ok"));
     }
 }

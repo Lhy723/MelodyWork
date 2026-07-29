@@ -1,32 +1,30 @@
 import {
   DownloadIcon,
   GitCompareArrowsIcon,
-  MoreHorizontalIcon,
+  PanelRightIcon,
 } from "lucide-react";
 import {
   useEffect,
+  useCallback,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEventHandler,
 } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { FileWorkspace } from "@/features/files/file-workspace";
-import { GitWorkspace } from "@/features/git/git-workspace";
 import { AppSidebar } from "@/features/sessions/app-sidebar";
 import { WindowNavigationControls } from "@/features/sessions/window-navigation-controls";
 import {
   SettingsWorkspace,
   type SettingsPage,
 } from "@/features/settings/settings-workspace";
-import { TerminalPanel } from "@/features/terminal/terminal-panel";
+import {
+  WorkspaceSidePanel,
+  type WorkspaceTab,
+} from "@/features/workspace/workspace-side-panel";
+import type { ProjectReference } from "@/domain/message-citations";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
@@ -57,6 +55,11 @@ const MIN_SIDEBAR_WIDTH = 224;
 const MAX_SIDEBAR_WIDTH = 420;
 const SIDEBAR_WIDTH_STORAGE_KEY = "melodywork.sidebar.width";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "melodywork.sidebar.collapsed";
+const DEFAULT_WORKSPACE_PANEL_WIDTH = 560;
+const MIN_WORKSPACE_PANEL_WIDTH = 360;
+const MAX_WORKSPACE_PANEL_WIDTH = 960;
+const WORKSPACE_PANEL_WIDTH_STORAGE_KEY =
+  "melodywork.workspace-panel.width";
 
 const isMacOS =
   typeof navigator !== "undefined" &&
@@ -80,6 +83,29 @@ const storedSidebarWidth = () => {
 const storedSidebarCollapsed = () =>
   typeof window !== "undefined" &&
   window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+
+const maxWorkspacePanelWidth = () =>
+  typeof window === "undefined"
+    ? MAX_WORKSPACE_PANEL_WIDTH
+    : Math.max(
+        MIN_WORKSPACE_PANEL_WIDTH,
+        Math.min(MAX_WORKSPACE_PANEL_WIDTH, window.innerWidth * 0.65),
+      );
+
+const storedWorkspacePanelWidth = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_WORKSPACE_PANEL_WIDTH;
+  }
+  const stored = Number(
+    window.localStorage.getItem(WORKSPACE_PANEL_WIDTH_STORAGE_KEY),
+  );
+  return Number.isFinite(stored)
+    ? Math.min(
+        maxWorkspacePanelWidth(),
+        Math.max(MIN_WORKSPACE_PANEL_WIDTH, stored),
+      )
+    : Math.min(DEFAULT_WORKSPACE_PANEL_WIDTH, maxWorkspacePanelWidth());
+};
 
 interface SessionNavigationHistory {
   entries: string[];
@@ -168,9 +194,19 @@ export function AgentWorkspace() {
     (state) => state.resolvePermission,
   );
   const resolvePlan = useAgentStore((state) => state.resolvePlan);
-  const [gitOpen, setGitOpen] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([]);
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] =
+    useState<string>();
+  const [workspacePanelWidth, setWorkspacePanelWidth] = useState(
+    storedWorkspacePanelWidth,
+  );
+  const workspacePanelWidthRef = useRef(workspacePanelWidth);
+  const workspaceTabSequence = useRef(0);
+  const [workspacePanelResize, setWorkspacePanelResize] = useState<{
+    startWidth: number;
+    startX: number;
+  }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] =
     useState<SettingsPage>("configuration");
@@ -278,6 +314,53 @@ export function AgentWorkspace() {
     };
   }, [sidebarResize]);
 
+  useEffect(() => {
+    if (!workspacePanelResize) {
+      return;
+    }
+
+    const previousCursor = document.documentElement.style.cursor;
+    const previousUserSelect =
+      document.documentElement.style.userSelect;
+    document.documentElement.style.cursor = "col-resize";
+    document.documentElement.style.userSelect = "none";
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const nextWidth = Math.min(
+        maxWorkspacePanelWidth(),
+        Math.max(
+          MIN_WORKSPACE_PANEL_WIDTH,
+          workspacePanelResize.startWidth +
+            workspacePanelResize.startX -
+            event.clientX,
+        ),
+      );
+      workspacePanelWidthRef.current = nextWidth;
+      setWorkspacePanelWidth(nextWidth);
+    };
+    const handlePointerUp = () => {
+      window.localStorage.setItem(
+        WORKSPACE_PANEL_WIDTH_STORAGE_KEY,
+        String(Math.round(workspacePanelWidthRef.current)),
+      );
+      setWorkspacePanelResize(undefined);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, {
+      once: true,
+    });
+
+    return () => {
+      document.documentElement.style.cursor = previousCursor;
+      document.documentElement.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [workspacePanelResize]);
+
   const installAppUpdate = async () => {
     setInstallingUpdate(true);
     try {
@@ -288,18 +371,116 @@ export function AgentWorkspace() {
   };
 
   const openSettings = (page: SettingsPage = "configuration") => {
-    setGitOpen(false);
-    setFilesOpen(false);
-    setTerminalOpen(false);
+    setWorkspacePanelOpen(false);
+    setWorkspaceTabs([]);
+    setActiveWorkspaceTabId(undefined);
     setSettingsPage(page);
     setSettingsOpen(true);
   };
 
-  const openGit = () => {
+  const openWorkspaceTab = useCallback((tab: WorkspaceTab) => {
     setSettingsOpen(false);
-    setFilesOpen(false);
-    setTerminalOpen(false);
-    setGitOpen(true);
+    setWorkspacePanelOpen(true);
+    setWorkspaceTabs((current) =>
+      current.some((item) => item.id === tab.id)
+        ? current
+        : [...current, tab],
+    );
+    setActiveWorkspaceTabId(tab.id);
+  }, []);
+
+  const openGit = () =>
+    openWorkspaceTab({ id: "review", kind: "review", label: "审阅" });
+
+  const openProjectReference = useCallback(
+    (reference: ProjectReference) => {
+      if (reference.kind === "folder") {
+        openWorkspaceTab({ id: "files", kind: "files", label: "文件" });
+        return;
+      }
+      const path = reference.displayPath;
+      openWorkspaceTab({
+        id: `file:${path}`,
+        kind: "file",
+        label: path.split("/").at(-1) ?? path,
+        path,
+      });
+    },
+    [openWorkspaceTab],
+  );
+
+  const openFilePreview = useCallback(
+    (path: string) =>
+      openWorkspaceTab({
+        id: `file:${path}`,
+        kind: "file",
+        label: path.split("/").at(-1) ?? path,
+        path,
+      }),
+    [openWorkspaceTab],
+  );
+
+  const newWorkspaceToolTab = (
+    kind: "files" | "terminal" | "review",
+  ) => {
+    const baseLabel = {
+      files: "文件",
+      terminal: "终端",
+      review: "审阅",
+    }[kind];
+    const matchingTabs = workspaceTabs.filter(
+      (tab) => tab.kind === kind,
+    ).length;
+    workspaceTabSequence.current += 1;
+    const label =
+      matchingTabs === 0 ? baseLabel : `${baseLabel} ${matchingTabs + 1}`;
+    const id = `${kind}:new:${workspaceTabSequence.current}`;
+    const tab: WorkspaceTab =
+      kind === "files"
+        ? { id, kind: "files", label }
+        : kind === "terminal"
+          ? { id, kind: "terminal", label }
+          : { id, kind: "review", label };
+    openWorkspaceTab(tab);
+  };
+
+  const closeWorkspaceTab = (tabId: string) => {
+    setWorkspaceTabs((current) => {
+      const closingIndex = current.findIndex((tab) => tab.id === tabId);
+      const nextTabs = current.filter((tab) => tab.id !== tabId);
+      if (activeWorkspaceTabId === tabId) {
+        const nextActive =
+          nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.id;
+        setActiveWorkspaceTabId(nextActive);
+      }
+      return nextTabs;
+    });
+  };
+
+  const updateWorkspacePanelWidth = (nextWidth: number) => {
+    const clampedWidth = Math.min(
+      maxWorkspacePanelWidth(),
+      Math.max(MIN_WORKSPACE_PANEL_WIDTH, nextWidth),
+    );
+    workspacePanelWidthRef.current = clampedWidth;
+    setWorkspacePanelWidth(clampedWidth);
+    window.localStorage.setItem(
+      WORKSPACE_PANEL_WIDTH_STORAGE_KEY,
+      String(Math.round(clampedWidth)),
+    );
+  };
+
+  const beginWorkspacePanelResize: PointerEventHandler<HTMLDivElement> = (
+    event,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    setWorkspacePanelResize({
+      startWidth: workspacePanelWidthRef.current,
+      startX: event.clientX,
+    });
   };
 
   const returnToConversation = () => {
@@ -379,9 +560,9 @@ export function AgentWorkspace() {
       index: targetIndex,
     }));
     returnToConversation();
-    setGitOpen(false);
-    setFilesOpen(false);
-    setTerminalOpen(false);
+    setWorkspaceTabs([]);
+    setActiveWorkspaceTabId(undefined);
+    setWorkspacePanelOpen(false);
     selectSession(session);
   };
 
@@ -465,193 +646,185 @@ export function AgentWorkspace() {
         <div
           aria-hidden={settingsOpen}
           className={cn(
-            "relative flex min-h-0 flex-1 flex-col",
+            "relative flex min-h-0 flex-1",
             settingsOpen && "hidden",
           )}
         >
-          <header
-            className={cn(
-              "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
-              sidebarCollapsed
-                ? isMacOS
-                  ? "pl-52"
-                  : "pl-32"
-                : "pl-6",
-            )}
-            data-tauri-drag-region
-          >
-            <div
-              className="flex min-w-0 flex-1 items-center gap-2"
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            <header
+              className={cn(
+                "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
+                sidebarCollapsed
+                  ? isMacOS
+                    ? "pl-52"
+                    : "pl-32"
+                  : "pl-6",
+              )}
               data-tauri-drag-region
             >
-              <h1
-                className="min-w-0 truncate font-semibold text-base"
-                data-tauri-drag-region
-              >
-                {activeSession
-                  ? localizedSessionTitle(activeSession.title)
-                  : "正在打开工作区…"}
-              </h1>
               <div
-                className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                className="flex min-w-0 flex-1 items-center gap-2"
                 data-tauri-drag-region
               >
-                <span
-                  aria-hidden="true"
-                  className="motion-status-dot size-1.5 rounded-full bg-current"
+                <h1
+                  className="min-w-0 truncate font-semibold text-base"
                   data-tauri-drag-region
-                />
-                {sessionStatusLabel(status.phase, acpPhase)}
+                >
+                  {activeSession
+                    ? localizedSessionTitle(activeSession.title)
+                    : "正在打开工作区…"}
+                </h1>
+                <div
+                  className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                  data-tauri-drag-region
+                >
+                  <span
+                    aria-hidden="true"
+                    className="motion-status-dot size-1.5 rounded-full bg-current"
+                    data-tauri-drag-region
+                  />
+                  {sessionStatusLabel(status.phase, acpPhase)}
+                </div>
               </div>
-            </div>
-            <Button
-              aria-label={
-                git.loading
-                  ? "正在检查更改"
-                  : `${git.changes.length} 项更改`
-              }
-              className="gap-1 px-2"
-              onClick={() => setGitOpen(true)}
-              size="sm"
-              title={
-                git.loading
-                  ? "正在检查更改"
-                  : `${git.changes.length} 项更改`
-              }
-              variant="outline"
-            >
-              <GitCompareArrowsIcon data-icon="inline-start" />
-              <span className="min-w-2 text-center tabular-nums">
-                {git.loading ? "…" : git.changes.length}
-              </span>
-            </Button>
-            {appUpdate?.available ? (
               <Button
-                className="motion-view-enter"
-                disabled={installingUpdate}
-                onClick={() => void installAppUpdate()}
+                aria-label={
+                  git.loading
+                    ? "正在检查更改"
+                    : `${git.changes.length} 项更改`
+                }
+                className="gap-1 px-2"
+                onClick={openGit}
+                size="sm"
+                title={
+                  git.loading
+                    ? "正在检查更改"
+                    : `${git.changes.length} 项更改`
+                }
                 variant="outline"
               >
-                <DownloadIcon />
-                {installingUpdate
-                  ? "正在安装更新"
-                  : `更新到 ${appUpdate.version}`}
+                <GitCompareArrowsIcon data-icon="inline-start" />
+                <span className="min-w-2 text-center tabular-nums">
+                  {git.loading ? "…" : git.changes.length}
+                </span>
               </Button>
-            ) : null}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+              {appUpdate?.available ? (
                 <Button
-                  aria-label="会话操作"
-                  size="icon"
-                  variant="ghost"
+                  className="motion-view-enter"
+                  disabled={installingUpdate}
+                  onClick={() => void installAppUpdate()}
+                  variant="outline"
                 >
-                  <MoreHorizontalIcon />
+                  <DownloadIcon />
+                  {installingUpdate
+                    ? "正在安装更新"
+                    : `更新到 ${appUpdate.version}`}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setFilesOpen(true)}>
-                  打开文件
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setTerminalOpen(true)}>
-                  打开终端
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setGitOpen(true)}>
-                  打开 Git
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </header>
-          <Presence present={Boolean(visibleError)}>
-            {(motionState) => (
-              <div
-                aria-live="polite"
-                className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-                data-motion-state={motionState}
-                role="alert"
+              ) : null}
+              <Button
+                aria-label={
+                  workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
+                }
+                aria-pressed={workspacePanelOpen}
+                onClick={() => setWorkspacePanelOpen((open) => !open)}
+                size="icon"
+                title={
+                  workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
+                }
+                variant={workspacePanelOpen ? "secondary" : "ghost"}
               >
-                {visibleError}
-              </div>
-            )}
-          </Presence>
+                <span
+                  className={cn(
+                    "transition-transform duration-200 ease-out [&>svg]:size-4",
+                    workspacePanelOpen && "-translate-x-0.5",
+                  )}
+                >
+                  <PanelRightIcon />
+                </span>
+              </Button>
+            </header>
+            <Presence present={Boolean(visibleError)}>
+              {(motionState) => (
+                <div
+                  aria-live="polite"
+                  className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+                  data-motion-state={motionState}
+                  role="alert"
+                >
+                  {visibleError}
+                </div>
+              )}
+            </Presence>
 
-          <AgentTimeline
-            cwd={cwd}
-            entries={timeline}
-            onPermission={resolvePermission}
-            onPlanDecision={resolvePlan}
-            projectRoot={activeProject?.path ?? cwd}
-          />
-          <AgentComposer
-            contextUsage={contextUsage}
-            modelChanging={Boolean(pendingModelId)}
-            models={availableModels}
-            onModelChange={(modelId) => void selectModel(modelId)}
-            onPermissionModeChange={(mode) =>
-              void selectPermissionMode(mode)
+            <AgentTimeline
+              cwd={cwd}
+              entries={timeline}
+              onPermission={resolvePermission}
+              onPlanDecision={resolvePlan}
+              onOpenProjectReference={openProjectReference}
+              projectRoot={activeProject?.path ?? cwd}
+            />
+            <AgentComposer
+              contextUsage={contextUsage}
+              modelChanging={Boolean(pendingModelId)}
+              models={availableModels}
+              onModelChange={(modelId) => void selectModel(modelId)}
+              onPermissionModeChange={(mode) =>
+                void selectPermissionMode(mode)
+              }
+              onReasoningEffortChange={(effort) =>
+                void selectReasoningEffort(effort)
+              }
+              onSessionModeChange={(modeId) =>
+                void selectSessionMode(modeId)
+              }
+              onSubmit={submitPrompt}
+              permissionMode={permissionMode}
+              reasoningEffortChanging={Boolean(pendingReasoningEffort)}
+              sessionModeChanging={Boolean(pendingSessionModeId)}
+              sessionModes={availableSessionModes}
+              selectedModelId={selectedModelId}
+              selectedReasoningEffort={selectedReasoningEffort}
+              selectedSessionModeId={selectedSessionModeId}
+              status={chatStatus}
+            />
+          </div>
+          <div
+            aria-hidden={!workspacePanelOpen}
+            className="motion-workspace-layer h-full min-h-0 shrink-0"
+            data-collapsed={!workspacePanelOpen}
+            data-resizing={Boolean(workspacePanelResize)}
+            inert={!workspacePanelOpen}
+            style={
+              {
+                "--workspace-panel-width": `${workspacePanelWidth}px`,
+                width: workspacePanelOpen ? workspacePanelWidth : 0,
+              } as CSSProperties
             }
-            onReasoningEffortChange={(effort) =>
-              void selectReasoningEffort(effort)
-            }
-            onSessionModeChange={(modeId) =>
-              void selectSessionMode(modeId)
-            }
-            onSubmit={submitPrompt}
-            permissionMode={permissionMode}
-            reasoningEffortChanging={Boolean(pendingReasoningEffort)}
-            sessionModeChanging={Boolean(pendingSessionModeId)}
-            sessionModes={availableSessionModes}
-            selectedModelId={selectedModelId}
-            selectedReasoningEffort={selectedReasoningEffort}
-            selectedSessionModeId={selectedSessionModeId}
-            status={chatStatus}
-          />
-          <Presence present={gitOpen}>
-            {(motionState) => (
-              <div
-                className="motion-layer pointer-events-none absolute inset-0 z-20"
-                data-motion-state={motionState}
-              >
-                <div className="pointer-events-auto size-full">
-                  <GitWorkspace
-                    changes={git.changes}
-                    cwd={cwd}
-                    onClose={() => setGitOpen(false)}
-                    onRefreshChanges={() => void git.refresh()}
-                  />
-                </div>
-              </div>
-            )}
-          </Presence>
-          <Presence present={filesOpen}>
-            {(motionState) => (
-              <div
-                className="motion-layer pointer-events-none absolute inset-0 z-20"
-                data-motion-state={motionState}
-              >
-                <div className="pointer-events-auto size-full">
-                  <FileWorkspace
-                    onClose={() => setFilesOpen(false)}
-                    root={cwd}
-                  />
-                </div>
-              </div>
-            )}
-          </Presence>
-          <Presence present={terminalOpen}>
-            {(motionState) => (
-              <div
-                className="motion-sheet-layer pointer-events-none absolute inset-0 z-30"
-                data-motion-state={motionState}
-              >
-                <div className="pointer-events-auto size-full">
-                  <TerminalPanel
-                    cwd={cwd}
-                    onClose={() => setTerminalOpen(false)}
-                  />
-                </div>
-              </div>
-            )}
-          </Presence>
+          >
+            <WorkspaceSidePanel
+              activeTabId={activeWorkspaceTabId}
+              changes={git.changes}
+              cwd={cwd}
+              gitError={git.error}
+              gitLoading={git.loading}
+              onActivateTab={setActiveWorkspaceTabId}
+              onCloseTab={closeWorkspaceTab}
+              onNewTab={newWorkspaceToolTab}
+              onOpenFile={openFilePreview}
+              onRefreshGit={() => void git.refresh()}
+              onResetWidth={() =>
+                updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
+              }
+              onResizeBy={(delta) =>
+                updateWorkspacePanelWidth(
+                  workspacePanelWidthRef.current + delta,
+                )
+              }
+              onResizeStart={beginWorkspacePanelResize}
+              root={activeProject?.path ?? cwd}
+              tabs={workspaceTabs}
+            />
+          </div>
         </div>
       </section>
     </main>

@@ -21,8 +21,10 @@ import { cn } from "@/lib/utils";
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
 interface FileWorkspaceProps {
+  embedded?: boolean;
+  onOpenFile?: (path: string) => void;
   root: string;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 const languageFor = (path: string) => {
@@ -47,7 +49,12 @@ const languageFor = (path: string) => {
   );
 };
 
-export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
+export function FileWorkspace({
+  embedded = false,
+  onOpenFile,
+  root,
+  onClose,
+}: FileWorkspaceProps) {
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [filter, setFilter] = useState("");
   const [selectedPath, setSelectedPath] = useState<string>();
@@ -56,6 +63,11 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const editorTheme =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark")
+      ? "vs-dark"
+      : "vs";
 
   const loadTree = async () => {
     setLoading(true);
@@ -84,6 +96,10 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
   }, [entries, filter]);
 
   const openFile = async (path: string) => {
+    if (onOpenFile) {
+      onOpenFile(path);
+      return;
+    }
     setSelectedPath(path);
     setLoading(true);
     setError(undefined);
@@ -116,8 +132,18 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
   };
 
   return (
-    <section className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4">
+    <section
+      className={cn(
+        "flex min-h-0 flex-col bg-background",
+        embedded ? "size-full" : "absolute inset-0 z-20",
+      )}
+    >
+      <header
+        className={cn(
+          "flex shrink-0 items-center gap-3 border-b px-4",
+          embedded ? "h-12" : "h-16",
+        )}
+      >
         <div className="min-w-0 flex-1">
           <h2 className="font-semibold text-base">文件</h2>
           <p className="truncate text-muted-foreground text-xs">{root}</p>
@@ -131,22 +157,26 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
         >
           <RefreshCwIcon className={cn(loading && "animate-spin")} />
         </Button>
-        <Button
-          disabled={!selectedPath || content === savedContent || saving}
-          onClick={() => void save()}
-          variant="outline"
-        >
-          <SaveIcon />
-          {saving ? "正在保存" : "保存"}
-        </Button>
-        <Button
-          aria-label="关闭文件"
-          onClick={onClose}
-          size="icon"
-          variant="ghost"
-        >
-          <XIcon />
-        </Button>
+        {!onOpenFile ? (
+          <Button
+            disabled={!selectedPath || content === savedContent || saving}
+            onClick={() => void save()}
+            variant="outline"
+          >
+            <SaveIcon />
+            {saving ? "正在保存" : "保存"}
+          </Button>
+        ) : null}
+        {onClose ? (
+          <Button
+            aria-label="关闭文件"
+            onClick={onClose}
+            size="icon"
+            variant="ghost"
+          >
+            <XIcon />
+          </Button>
+        ) : null}
       </header>
 
       {error ? (
@@ -156,7 +186,12 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 shrink-0 flex-col border-r">
+        <aside
+          className={cn(
+            "flex shrink-0 flex-col",
+            onOpenFile ? "w-full" : "w-64 border-r",
+          )}
+        >
           <div className="p-3">
             <Input
               aria-label="筛选文件"
@@ -202,6 +237,7 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
           </nav>
         </aside>
 
+        {!onOpenFile ? (
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs">
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -236,7 +272,7 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
                     smoothScrolling: true,
                     wordWrap: "on",
                   }}
-                  theme="vs"
+                  theme={editorTheme}
                   value={content}
                 />
               </Suspense>
@@ -247,6 +283,7 @@ export function FileWorkspace({ root, onClose }: FileWorkspaceProps) {
             )}
           </div>
         </section>
+        ) : null}
       </div>
     </section>
   );

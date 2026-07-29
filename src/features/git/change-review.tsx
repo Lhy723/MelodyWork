@@ -13,9 +13,10 @@ import { getGitDiff } from "@/lib/melody-bridge";
 interface ChangeReviewProps {
   changes: GitChange[];
   cwd: string;
+  embedded?: boolean;
   error?: string;
   loading: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   onRefresh: () => void;
 }
 
@@ -52,6 +53,7 @@ const DiffLine = ({ line }: { line: string }) => {
 export function ChangeReview({
   changes,
   cwd,
+  embedded = false,
   error,
   loading,
   onClose,
@@ -103,8 +105,20 @@ export function ChangeReview({
   const diffLines = useMemo(() => diff?.content.split("\n") ?? [], [diff]);
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-20 flex w-[min(42rem,calc(100%-2rem))] flex-col border-l bg-background shadow-xl">
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4">
+    <aside
+      className={cn(
+        "flex min-h-0 flex-col bg-background",
+        embedded
+          ? "size-full"
+          : "absolute inset-y-0 right-0 z-20 w-[min(42rem,calc(100%-2rem))] border-l shadow-xl",
+      )}
+    >
+      <header
+        className={cn(
+          "flex shrink-0 items-center gap-3 border-b px-4",
+          embedded ? "h-12" : "h-16",
+        )}
+      >
         <div className="min-w-0 flex-1">
           <h2 className="font-semibold text-sm">更改</h2>
           <p className="text-muted-foreground text-xs">
@@ -120,14 +134,16 @@ export function ChangeReview({
         >
           <RefreshCwIcon className={cn(loading && "animate-spin")} />
         </Button>
-        <Button
-          aria-label="关闭更改"
-          onClick={onClose}
-          size="icon"
-          variant="ghost"
-        >
-          <XIcon />
-        </Button>
+        {onClose ? (
+          <Button
+            aria-label="关闭更改"
+            onClick={onClose}
+            size="icon"
+            variant="ghost"
+          >
+            <XIcon />
+          </Button>
+        ) : null}
       </header>
 
       {error ? (

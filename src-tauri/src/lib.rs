@@ -25,7 +25,8 @@ use git_runtime::{
 use tauri::Manager;
 use update_runtime::check_app_update;
 use workspace_runtime::{
-    read_workspace_file, run_terminal_command, workspace_tree, write_workspace_file,
+    TerminalRuntime, close_terminal_session, create_terminal_session, read_workspace_file,
+    run_terminal_command, workspace_tree, write_terminal_input, write_workspace_file,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,6 +42,7 @@ pub fn run() {
             Ok(())
         })
         .manage(AgentRuntime::default())
+        .manage(TerminalRuntime::default())
         .invoke_handler(tauri::generate_handler![
             agent_status,
             start_agent,
@@ -67,6 +69,9 @@ pub fn run() {
             workspace_tree,
             read_workspace_file,
             write_workspace_file,
+            create_terminal_session,
+            write_terminal_input,
+            close_terminal_session,
             run_terminal_command,
             read_melody_config,
             update_melody_config,
