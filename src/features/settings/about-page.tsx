@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
   CheckCircleIcon,
@@ -9,7 +10,11 @@ import { useEffect, useState } from "react";
 
 import appPackage from "../../../package.json";
 import { Button } from "@/components/ui/button";
-import { checkAppUpdate } from "@/lib/melody-bridge";
+import {
+  checkAppUpdate,
+  isTauriRuntime,
+  openExternalUrl,
+} from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
 type UpdateCheckState =
@@ -46,6 +51,7 @@ function GithubMark({ className }: { className?: string }) {
 }
 
 export function AboutPage() {
+  const [currentVersion, setCurrentVersion] = useState(appPackage.version);
   const [updateState, setUpdateState] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -91,7 +97,20 @@ export function AboutPage() {
   };
 
   useEffect(() => {
-    void checkForUpdate();
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let active = true;
+    void getVersion()
+      .then((version) => {
+        if (active) {
+          setCurrentVersion(version);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -107,7 +126,7 @@ export function AboutPage() {
 
         <div className="mt-4 flex items-center gap-2">
           <span className="rounded-full bg-muted px-3 py-1 font-mono text-muted-foreground text-xs">
-            v{appPackage.version}
+            v{currentVersion}
           </span>
         </div>
 
@@ -126,16 +145,15 @@ export function AboutPage() {
               : "检查更新"}
           </Button>
 
-          <a
-            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border bg-background px-4 py-2 font-medium text-sm shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-            href={GITHUB_REPO_URL}
-            rel="noopener noreferrer"
-            target="_blank"
+          <Button
+            className="w-full"
+            onClick={() => void openExternalUrl(GITHUB_REPO_URL)}
+            variant="outline"
           >
             <GithubMark className="size-4" />
             GitHub 仓库
             <ExternalLinkIcon className="size-3 text-muted-foreground" />
-          </a>
+          </Button>
         </div>
 
         <div className="mt-8 w-full">
