@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "untrusted comment: minisign public key: D3BABB1B3E4159FA\nRWT6WUE+G7u601xuk65J3jWw6VUPwB7N5+z53FQBeckpzFoNW91bMs6A"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzQkFCQjFCM0U0MTU5RkEKUldUNldVRStHN3U2MDF4dWs2NUozald3NlZVUHdCN041K3o1M0ZRQmVja3B6Rm9OVzkxYk1zNkEK"
     }
   }
 }

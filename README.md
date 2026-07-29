@@ -62,7 +62,8 @@ Windows 的 Git 页面依赖系统已安装 `git` 并可从 `PATH` 访问。
 
 首次发布前需要生成 Tauri updater 密钥，并配置：
 
-- Repository variable `TAURI_UPDATER_PUBLIC_KEY`
+- Repository variable `TAURI_UPDATER_PUBLIC_KEY`（Tauri 生成的完整 `.pub`
+  文件内容再进行 Base64 编码；必须与 `tauri.conf.json` 中的值一致）
 - Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 私钥不得提交到仓库。应用会在启动时检查 GitHub Release 的 `latest.json`，发现新版本后在顶部提供安装入口。
