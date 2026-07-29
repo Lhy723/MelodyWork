@@ -21,6 +21,7 @@ import {
   upsertPlanApproval,
 } from "@/domain/plan-approval";
 import {
+  isSessionUpdateMethod,
   notificationMetadata,
   parseTimelineProjection,
   SessionEventDeduplicator,
@@ -807,8 +808,9 @@ const contextUsageForModel = (
 };
 
 // 从 ACP 消息中提取 session update 的真实 params。
-// session/update 是直连形式：params.sessionId / params.update
-// _x.ai/session_notification 是包装形式：params.params.sessionId / params.params.update
+// session/update 与 x.ai/session/update 是直连形式：
+// params.sessionId / params.update。session_notification 也可能由兼容层
+// 包装为 params.params.sessionId / params.params.update。
 const extractSessionUpdateParams = (
   message: AcpEnvelope,
 ): Record<string, unknown> | undefined => {
@@ -1661,10 +1663,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
 
-    const isSessionUpdate =
-      message.method === "session/update" ||
-      message.method === "_x.ai/session_notification";
-    if (!isSessionUpdate) {
+    if (!isSessionUpdateMethod(message.method)) {
       return;
     }
 

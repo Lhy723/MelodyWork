@@ -77,10 +77,11 @@ jobs:
 
       - name: Build Melody sidecar
         shell: bash
+        working-directory: vendor/melody-build
         run: |
-          cargo build --locked --release --manifest-path vendor/melody-build/Cargo.toml --package melody-pager-bin --bin melody-pager
-          mkdir -p src-tauri/binaries
-          cp "vendor/melody-build/target/release/melody-pager${{ matrix.sidecar_ext }}" "src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
+          cargo build --locked --release --package melody-pager-bin --bin melody-pager
+          mkdir -p ../../src-tauri/binaries
+          cp "target/release/melody-pager${{ matrix.sidecar_ext }}" "../../src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
 
       - name: Build and publish installers
         uses: tauri-apps/tauri-action@v0

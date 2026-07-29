@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": ""
+      "pubkey": "untrusted comment: minisign public key: D3BABB1B3E4159FA\nRWT6WUE+G7u601xuk65J3jWw6VUPwB7N5+z53FQBeckpzFoNW91bMs6A"
     }
   }
 }

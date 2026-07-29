@@ -30,6 +30,7 @@ export const useSessionPersistence = () => {
   const localSessionId = useAgentStore((state) => state.localSessionId);
   const timeline = useAgentStore((state) => state.timeline);
   const acpCursor = useAgentStore((state) => state.acpCursor);
+  const chatStatus = useAgentStore((state) => state.chatStatus);
   const activeSession = useWorkspaceStore((state) => state.activeSession);
   const replaceSession = useWorkspaceStore((state) => state.replaceSession);
   const lastSaved = useRef("");
@@ -51,7 +52,10 @@ export const useSessionPersistence = () => {
         title,
         timelineJson,
         acpCursor: acpCursor ?? null,
-        timelineVersion: timelineProjectionVersion(timeline),
+        timelineVersion: timelineProjectionVersion(
+          timeline,
+          chatStatus === "submitted" || chatStatus === "streaming",
+        ),
       }).then((session) => {
         lastSaved.current = signature;
         replaceSession(session);
@@ -62,6 +66,7 @@ export const useSessionPersistence = () => {
   }, [
     activeSession,
     acpCursor,
+    chatStatus,
     localSessionId,
     replaceSession,
     timeline,

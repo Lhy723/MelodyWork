@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isSessionUpdateMethod,
   SessionEventDeduplicator,
   TIMELINE_PROJECTION_VERSION,
   notificationMetadata,
@@ -45,6 +46,20 @@ test("only restores a projection with the current version and a cursor", () => {
   );
 });
 
+test("recognizes live and durable Melody session update rails", () => {
+  for (const method of [
+    "session/update",
+    "_x.ai/session/update",
+    "x.ai/session/update",
+    "_x.ai/session_notification",
+    "x.ai/session_notification",
+  ]) {
+    assert.equal(isSessionUpdateMethod(method), true, method);
+  }
+  assert.equal(isSessionUpdateMethod("session/request_permission"), false);
+  assert.equal(isSessionUpdateMethod(undefined), false);
+});
+
 test("does not mark legacy tool rows as a current projection", () => {
   assert.equal(
     timelineProjectionVersion([{
@@ -65,6 +80,24 @@ test("does not mark legacy tool rows as a current projection", () => {
       output: "",
       activity: { operation: "edit" },
     }]),
+    TIMELINE_PROJECTION_VERSION,
+  );
+});
+
+test("replays an orphaned stream but preserves an active stream", () => {
+  const streamingTimeline = [{
+    id: "assistant-streaming",
+    kind: "message",
+    role: "assistant",
+    content: "已经完成的内容",
+    streaming: true,
+  }];
+  assert.equal(
+    timelineProjectionVersion(streamingTimeline),
+    TIMELINE_PROJECTION_VERSION - 1,
+  );
+  assert.equal(
+    timelineProjectionVersion(streamingTimeline, true),
     TIMELINE_PROJECTION_VERSION,
   );
 });

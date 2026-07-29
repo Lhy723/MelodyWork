@@ -1,6 +1,20 @@
 import type { TimelineEntry } from "@/domain/acp";
 
-export const TIMELINE_PROJECTION_VERSION = 2;
+// Version 3 replays projections written before MelodyWork handled the durable
+// `_x.ai/session/update` completion rail. Those projections may otherwise keep
+// a finished assistant message marked as streaming forever.
+export const TIMELINE_PROJECTION_VERSION = 3;
+
+const SESSION_UPDATE_METHODS = new Set([
+  "session/update",
+  "_x.ai/session/update",
+  "x.ai/session/update",
+  "_x.ai/session_notification",
+  "x.ai/session_notification",
+]);
+
+export const isSessionUpdateMethod = (method?: string): boolean =>
+  method !== undefined && SESSION_UPDATE_METHODS.has(method);
 
 export interface NotificationMetadata {
   eventId?: string;
@@ -34,12 +48,24 @@ export const usableTimelineProjection = ({
     ? parseTimelineProjection(timelineJson)
     : [];
 
-export const timelineProjectionVersion = (timeline: TimelineEntry[]) =>
-  timeline.every(
-    (entry) => entry.kind !== "tool" || entry.activity !== undefined,
-  )
-    ? TIMELINE_PROJECTION_VERSION
-    : TIMELINE_PROJECTION_VERSION - 1;
+export const timelineProjectionVersion = (
+  timeline: TimelineEntry[],
+  activelyStreaming = false,
+) => {
+  const hasOrphanedStream =
+    !activelyStreaming &&
+    timeline.some(
+      (entry) =>
+        (entry.kind === "message" || entry.kind === "thought") &&
+        entry.streaming,
+    );
+  const hasLegacyTool = timeline.some(
+    (entry) => entry.kind === "tool" && entry.activity === undefined,
+  );
+  return hasOrphanedStream || hasLegacyTool
+    ? TIMELINE_PROJECTION_VERSION - 1
+    : TIMELINE_PROJECTION_VERSION;
+};
 
 export const notificationMetadata = (
   params: Record<string, unknown> | undefined,
