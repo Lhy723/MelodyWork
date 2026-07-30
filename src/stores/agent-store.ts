@@ -41,6 +41,7 @@ import {
   updateStoredSession,
   upsertPermissionRule,
 } from "@/lib/melody-bridge";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const INITIALIZE_REQUEST_ID = 1;
@@ -1131,7 +1132,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   stderr: [],
   availableModels: [],
   availableSessionModes: [],
-  permissionMode: "ask",
+  permissionMode: useAppSettingsStore.getState().defaultPermissionMode,
   runningSessions: {},
   chatStatus: "ready",
   setStatus: (status) =>
@@ -1935,7 +1936,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
   submitPrompt: async (content, attachments = []) => {
     const trimmed = content.trim();
-    if ((!trimmed && attachments.length === 0) || get().chatStatus !== "ready") {
+    if (!trimmed && attachments.length === 0) {
       return;
     }
 
@@ -1962,8 +1963,59 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       (attachmentNames
         ? `已附加：${attachmentNames}`
         : `已附加 ${attachments.length} 个文件`);
+    const stateBeforeSubmit = get();
+    const localSessionId = stateBeforeSubmit.localSessionId;
 
-    const localSessionId = get().localSessionId;
+    if (stateBeforeSubmit.chatStatus !== "ready") {
+      const sessionId = stateBeforeSubmit.acpSessionId;
+      if (!sessionId || !localSessionId) {
+        return;
+      }
+      const sendNow =
+        useAppSettingsStore.getState().followUpBehavior === "steer";
+      set((state) => ({
+        timeline: [
+          ...state.timeline,
+          {
+            id: `user-follow-up-${Date.now()}`,
+            kind: "message",
+            role: "user",
+            content: timelineContent,
+            startedAt: Date.now(),
+            attachments:
+              attachments.length > 0
+                ? timelineAttachments(attachments)
+                : undefined,
+          },
+        ],
+      }));
+      if (!isTauriRuntime()) {
+        return;
+      }
+      pendingUserEchoBlocks.set(
+        sessionId,
+        (pendingUserEchoBlocks.get(sessionId) ?? 0) + prompt.length,
+      );
+      try {
+        await sendAcp({
+          jsonrpc: "2.0",
+          method: "x.ai/queue/interject",
+          params: {
+            sessionId,
+            prompt,
+            sendNow,
+          },
+        });
+      } catch (reason) {
+        pendingUserEchoBlocks.delete(sessionId);
+        set((state) => ({
+          status: { ...state.status, message: reasonMessage(reason) },
+        }));
+        throw reason;
+      }
+      return;
+    }
+
     set((state) => ({
       chatStatus: "submitted",
       runningSessions: localSessionId

@@ -96,6 +96,24 @@ export function SkillDetailsView({
             <Badge variant="outline">
               {skill.scope === "user" ? "用户" : "项目"}
             </Badge>
+            <Badge variant="secondary">
+              {skill.pluginName
+                ? `插件 · ${skill.pluginName}`
+                : skill.provider === "agents"
+                  ? "Agents"
+                  : skill.provider === "claude"
+                    ? "Claude"
+                    : skill.provider === "cursor"
+                      ? "Cursor"
+                      : "Melody"}
+            </Badge>
+            {!skill.enabled ? (
+              <Badge variant="secondary">
+                {skill.compatibilityStatus === "disabled"
+                  ? "兼容性已关闭"
+                  : "已停用"}
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-muted-foreground text-sm">
             {details?.description ?? "查看技能说明、包含的文件和安装位置。"}
@@ -110,17 +128,19 @@ export function SkillDetailsView({
         >
           <RefreshCwIcon className={cn(loading && "animate-spin")} />
         </Button>
-        <Button
-          onClick={() => {
-            setDeleteError(undefined);
-            setDeleteOpen(true);
-          }}
-          size="sm"
-          variant="destructive"
-        >
-          <Trash2Icon />
-          删除技能
-        </Button>
+        {skill.deletable ? (
+          <Button
+            onClick={() => {
+              setDeleteError(undefined);
+              setDeleteOpen(true);
+            }}
+            size="sm"
+            variant="destructive"
+          >
+            <Trash2Icon />
+            删除技能
+          </Button>
+        ) : null}
       </div>
 
       {error ? (
@@ -218,7 +238,7 @@ export function SkillDetailsView({
         </p>
       ) : null}
 
-      <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
+      <Dialog onOpenChange={setDeleteOpen} open={skill.deletable && deleteOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>删除“{skill.name}”？</DialogTitle>

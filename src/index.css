@@ -18,6 +18,12 @@ body {
   overflow: hidden;
 }
 
+.research-serif {
+  font-family: Georgia, "Songti SC", "STSong", "Noto Serif CJK SC",
+    "Source Han Serif SC", serif;
+  letter-spacing: -0.01em;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;

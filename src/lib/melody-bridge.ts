@@ -49,6 +49,11 @@ export interface AppUpdateStatus {
   installed: boolean;
 }
 
+interface ResearchHttpResponse {
+  body: string;
+  contentType?: string;
+}
+
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -90,6 +95,26 @@ export const openExternalUrl = async (candidate: string): Promise<void> => {
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
+};
+
+export const fetchResearchResource = async (
+  url: string,
+  accept?: string,
+): Promise<string> => {
+  if (!isTauriRuntime()) {
+    const response = await fetch(url, {
+      headers: accept ? { Accept: accept } : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return response.text();
+  }
+  const response = await invoke<ResearchHttpResponse>(
+    "fetch_research_resource",
+    { accept, url },
+  );
+  return response.body;
 };
 
 export const getAgentStatus = async (): Promise<AgentStatus> => {
@@ -622,6 +647,68 @@ export const listMelodyExtensions = async (
         },
       ];
 
+export const listMelodySkills = async (
+  cwd: string,
+): Promise<MelodyExtension[]> =>
+  isTauriRuntime()
+    ? invoke<MelodyExtension[]>("list_melody_skills", { cwd })
+    : [
+        {
+          kind: "skills",
+          name: "code-review",
+          description: "检查代码质量、风险与测试覆盖。",
+          path: "~/.melody/skills/code-review",
+          scope: "user",
+          provider: "melody",
+          source: "user",
+          managed: false,
+          enabled: true,
+          userInvocable: true,
+          deletable: true,
+        },
+        {
+          kind: "skills",
+          name: "ai-elements",
+          description: "构建 AI 对话界面和工具调用体验。",
+          path: "~/.agents/skills/ai-elements",
+          scope: "user",
+          provider: "agents",
+          source: "user",
+          managed: false,
+          enabled: true,
+          userInvocable: true,
+          deletable: false,
+        },
+        {
+          kind: "skills",
+          name: "swiftui-patterns",
+          description: "使用成熟的 SwiftUI 模式构建 macOS 界面。",
+          path: "~/.claude/skills/swiftui-patterns",
+          scope: "user",
+          provider: "claude",
+          source: "user",
+          managed: false,
+          enabled: false,
+          compatibilityStatus: "disabled",
+          userInvocable: true,
+          deletable: false,
+        },
+        {
+          kind: "skills",
+          name: "mattpocock-skills:implement",
+          description: "按照既定方案实现经过验证的代码变更。",
+          path: "~/.melody/installed-plugins/mattpocock-skills/skills/implement",
+          scope: "user",
+          provider: "plugin",
+          source: "plugin",
+          pluginName: "mattpocock-skills",
+          managed: true,
+          enabled: true,
+          userInvocable: true,
+          deletable: false,
+        },
+      ];
+
 export const listMarketplaceSources = async (): Promise<MarketplaceSource[]> =>
   isTauriRuntime()
     ? invoke<MarketplaceSource[]>("list_marketplace_sources")
@@ -796,14 +883,16 @@ export const getMelodySkillDetails = async (
       })
     : {
         name: skill.name,
-        description: "检查代码质量并给出可执行的改进建议。",
+        description:
+          skill.description ?? "查看技能说明、包含的文件和安装位置。",
         license: "MIT",
         compatibility: "Melody 0.0.1+",
         path: skill.path,
         skillPath: `${skill.path}/SKILL.md`,
         files: ["SKILL.md", "references/checklist.md"],
-        content:
-          "---\nname: code-review\ndescription: 检查代码质量并给出可执行的改进建议。\n---\n\n# Code Review\n\n读取变更并检查正确性、风险和测试覆盖。",
+        content: `---\nname: ${skill.name}\ndescription: ${
+          skill.description ?? "查看技能说明、包含的文件和安装位置。"
+        }\n---\n\n# ${skill.name}\n\n这是浏览器预览中的技能详情。`,
       };
 
 export const deleteMelodySkill = async (

@@ -1,11 +1,16 @@
 import {
+  BeakerIcon,
   BlocksIcon,
+  BrainCircuitIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  FlaskConicalIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
+  LibraryIcon,
   MoreHorizontalIcon,
   PlusIcon,
+  RadarIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -45,10 +50,22 @@ import type { ProjectRecord, SessionRecord } from "@/domain/workspace";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
 
+export type WorkspaceMode = "work" | "research";
+export type ResearchSection =
+  | "knowledge"
+  | "library"
+  | "experiments"
+  | "sandbox"
+  | "search"
+  | "tracking"
+  | "skills";
+
 interface AppSidebarProps {
   activeProject?: ProjectRecord;
+  activeResearchSection: ResearchSection;
   activeSessionId?: string;
   loading: boolean;
+  workspaceMode: WorkspaceMode;
   settingsActive: boolean;
   projects: ProjectRecord[];
   runningSessions: Record<string, boolean>;
@@ -59,18 +76,22 @@ interface AppSidebarProps {
   onResetWidth: () => void;
   onChooseProject: () => void;
   onDeleteSession: (session: SessionRecord) => void;
+  onModeChange: (mode: WorkspaceMode) => void;
   onOpenExtensions: () => void;
   onOpenGit: () => void;
   onOpenSettings: () => void;
   onNewSession: (project?: ProjectRecord) => void;
   onSelectProject: (project: ProjectRecord) => void;
   onSelectSession: (session: SessionRecord) => void;
+  onSelectResearchSection: (section: ResearchSection) => void;
 }
 
 export function AppSidebar({
   activeProject,
+  activeResearchSection,
   activeSessionId,
   loading,
+  workspaceMode,
   settingsActive,
   projects,
   runningSessions,
@@ -81,12 +102,14 @@ export function AppSidebar({
   onResetWidth,
   onChooseProject,
   onDeleteSession,
+  onModeChange,
   onNewSession,
   onOpenExtensions,
   onOpenGit,
   onOpenSettings,
   onSelectProject,
   onSelectSession,
+  onSelectResearchSection,
 }: AppSidebarProps) {
   const [pendingDelete, setPendingDelete] = useState<SessionRecord>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -146,12 +169,47 @@ export function AppSidebar({
               className="min-w-0 justify-start gap-1 px-2 font-semibold text-lg text-sidebar-foreground hover:text-sidebar-foreground"
               variant="ghost"
             >
-              <span className="truncate">MelodyWork</span>
+              <span
+                className={cn(
+                  "truncate",
+                  workspaceMode === "research" && "research-serif",
+                )}
+              >
+                {workspaceMode === "research"
+                  ? "Melody Research"
+                  : "Melody Work"}
+              </span>
               <ChevronDownIcon className="size-4 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuLabel>工作区</DropdownMenuLabel>
+            <DropdownMenuLabel>应用模式</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => onModeChange("work")}>
+              <SquarePenIcon />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">Melody Work</p>
+                <p className="text-muted-foreground text-xs">
+                  开发任务与工程工具
+                </p>
+              </div>
+              {workspaceMode === "work" ? (
+                <span className="size-1.5 rounded-full bg-foreground" />
+              ) : null}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onModeChange("research")}>
+              <BrainCircuitIcon />
+              <div className="min-w-0 flex-1">
+                <p className="research-serif font-medium">Melody Research</p>
+                <p className="text-muted-foreground text-xs">
+                  文献、实验与研究智能
+                </p>
+              </div>
+              {workspaceMode === "research" ? (
+                <span className="size-1.5 rounded-full bg-foreground" />
+              ) : null}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>当前工作区</DropdownMenuLabel>
             {projects.map((project) => (
               <DropdownMenuItem
                 key={project.id}
@@ -207,19 +265,53 @@ export function AppSidebar({
           variant="ghost"
         >
           <SquarePenIcon data-icon="inline-start" />
-          新建任务
+          {workspaceMode === "research" ? "新建研究任务" : "新建任务"}
         </Button>
+        {workspaceMode === "research" ? (
+          <>
+            <Button
+              className={cn(
+                "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "search" &&
+                  "bg-sidebar-selected",
+              )}
+              onClick={() => onSelectResearchSection("search")}
+              variant="ghost"
+            >
+              <SearchIcon data-icon="inline-start" />
+              自然语言检索
+            </Button>
+            <Button
+              className={cn(
+                "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "tracking" &&
+                  "bg-sidebar-selected",
+              )}
+              onClick={() => onSelectResearchSection("tracking")}
+              variant="ghost"
+            >
+              <RadarIcon data-icon="inline-start" />
+              科研追踪
+            </Button>
+          </>
+        ) : (
+          <Button
+            className="h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground"
+            disabled={!activeProject}
+            onClick={onOpenGit}
+            variant="ghost"
+          >
+            <GitPullRequestIcon data-icon="inline-start" />
+            Git 工作区
+          </Button>
+        )}
         <Button
-          className="h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground"
-          disabled={!activeProject}
-          onClick={onOpenGit}
-          variant="ghost"
-        >
-          <GitPullRequestIcon data-icon="inline-start" />
-          Git 工作区
-        </Button>
-        <Button
-          className="h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground"
+          className={cn(
+            "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+            workspaceMode === "research" &&
+              activeResearchSection === "skills" &&
+              "bg-sidebar-selected",
+          )}
           onClick={onOpenExtensions}
           variant="ghost"
         >
@@ -229,7 +321,44 @@ export function AppSidebar({
       </nav>
 
       <div className="mt-5 flex min-h-0 flex-1 flex-col">
-        <p className="px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
+        {workspaceMode === "research" ? (
+          <>
+            <p className="px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
+              研究
+            </p>
+            <nav
+              aria-label="研究模块"
+              className="flex shrink-0 flex-col gap-0.5 px-1"
+            >
+              {([
+                ["knowledge", BrainCircuitIcon, "知识资产"],
+                ["library", LibraryIcon, "文献库"],
+                ["experiments", FlaskConicalIcon, "实验资源"],
+                ["sandbox", BeakerIcon, "研究沙盒"],
+              ] as const).map(([section, Icon, label]) => (
+                <Button
+                  className={cn(
+                    "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                    activeResearchSection === section &&
+                      "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
+                  )}
+                  key={section}
+                  onClick={() => onSelectResearchSection(section)}
+                  variant="ghost"
+                >
+                  <Icon data-icon="inline-start" />
+                  {label}
+                </Button>
+              ))}
+            </nav>
+          </>
+        ) : null}
+        <p
+          className={cn(
+            "px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide",
+            workspaceMode === "research" && "mt-5",
+          )}
+        >
           项目
         </p>
         <nav
@@ -308,16 +437,24 @@ export function AppSidebar({
                         onSelect={() => onNewSession(project)}
                       >
                         <SquarePenIcon />
-                        在此项目新建任务
+                        {workspaceMode === "research"
+                          ? "在此项目新建研究任务"
+                          : "在此项目新建任务"}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
-                    aria-label={`在 ${project.name} 中新建任务`}
+                    aria-label={`在 ${project.name} 中新建${
+                      workspaceMode === "research" ? "研究任务" : "任务"
+                    }`}
                     disabled={loading}
                     onClick={() => onNewSession(project)}
                     size="icon-sm"
-                    title="在此项目新建任务"
+                    title={
+                      workspaceMode === "research"
+                        ? "在此项目新建研究任务"
+                        : "在此项目新建任务"
+                    }
                     variant="ghost"
                   >
                     <SquarePenIcon />

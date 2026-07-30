@@ -36,12 +36,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import type { AgentModelOption } from "@/domain/acp";
+import type { AgentModelOption, AgentPermissionMode } from "@/domain/acp";
 import type {
   MelodyConfigScope,
   MelodyConfigValue,
 } from "@/domain/config";
+import { requestSystemNotificationPermission } from "@/lib/system-notifications";
 import { cn } from "@/lib/utils";
+import { useAgentStore } from "@/stores/agent-store";
 import {
   useAppSettingsStore,
   type AppSettings,
@@ -137,6 +139,7 @@ export interface ConfigurationNavigationItem {
 }
 
 type SettingKind =
+  | "agents-skills-source"
   | "boolean"
   | "key-value"
   | "number"
@@ -249,7 +252,7 @@ const userSections: SettingSection[] = [
   },
   {
     id: "melody-appearance",
-    label: "Melody 界面",
+    label: "界面",
     description: "终端界面、滚动和内容展示方式。",
     icon: MonitorIcon,
     settings: [
@@ -700,6 +703,14 @@ const userSections: SettingSection[] = [
     description: "从其他编码工具导入约定和数据。",
     icon: DatabaseIcon,
     settings: [
+      {
+        path: ["compat", "agents", "skills"],
+        label: "技能",
+        description:
+          "发现用户 ~/.agents 与当前工作目录 .agents 中的通用技能。",
+        kind: "agents-skills-source",
+        defaultValue: true,
+      },
       ...(["claude", "cursor"] as const).flatMap((provider) =>
         [
           ["skills", "技能", "发现技能与旧式自定义命令。"],
@@ -730,6 +741,11 @@ const userSections: SettingSection[] = [
 ];
 
 const compatibilityGroups = [
+  {
+    id: "agents",
+    label: "Agents",
+    description: "控制跨智能体工具共享的 .agents 通用技能目录。",
+  },
   {
     id: "claude",
     label: "Claude Code",
@@ -773,6 +789,31 @@ function SettingControl({
 }) {
   const explicit = valueAt(values, definition.path);
   const value = explicit ?? definition.defaultValue;
+
+  if (definition.kind === "agents-skills-source") {
+    const ignoreValue = valueAt(values, ["skills", "ignore"]);
+    const ignored = Array.isArray(ignoreValue)
+      ? ignoreValue.filter((item): item is string => typeof item === "string")
+      : [];
+    const managedPaths = new Set(["~/.agents", ".agents"]);
+    const checked = !ignored.some((path) => managedPaths.has(path));
+    return (
+      <Switch
+        aria-label={definition.label}
+        checked={checked}
+        onCheckedChange={(next) => {
+          const preserved = ignored.filter((path) => !managedPaths.has(path));
+          const updated = next
+            ? preserved
+            : [...preserved, "~/.agents", ".agents"];
+          onChange(
+            ["skills", "ignore"],
+            updated.length > 0 ? updated : null,
+          );
+        }}
+      />
+    );
+  }
 
   if (definition.kind === "boolean") {
     const checked = Boolean(value);
@@ -1070,6 +1111,113 @@ function PreferenceSwitch<Key extends keyof AppSettings>({
   );
 }
 
+function UnavailableControl({ label = "尚未实现" }: { label?: string }) {
+  return <Badge variant="outline">{label}</Badge>;
+}
+
+function PermissionModePreference() {
+  const value = useAppSettingsStore(
+    (state) => state.defaultPermissionMode,
+  );
+  const setSetting = useAppSettingsStore((state) => state.setSetting);
+  return (
+    <Select
+      onValueChange={(next) => {
+        const mode = next as AgentPermissionMode;
+        setSetting("defaultPermissionMode", mode);
+        void useAgentStore.getState().selectPermissionMode(mode);
+      }}
+      value={value}
+    >
+      <SelectTrigger className="w-44">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="ask">询问</SelectItem>
+        <SelectItem value="auto">自动审核</SelectItem>
+        <SelectItem value="always-approve">始终允许</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function NotificationPreferenceSwitch({
+  settingKey,
+}: {
+  settingKey: "permissionNotifications";
+}) {
+  const value = useAppSettingsStore((state) => state[settingKey]);
+  const setSetting = useAppSettingsStore((state) => state.setSetting);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Switch
+        checked={value}
+        onCheckedChange={(checked) => {
+          if (!checked) {
+            setPermissionDenied(false);
+            setSetting(settingKey, false);
+            return;
+          }
+          void requestSystemNotificationPermission().then((granted) => {
+            setPermissionDenied(!granted);
+            setSetting(settingKey, granted);
+          });
+        }}
+      />
+      {permissionDenied ? (
+        <span className="text-destructive text-[11px]">
+          系统未授予通知权限
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function CompletionNotificationPreference() {
+  const value = useAppSettingsStore(
+    (state) => state.completionNotification,
+  );
+  const setSetting = useAppSettingsStore((state) => state.setSetting);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Select
+        onValueChange={(next) => {
+          const mode = next as AppSettings["completionNotification"];
+          if (mode === "never") {
+            setPermissionDenied(false);
+            setSetting("completionNotification", mode);
+            return;
+          }
+          void requestSystemNotificationPermission().then((granted) => {
+            setPermissionDenied(!granted);
+            setSetting(
+              "completionNotification",
+              granted ? mode : "never",
+            );
+          });
+        }}
+        value={value}
+      >
+        <SelectTrigger className="w-36">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="unfocused">仅应用失焦时</SelectItem>
+          <SelectItem value="always">始终</SelectItem>
+          <SelectItem value="never">从不</SelectItem>
+        </SelectContent>
+      </Select>
+      {permissionDenied ? (
+        <span className="text-destructive text-[11px]">
+          系统未授予通知权限
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ApplicationGeneralSettings({
   values,
   onChange,
@@ -1077,8 +1225,6 @@ function ApplicationGeneralSettings({
   values: ConfigValues;
   onChange: ConfigurationFormProps["onChange"];
 }) {
-  const popupShortcut = useAppSettingsStore((state) => state.popupShortcut);
-  const setSetting = useAppSettingsStore((state) => state.setSetting);
   const importInput = useRef<HTMLInputElement>(null);
   const [actionMessage, setActionMessage] = useState<string>();
   const autoUpdate = valueAt(values, ["cli", "auto_update"]);
@@ -1108,22 +1254,10 @@ function ApplicationGeneralSettings({
     <div className="flex flex-col gap-7">
       <PreferenceGroup title="权限">
         <PreferenceRow
-          description="默认允许读取和编辑当前工作区；访问外部位置时仍会询问。"
-          label="默认权限"
+          description="立即应用到当前任务，并作为以后新任务的默认权限模式。"
+          label="默认及当前权限模式"
         >
-          <PreferenceSwitch settingKey="defaultPermission" />
-        </PreferenceRow>
-        <PreferenceRow
-          description="自动审核额外权限请求，仅在高风险操作时询问。"
-          label="自动审核"
-        >
-          <PreferenceSwitch settingKey="autoReview" />
-        </PreferenceRow>
-        <PreferenceRow
-          description="允许不经确认访问本机文件和网络；请谨慎开启。"
-          label="完全访问权限"
-        >
-          <PreferenceSwitch settingKey="fullAccess" />
+          <PermissionModePreference />
         </PreferenceRow>
       </PreferenceGroup>
 
@@ -1144,60 +1278,40 @@ function ApplicationGeneralSettings({
           description="从消息或工具活动中打开文件时使用的应用。"
           label="默认文件打开目标"
         >
-          <PreferenceSelect
-            options={[
-              { value: "vscode", label: "VS Code" },
-              { value: "cursor", label: "Cursor" },
-              { value: "system", label: "系统默认" },
-            ]}
-            settingKey="defaultFileOpener"
-          />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow description="MelodyWork 界面使用的语言。" label="语言">
-          <PreferenceSelect
-            options={[
-              { value: "auto", label: "自动检测" },
-              { value: "zh-CN", label: "简体中文" },
-              { value: "en", label: "English" },
-            ]}
-            settingKey="language"
-          />
+          <UnavailableControl label="简体中文 · 其他语言尚未实现" />
         </PreferenceRow>
         <PreferenceRow
           description="关闭主窗口后仍在系统菜单栏中保留 MelodyWork。"
           label="在菜单栏中显示"
         >
-          <PreferenceSwitch settingKey="showInMenuBar" />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="在应用底部显示终端和其他面板控件。"
           label="底部面板"
         >
-          <PreferenceSwitch settingKey="showBottomPanel" />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="选择终端快捷键和环境操作在何处打开终端标签页。"
           label="默认终端位置"
         >
-          <PreferenceSelect
-            options={[
-              { value: "bottom", label: "底部" },
-              { value: "right", label: "右侧" },
-            ]}
-            settingKey="terminalPosition"
-          />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="代理运行时阻止系统自动休眠。"
           label="运行时防止系统休眠"
         >
-          <PreferenceSwitch settingKey="preventSystemSleep" />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="搜索项目文件和已连接应用，建议下一步操作。"
           label="建议提示"
         >
-          <PreferenceSwitch settingKey="suggestions" />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="导入其他客户端导出的 JSON 设置。"
@@ -1275,20 +1389,13 @@ function ApplicationGeneralSettings({
           description="为弹出输入窗口设置全局快捷键；留空表示禁用。"
           label="弹出窗口快捷键"
         >
-          <Input
-            className="w-36"
-            onChange={(event) =>
-              setSetting("popupShortcut", event.target.value)
-            }
-            placeholder="禁用"
-            value={popupShortcut}
-          />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="无需选择项目即可开始新任务。"
           label="默认设为无项目任务"
         >
-          <PreferenceSwitch settingKey="allowUntitledTasks" />
+          <UnavailableControl />
         </PreferenceRow>
       </PreferenceGroup>
 
@@ -1297,26 +1404,19 @@ function ApplicationGeneralSettings({
           description="设置代理完成回复时提醒你的时机。"
           label="轮次完成通知"
         >
-          <PreferenceSelect
-            options={[
-              { value: "unfocused", label: "仅应用失焦时" },
-              { value: "always", label: "始终" },
-              { value: "never", label: "从不" },
-            ]}
-            settingKey="completionNotification"
-          />
+          <CompletionNotificationPreference />
         </PreferenceRow>
         <PreferenceRow
           description="在需要授权时显示系统提醒。"
           label="启用权限通知"
         >
-          <PreferenceSwitch settingKey="permissionNotifications" />
+          <NotificationPreferenceSwitch settingKey="permissionNotifications" />
         </PreferenceRow>
         <PreferenceRow
           description="代理需要你回答问题时显示系统提醒。"
           label="启用问题通知"
         >
-          <PreferenceSwitch settingKey="questionNotifications" />
+          <UnavailableControl />
         </PreferenceRow>
       </PreferenceGroup>
 
@@ -1416,9 +1516,6 @@ function AppearanceThemeGroup({
   const prefix = dark ? "dark" : "light";
   const uiFont = useAppSettingsStore((state) => state.uiFont);
   const codeFont = useAppSettingsStore((state) => state.codeFont);
-  const contrast = useAppSettingsStore((state) =>
-    dark ? state.darkContrast : state.lightContrast,
-  );
   const setSetting = useAppSettingsStore((state) => state.setSetting);
 
   return (
@@ -1461,24 +1558,7 @@ function AppearanceThemeGroup({
         <PreferenceSwitch settingKey="translucentSidebar" />
       </PreferenceRow>
       <PreferenceRow description="" label="对比度">
-        <div className="flex items-center gap-3">
-          <input
-            className="w-40 accent-blue-500"
-            max={100}
-            min={0}
-            onChange={(event) =>
-              setSetting(
-                dark ? "darkContrast" : "lightContrast",
-                Number(event.target.value),
-              )
-            }
-            type="range"
-            value={contrast}
-          />
-          <span className="w-6 text-right tabular-nums text-xs">
-            {contrast}
-          </span>
-        </div>
+        <UnavailableControl />
       </PreferenceRow>
     </PreferenceGroup>
   );
@@ -1587,13 +1667,7 @@ function ApplicationAppearanceSettings() {
           description="使用颜色或加减号标记文件变更。"
           label="差异标记"
         >
-          <PreferenceSelect
-            options={[
-              { value: "color", label: "颜色" },
-              { value: "sign", label: "+ / −" },
-            ]}
-            settingKey="diffMarker"
-          />
+          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="在 macOS 上使用原生字体抗锯齿。"

@@ -2,6 +2,7 @@ mod agent_runtime;
 mod config_runtime;
 mod database;
 mod git_runtime;
+mod research_runtime;
 mod update_runtime;
 mod workspace_runtime;
 
@@ -10,7 +11,7 @@ use config_runtime::{
     add_marketplace_source, delete_marketplace_source, delete_melody_skill,
     get_melody_plugin_details, get_melody_skill_details, install_melody_plugin,
     list_installed_melody_plugins, list_marketplace_sources, list_melody_extensions,
-    read_melody_config, save_marketplace_source, scan_marketplace_plugins,
+    list_melody_skills, read_melody_config, save_marketplace_source, scan_marketplace_plugins,
     set_melody_extension_enabled, uninstall_melody_plugin, update_melody_config,
     update_melody_plugin,
 };
@@ -23,6 +24,7 @@ use git_runtime::{
     git_branches, git_changes, git_checkout_branch, git_commit, git_create_branch,
     git_create_worktree, git_diff, git_remove_worktree, git_stage, git_unstage, git_worktrees,
 };
+use research_runtime::fetch_research_resource;
 use tauri::Manager;
 use update_runtime::check_app_update;
 use workspace_runtime::{
@@ -35,6 +37,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
@@ -77,6 +80,7 @@ pub fn run() {
             read_melody_config,
             update_melody_config,
             list_melody_extensions,
+            list_melody_skills,
             set_melody_extension_enabled,
             list_marketplace_sources,
             add_marketplace_source,
@@ -94,6 +98,7 @@ pub fn run() {
             find_permission_rule,
             upsert_permission_rule,
             delete_permission_rule,
+            fetch_research_resource,
             check_app_update
         ])
         .run(tauri::generate_context!())

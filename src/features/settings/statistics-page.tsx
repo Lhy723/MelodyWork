@@ -26,7 +26,7 @@ import type {
 } from "@/domain/statistics";
 import {
   getUsageStatistics,
-  listMelodyExtensions,
+  listMelodySkills,
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
@@ -439,11 +439,11 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
     try {
       const [nextStatistics, extensions] = await Promise.all([
         getUsageStatistics(),
-        listMelodyExtensions(cwd),
+        listMelodySkills(cwd),
       ]);
       setStatistics(nextStatistics);
       setSkillCount(
-        extensions.filter((extension) => extension.kind === "skills").length,
+        extensions.filter((extension) => extension.enabled).length,
       );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

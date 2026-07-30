@@ -15,9 +15,14 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
-import type { AgentSubagent } from "@/domain/acp";
-import { AppSidebar } from "@/features/sessions/app-sidebar";
+import type { AgentPromptAttachment, AgentSubagent } from "@/domain/acp";
+import {
+  AppSidebar,
+  type ResearchSection,
+  type WorkspaceMode,
+} from "@/features/sessions/app-sidebar";
 import { WindowNavigationControls } from "@/features/sessions/window-navigation-controls";
+import { ResearchMainWorkspace } from "@/features/research/research-main-workspace";
 import {
   SettingsWorkspace,
   type SettingsPage,
@@ -28,6 +33,7 @@ import {
 } from "@/features/workspace/workspace-side-panel";
 import type { ProjectReference } from "@/domain/message-citations";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
+import { useAgentNotifications } from "@/hooks/use-agent-notifications";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
 import { useSessionPersistence } from "@/hooks/use-session-persistence";
@@ -43,6 +49,7 @@ import { cn } from "@/lib/utils";
 
 import { AgentComposer } from "./agent-composer";
 import { AgentTimeline } from "./agent-timeline";
+import { NewTaskWorkspace } from "./new-task-workspace";
 import { SubagentTray } from "./subagent-tray";
 
 const statusLabel = {
@@ -63,6 +70,7 @@ const MIN_WORKSPACE_PANEL_WIDTH = 360;
 const MAX_WORKSPACE_PANEL_WIDTH = 960;
 const WORKSPACE_PANEL_WIDTH_STORAGE_KEY =
   "melodywork.workspace-panel.width";
+const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
 
 const isMacOS =
   typeof navigator !== "undefined" &&
@@ -86,6 +94,12 @@ const storedSidebarWidth = () => {
 const storedSidebarCollapsed = () =>
   typeof window !== "undefined" &&
   window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+
+const storedWorkspaceMode = (): WorkspaceMode =>
+  typeof window !== "undefined" &&
+  window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === "research"
+    ? "research"
+    : "work";
 
 const maxWorkspacePanelWidth = () =>
   typeof window === "undefined"
@@ -168,6 +182,7 @@ const sessionStatusLabel = (
 
 export function AgentWorkspace() {
   useAppearanceSettings();
+  useAgentNotifications();
   useWorkspace();
 
   const projects = useWorkspaceStore((state) => state.projects);
@@ -178,6 +193,7 @@ export function AgentWorkspace() {
   const activeSession = useWorkspaceStore((state) => state.activeSession);
   const workspaceLoading = useWorkspaceStore((state) => state.loading);
   const workspaceError = useWorkspaceStore((state) => state.error);
+  const addProject = useWorkspaceStore((state) => state.addProject);
   const chooseProject = useWorkspaceStore((state) => state.chooseProject);
   const selectProject = useWorkspaceStore((state) => state.selectProject);
   const createSession = useWorkspaceStore((state) => state.createSession);
@@ -193,6 +209,7 @@ export function AgentWorkspace() {
   const acpSessionId = useAgentStore((state) => state.acpSessionId);
   const timeline = useAgentStore((state) => state.timeline);
   const chatStatus = useAgentStore((state) => state.chatStatus);
+  const agentLocalSessionId = useAgentStore((state) => state.localSessionId);
   const contextUsage = useAgentStore((state) => state.contextUsage);
   const availableModels = useAgentStore((state) => state.availableModels);
   const selectedModelId = useAgentStore((state) => state.selectedModelId);
@@ -244,6 +261,21 @@ export function AgentWorkspace() {
     startX: number;
   }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceMode, setWorkspaceMode] =
+    useState<WorkspaceMode>(storedWorkspaceMode);
+  const [researchSection, setResearchSection] =
+    useState<ResearchSection>("library");
+  const [researchMainOpen, setResearchMainOpen] = useState(false);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskProjectId, setNewTaskProjectId] = useState<string>();
+  const pendingNewTaskPrompt = useRef<
+    | {
+        attachments: AgentPromptAttachment[];
+        content: string;
+        sessionId: string;
+      }
+    | undefined
+  >(undefined);
   const [settingsPage, setSettingsPage] =
     useState<SettingsPage>("configuration");
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>();
@@ -496,6 +528,21 @@ export function AgentWorkspace() {
     openWorkspaceTab(tab);
   };
 
+  const openResearchSection = (section: ResearchSection) => {
+    setResearchSection(section);
+    if (section !== "skills") {
+      setResearchMainOpen(true);
+      setSettingsOpen(false);
+      setWorkspacePanelOpen(false);
+      return;
+    }
+    if (section === "skills") {
+      setResearchMainOpen(false);
+      openSettings("skills");
+      return;
+    }
+  };
+
   const closeWorkspaceTab = (tabId: string) => {
     setWorkspaceTabs((current) => {
       const closingIndex = current.findIndex((tab) => tab.id === tabId);
@@ -537,6 +584,19 @@ export function AgentWorkspace() {
 
   const returnToConversation = () => {
     setSettingsOpen(false);
+  };
+
+  const changeWorkspaceMode = (mode: WorkspaceMode) => {
+    setWorkspaceMode(mode);
+    window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, mode);
+    setSettingsOpen(false);
+    setNewTaskOpen(false);
+    if (mode === "research") {
+      openResearchSection("search");
+    } else {
+      setResearchMainOpen(false);
+      setWorkspacePanelOpen(false);
+    }
   };
 
   const updateSidebarWidth = (nextWidth: number) => {
@@ -620,6 +680,76 @@ export function AgentWorkspace() {
 
   const canGoBack = nextHistoryIndex(-1) !== undefined;
   const canGoForward = nextHistoryIndex(1) !== undefined;
+  const newTaskProject =
+    projects.find((project) => project.id === newTaskProjectId) ??
+    activeProject;
+
+  const createTaskFromPrompt = async (
+    content: string,
+    attachments: AgentPromptAttachment[],
+  ) => {
+    if (!newTaskProject) {
+      return;
+    }
+    await createSession(newTaskProject);
+    const session = useWorkspaceStore.getState().activeSession;
+    if (!session) {
+      return;
+    }
+    pendingNewTaskPrompt.current = {
+      attachments,
+      content,
+      sessionId: session.id,
+    };
+    setNewTaskOpen(false);
+  };
+
+  useEffect(() => {
+    const pending = pendingNewTaskPrompt.current;
+    if (
+      !pending ||
+      pending.sessionId !== activeSession?.id ||
+      pending.sessionId !== agentLocalSessionId ||
+      chatStatus !== "ready"
+    ) {
+      return;
+    }
+    pendingNewTaskPrompt.current = undefined;
+    void submitPrompt(pending.content, pending.attachments);
+  }, [
+    activeSession?.id,
+    agentLocalSessionId,
+    chatStatus,
+    submitPrompt,
+  ]);
+
+  const renderComposer = (
+    onSubmit: (
+      content: string,
+      attachments: AgentPromptAttachment[],
+    ) => void | Promise<void>,
+  ) => (
+    <AgentComposer
+      contextUsage={contextUsage}
+      modelChanging={Boolean(pendingModelId)}
+      models={availableModels}
+      onModelChange={(modelId) => void selectModel(modelId)}
+      onPermissionModeChange={(mode) => void selectPermissionMode(mode)}
+      onReasoningEffortChange={(effort) =>
+        void selectReasoningEffort(effort)
+      }
+      onSessionModeChange={(modeId) => void selectSessionMode(modeId)}
+      onSubmit={onSubmit}
+      permissionMode={permissionMode}
+      reasoningEffortChanging={Boolean(pendingReasoningEffort)}
+      sessionModeChanging={Boolean(pendingSessionModeId)}
+      sessionModes={availableSessionModes}
+      selectedModelId={selectedModelId}
+      selectedReasoningEffort={selectedReasoningEffort}
+      selectedSessionModeId={selectedSessionModeId}
+      status={chatStatus}
+    />
+  );
 
   return (
     <main className="relative flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
@@ -649,6 +779,7 @@ export function AgentWorkspace() {
       >
         <AppSidebar
           activeProject={activeProject}
+          activeResearchSection={researchSection}
           activeSessionId={settingsOpen ? undefined : activeSession?.id}
           loading={workspaceLoading}
           onChooseProject={() => {
@@ -656,9 +787,13 @@ export function AgentWorkspace() {
             void chooseProject();
           }}
           onDeleteSession={(session) => void deleteSession(session)}
+          onModeChange={changeWorkspaceMode}
           onNewSession={(project) => {
             returnToConversation();
-            void createSession(project);
+            setResearchMainOpen(false);
+            setWorkspacePanelOpen(false);
+            setNewTaskProjectId(project?.id ?? activeProject?.id);
+            setNewTaskOpen(true);
           }}
           onOpenExtensions={() => openSettings("skills")}
           onOpenGit={openGit}
@@ -672,17 +807,21 @@ export function AgentWorkspace() {
           onResizeStart={beginSidebarResize}
           onSelectProject={(project) => {
             returnToConversation();
+            setNewTaskOpen(false);
             void selectProject(project);
           }}
           onSelectSession={(session) => {
             returnToConversation();
+            setNewTaskOpen(false);
             selectSession(session);
           }}
+          onSelectResearchSection={openResearchSection}
           projects={projects}
           runningSessions={runningSessions}
           settingsActive={settingsOpen}
           sessionsByProject={sessionsByProject}
           sidebarWidth={sidebarWidth}
+          workspaceMode={workspaceMode}
         />
       </div>
       <section className="relative flex min-w-0 flex-1 flex-col">
@@ -702,6 +841,35 @@ export function AgentWorkspace() {
             settingsOpen && "hidden",
           )}
         >
+          {newTaskOpen ? (
+            <NewTaskWorkspace
+              mode={workspaceMode}
+              onAddProject={() => {
+                void addProject().then((project) => {
+                  if (project) {
+                    setNewTaskProjectId(project.id);
+                  }
+                });
+              }}
+              onCancel={() => setNewTaskOpen(false)}
+              onSelectProject={(project) =>
+                setNewTaskProjectId(project.id)
+              }
+              projects={projects}
+              selectedProject={newTaskProject}
+            >
+              {renderComposer(createTaskFromPrompt)}
+            </NewTaskWorkspace>
+          ) : workspaceMode === "research" &&
+          researchMainOpen &&
+          researchSection !== "skills" ? (
+            <ResearchMainWorkspace
+              cwd={cwd}
+              kind={researchSection}
+              root={activeProject?.path ?? cwd}
+            />
+          ) : (
+            <>
           <div className="relative flex min-w-0 flex-1 flex-col">
             <header
               className={cn(
@@ -819,30 +987,7 @@ export function AgentWorkspace() {
               onOpenSubagent={openSubagent}
               subagents={visibleSubagents}
             />
-            <AgentComposer
-              contextUsage={contextUsage}
-              modelChanging={Boolean(pendingModelId)}
-              models={availableModels}
-              onModelChange={(modelId) => void selectModel(modelId)}
-              onPermissionModeChange={(mode) =>
-                void selectPermissionMode(mode)
-              }
-              onReasoningEffortChange={(effort) =>
-                void selectReasoningEffort(effort)
-              }
-              onSessionModeChange={(modeId) =>
-                void selectSessionMode(modeId)
-              }
-              onSubmit={submitPrompt}
-              permissionMode={permissionMode}
-              reasoningEffortChanging={Boolean(pendingReasoningEffort)}
-              sessionModeChanging={Boolean(pendingSessionModeId)}
-              sessionModes={availableSessionModes}
-              selectedModelId={selectedModelId}
-              selectedReasoningEffort={selectedReasoningEffort}
-              selectedSessionModeId={selectedSessionModeId}
-              status={chatStatus}
-            />
+            {renderComposer(submitPrompt)}
           </div>
           <div
             aria-hidden={!workspacePanelOpen}
@@ -883,6 +1028,8 @@ export function AgentWorkspace() {
               tabs={workspaceTabs}
             />
           </div>
+            </>
+          )}
         </div>
       </section>
     </main>

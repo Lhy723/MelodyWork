@@ -27,9 +27,21 @@ export interface MelodyExtension {
   name: string;
   path: string;
   scope: MelodyConfigScope;
-  provider: "melody" | "claude";
+  provider:
+    | "melody"
+    | "agents"
+    | "claude"
+    | "cursor"
+    | "plugin"
+    | string;
   managed: boolean;
   enabled: boolean;
+  description?: string;
+  source?: string;
+  pluginName?: string;
+  userInvocable?: boolean;
+  compatibilityStatus?: string;
+  deletable?: boolean;
 }
 
 export interface MarketplaceSource {

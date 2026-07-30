@@ -20,9 +20,7 @@ export interface AppSettings {
   codeFontSize: number;
   diffMarker: "color" | "sign";
   fontSmoothing: boolean;
-  defaultPermission: boolean;
-  autoReview: boolean;
-  fullAccess: boolean;
+  defaultPermissionMode: "ask" | "auto" | "always-approve";
   defaultFileOpener: "system" | "vscode" | "cursor";
   language: "auto" | "zh-CN" | "en";
   showInMenuBar: boolean;
@@ -66,9 +64,7 @@ const defaultSettings: AppSettings = {
   codeFontSize: 12,
   diffMarker: "color",
   fontSmoothing: true,
-  defaultPermission: true,
-  autoReview: true,
-  fullAccess: false,
+  defaultPermissionMode: "ask",
   defaultFileOpener: "vscode",
   language: "auto",
   showInMenuBar: true,
@@ -95,11 +91,25 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
     {
       name: "melodywork.app-settings",
       merge: (persistedState, currentState) => {
-        const { dockIcon: _dockIcon, ...persistedSettings } =
+        const {
+          dockIcon: _dockIcon,
+          defaultPermission: _defaultPermission,
+          autoReview: _autoReview,
+          fullAccess: legacyFullAccess,
+          ...persistedSettings
+        } =
           (persistedState ?? {}) as Record<string, unknown>;
         return {
           ...currentState,
           ...persistedSettings,
+          defaultPermissionMode:
+            persistedSettings.defaultPermissionMode === "auto" ||
+            persistedSettings.defaultPermissionMode === "always-approve" ||
+            persistedSettings.defaultPermissionMode === "ask"
+              ? persistedSettings.defaultPermissionMode
+              : legacyFullAccess === true
+                ? "always-approve"
+                : currentState.defaultPermissionMode,
         } as AppSettingsStore;
       },
       partialize: ({ setSetting: _setSetting, ...settings }) => settings,

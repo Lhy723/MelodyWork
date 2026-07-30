@@ -20,6 +20,7 @@ interface WorkspaceStore {
   initialized: boolean;
   error?: string;
   initialize: () => Promise<void>;
+  addProject: () => Promise<ProjectRecord | undefined>;
   chooseProject: () => Promise<void>;
   selectProject: (project: ProjectRecord) => Promise<void>;
   createSession: (project?: ProjectRecord) => Promise<void>;
@@ -60,6 +61,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       await get().selectProject(projects[0]);
     } catch (reason) {
       set({ error: messageFrom(reason), loading: false });
+    }
+  },
+  addProject: async () => {
+    const path = await pickWorkspaceDirectory();
+    if (!path) {
+      return undefined;
+    }
+    set({ error: undefined });
+    try {
+      const project = await upsertProject(path);
+      set((state) => ({
+        projects: [
+          project,
+          ...state.projects.filter((item) => item.id !== project.id),
+        ],
+      }));
+      return project;
+    } catch (reason) {
+      set({ error: messageFrom(reason) });
+      return undefined;
     }
   },
   chooseProject: async () => {

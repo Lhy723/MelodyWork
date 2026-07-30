@@ -42,6 +42,18 @@ pub struct MelodyExtension {
     provider: String,
     managed: bool,
     enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plugin_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_invocable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility_status: Option<String>,
+    #[serde(default)]
+    deletable: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -129,6 +141,40 @@ struct InstalledPluginEntry {
     status: String,
     name: String,
     path: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MelodyInspectDocument {
+    #[serde(default)]
+    skills: Vec<MelodyInspectSkill>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MelodyInspectSkill {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    source: MelodyInspectSkillSource,
+    #[serde(default)]
+    user_invocable: Option<bool>,
+    #[serde(default)]
+    vendor: Option<String>,
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    compatibility_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MelodyInspectSkillSource {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    path: Option<PathBuf>,
+    #[serde(default)]
+    plugin_name: Option<String>,
 }
 
 fn user_home() -> Result<PathBuf, String> {
@@ -353,6 +399,12 @@ fn scan_kind(
             provider: provider.to_string(),
             managed: false,
             enabled,
+            description: None,
+            source: None,
+            plugin_name: None,
+            user_invocable: None,
+            compatibility_status: None,
+            deletable: false,
         });
     }
 }
@@ -458,6 +510,111 @@ pub fn list_melody_extensions(cwd: String) -> Result<Vec<MelodyExtension>, Strin
             .then(left.provider.cmp(&right.provider))
     });
     Ok(extensions)
+}
+
+async fn run_melody_inspect(app: &AppHandle, cwd: &str) -> Result<MelodyInspectDocument, String> {
+    let binary = agent_runtime::resolve_binary(app, None).ok_or_else(|| {
+        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
+            .to_string()
+    })?;
+    let mut command = Command::new(binary);
+    command.args(["inspect", "--json"]).current_dir(cwd);
+    if let Some(home) = agent_runtime::melody_home() {
+        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("Failed to inspect Melody skills: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("Melody inspection failed with status {}", output.status)
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Melody returned an invalid inspection document: {error}"))
+}
+
+fn inspect_skill_directory(path: &Path) -> Option<PathBuf> {
+    if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
+        path.parent().map(Path::to_path_buf)
+    } else if path.join("SKILL.md").is_file() {
+        Some(path.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn inspect_skill_provider(skill: &MelodyInspectSkill, directory: &Path) -> String {
+    if let Some(vendor) = skill.vendor.as_deref() {
+        return vendor.to_string();
+    }
+    if skill.source.kind == "plugin" {
+        return "plugin".to_string();
+    }
+    let path = directory.to_string_lossy();
+    if path.contains("/.agents/") || path.contains("\\.agents\\") {
+        "agents".to_string()
+    } else if path.contains("/.claude/") || path.contains("\\.claude\\") {
+        "claude".to_string()
+    } else if path.contains("/.cursor/") || path.contains("\\.cursor\\") {
+        "cursor".to_string()
+    } else {
+        "melody".to_string()
+    }
+}
+
+fn melody_skill_extensions(cwd: &str, document: MelodyInspectDocument) -> Vec<MelodyExtension> {
+    let project = PathBuf::from(cwd).canonicalize().ok();
+    document
+        .skills
+        .into_iter()
+        .filter_map(|skill| {
+            let source_path = skill.source.path.as_deref()?;
+            let directory = inspect_skill_directory(source_path)?;
+            let canonical = directory
+                .canonicalize()
+                .unwrap_or_else(|_| directory.clone());
+            let scope = if matches!(skill.source.kind.as_str(), "local" | "repo" | "project")
+                || project
+                    .as_ref()
+                    .is_some_and(|root| canonical.starts_with(root))
+            {
+                "project"
+            } else {
+                "user"
+            };
+            let compatibility_disabled = skill.compatibility_status.as_deref() == Some("disabled");
+            let provider = inspect_skill_provider(&skill, &canonical);
+            Some(MelodyExtension {
+                kind: "skills".to_string(),
+                name: skill.name,
+                path: canonical.to_string_lossy().into_owned(),
+                scope: scope.to_string(),
+                provider,
+                managed: matches!(skill.source.kind.as_str(), "plugin" | "server" | "bundled"),
+                enabled: !skill.disabled && !compatibility_disabled,
+                description: skill.description,
+                source: Some(skill.source.kind),
+                plugin_name: skill.source.plugin_name,
+                user_invocable: skill.user_invocable,
+                compatibility_status: skill.compatibility_status,
+                deletable: allowed_skill_path(cwd, &canonical).is_ok(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn list_melody_skills(
+    app: AppHandle,
+    cwd: String,
+) -> Result<Vec<MelodyExtension>, String> {
+    let document = run_melody_inspect(&app, &cwd).await?;
+    Ok(melody_skill_extensions(&cwd, document))
 }
 
 fn read_user_config_document() -> Result<(PathBuf, DocumentMut), String> {
@@ -928,6 +1085,12 @@ pub async fn list_installed_melody_plugins(
                 provider: "melody".to_string(),
                 managed: true,
                 enabled,
+                description: None,
+                source: Some("plugin".to_string()),
+                plugin_name: None,
+                user_invocable: None,
+                compatibility_status: None,
+                deletable: false,
             }
         })
         .collect())
@@ -1407,12 +1570,28 @@ fn allowed_skill_path(cwd: &str, path: &Path) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub fn get_melody_skill_details(
+pub async fn get_melody_skill_details(
+    app: AppHandle,
     cwd: String,
     name: String,
     path: String,
 ) -> Result<SkillDetails, String> {
-    let root = allowed_skill_path(&cwd, Path::new(&path))?;
+    let root = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|error| format!("Skill path is unavailable: {error}"))?;
+    let document = run_melody_inspect(&app, &cwd).await?;
+    let discovered = document.skills.iter().any(|skill| {
+        skill
+            .source
+            .path
+            .as_deref()
+            .and_then(inspect_skill_directory)
+            .and_then(|directory| directory.canonicalize().ok())
+            .is_some_and(|directory| directory == root)
+    });
+    if !discovered {
+        return Err("Skill is no longer present in Melody's runtime catalog".to_string());
+    }
     skill_details_from_directory(&root, &name)
 }
 
@@ -1592,6 +1771,59 @@ path = "~/dev/plugins"
         assert_eq!(details.compatibility.as_deref(), Some("Melody 0.0.1+"));
         assert!(details.content.contains("# Review"));
         assert_eq!(details.files, ["SKILL.md", "references/checklist.md"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn maps_runtime_skill_catalog_with_sources_and_status() {
+        let root = env::temp_dir().join(format!(
+            "melody-work-runtime-skills-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let local = root.join(".melody/skills/review");
+        let plugin = root.join(".claude/plugins/cache/team/skills/check");
+        fs::create_dir_all(&local).unwrap();
+        fs::create_dir_all(&plugin).unwrap();
+        fs::write(local.join("SKILL.md"), "# Review").unwrap();
+        fs::write(plugin.join("SKILL.md"), "# Check").unwrap();
+        let document: MelodyInspectDocument = serde_json::from_value(serde_json::json!({
+            "skills": [
+                {
+                    "name": "review",
+                    "description": "Review changes",
+                    "source": {
+                        "type": "local",
+                        "path": local.join("SKILL.md"),
+                    },
+                    "userInvocable": true
+                },
+                {
+                    "name": "team:check",
+                    "source": {
+                        "type": "plugin",
+                        "plugin_name": "team",
+                        "path": plugin.join("SKILL.md"),
+                    },
+                    "vendor": "claude",
+                    "disabled": true,
+                    "compatibilityStatus": "disabled"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let skills = melody_skill_extensions(root.to_str().unwrap(), document);
+
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].name, "review");
+        assert_eq!(skills[0].scope, "project");
+        assert_eq!(skills[0].provider, "melody");
+        assert!(skills[0].enabled);
+        assert!(skills[0].deletable);
+        assert_eq!(skills[1].plugin_name.as_deref(), Some("team"));
+        assert_eq!(skills[1].provider, "claude");
+        assert!(!skills[1].enabled);
+        assert!(!skills[1].deletable);
         fs::remove_dir_all(root).unwrap();
     }
 

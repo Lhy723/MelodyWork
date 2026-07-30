@@ -3,6 +3,7 @@ import {
   FileCode2Icon,
   FilesIcon,
   GitCompareArrowsIcon,
+  LibraryIcon,
   PlusIcon,
   RefreshCwIcon,
   TerminalSquareIcon,
@@ -28,6 +29,10 @@ import type { GitChange } from "@/domain/git";
 import type { ProjectReference } from "@/domain/message-citations";
 import { FileWorkspace } from "@/features/files/file-workspace";
 import { ChangeReview } from "@/features/git/change-review";
+import {
+  ResearchPanel,
+  type ResearchPanelKind,
+} from "@/features/research/research-panel";
 import { TerminalPanel } from "@/features/terminal/terminal-panel";
 import { SubagentConversation } from "@/features/workspace/subagent-conversation";
 import { readWorkspaceFile } from "@/lib/melody-bridge";
@@ -39,6 +44,12 @@ export type WorkspaceTab =
   | { id: string; kind: "files"; label: string }
   | { id: string; kind: "terminal"; label: string }
   | { id: string; kind: "review"; label: string }
+  | {
+      id: string;
+      kind: "research";
+      label: string;
+      panel: ResearchPanelKind;
+    }
   | {
       id: string;
       kind: "file";
@@ -107,6 +118,9 @@ const tabIcon = (tab: WorkspaceTab) => {
   }
   if (tab.kind === "subagent") {
     return <BotIcon />;
+  }
+  if (tab.kind === "research") {
+    return <LibraryIcon />;
   }
   return <FileCode2Icon />;
 };
@@ -398,6 +412,8 @@ export function WorkspaceSidePanel({
               />
             ) : tab.kind === "file" ? (
               <FilePreview path={tab.path} root={root} />
+            ) : tab.kind === "research" ? (
+              <ResearchPanel kind={tab.panel} />
             ) : subagents[tab.subagentId] ? (
               <SubagentConversation
                 active={activeTabId === tab.id}
