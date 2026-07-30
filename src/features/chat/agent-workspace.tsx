@@ -194,7 +194,6 @@ export function AgentWorkspace() {
   const workspaceLoading = useWorkspaceStore((state) => state.loading);
   const workspaceError = useWorkspaceStore((state) => state.error);
   const addProject = useWorkspaceStore((state) => state.addProject);
-  const chooseProject = useWorkspaceStore((state) => state.chooseProject);
   const selectProject = useWorkspaceStore((state) => state.selectProject);
   const createSession = useWorkspaceStore((state) => state.createSession);
   const deleteSession = useWorkspaceStore((state) => state.deleteSession);
@@ -782,10 +781,6 @@ export function AgentWorkspace() {
           activeResearchSection={researchSection}
           activeSessionId={settingsOpen ? undefined : activeSession?.id}
           loading={workspaceLoading}
-          onChooseProject={() => {
-            returnToConversation();
-            void chooseProject();
-          }}
           onDeleteSession={(session) => void deleteSession(session)}
           onModeChange={changeWorkspaceMode}
           onNewSession={(project) => {

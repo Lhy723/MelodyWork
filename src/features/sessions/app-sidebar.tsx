@@ -9,7 +9,6 @@ import {
   GitPullRequestIcon,
   LibraryIcon,
   MoreHorizontalIcon,
-  PlusIcon,
   RadarIcon,
   SearchIcon,
   SettingsIcon,
@@ -43,7 +42,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ProjectRecord, SessionRecord } from "@/domain/workspace";
@@ -74,7 +72,6 @@ interface AppSidebarProps {
   onResizeBy: (delta: number) => void;
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
-  onChooseProject: () => void;
   onDeleteSession: (session: SessionRecord) => void;
   onModeChange: (mode: WorkspaceMode) => void;
   onOpenExtensions: () => void;
@@ -100,7 +97,6 @@ export function AppSidebar({
   onResizeBy,
   onResizeStart,
   onResetWidth,
-  onChooseProject,
   onDeleteSession,
   onModeChange,
   onNewSession,
@@ -208,22 +204,6 @@ export function AppSidebar({
                 <span className="size-1.5 rounded-full bg-foreground" />
               ) : null}
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>当前工作区</DropdownMenuLabel>
-            {projects.map((project) => (
-              <DropdownMenuItem
-                key={project.id}
-                onSelect={() => onSelectProject(project)}
-              >
-                <FolderOpenIcon />
-                <span className="truncate">{project.name}</span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onChooseProject}>
-              <PlusIcon />
-              打开工作区…
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <Button
@@ -259,7 +239,10 @@ export function AppSidebar({
 
       <nav aria-label="主导航" className="mt-2 flex flex-col gap-0 px-1">
         <Button
-          className="h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground"
+          className={cn(
+            "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+            workspaceMode === "research" && "research-serif",
+          )}
           disabled={loading || !activeProject}
           onClick={() => onNewSession()}
           variant="ghost"
@@ -271,7 +254,7 @@ export function AppSidebar({
           <>
             <Button
               className={cn(
-                "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
                 activeResearchSection === "search" &&
                   "bg-sidebar-selected",
               )}
@@ -283,7 +266,7 @@ export function AppSidebar({
             </Button>
             <Button
               className={cn(
-                "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
                 activeResearchSection === "tracking" &&
                   "bg-sidebar-selected",
               )}
@@ -308,6 +291,7 @@ export function AppSidebar({
         <Button
           className={cn(
             "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+            workspaceMode === "research" && "research-serif",
             workspaceMode === "research" &&
               activeResearchSection === "skills" &&
               "bg-sidebar-selected",
@@ -323,7 +307,7 @@ export function AppSidebar({
       <div className="mt-5 flex min-h-0 flex-1 flex-col">
         {workspaceMode === "research" ? (
           <>
-            <p className="px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
+            <p className="research-serif px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
               研究
             </p>
             <nav
@@ -338,7 +322,7 @@ export function AppSidebar({
               ] as const).map(([section, Icon, label]) => (
                 <Button
                   className={cn(
-                    "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                    "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
                     activeResearchSection === section &&
                       "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
                   )}
@@ -543,15 +527,13 @@ export function AppSidebar({
         <Button
           className={cn(
             "h-9 w-full justify-start rounded-lg px-2 text-sidebar-foreground hover:text-sidebar-foreground",
+            workspaceMode === "research" && "research-serif",
             settingsActive &&
               "bg-sidebar-selected hover:bg-sidebar-selected",
           )}
           onClick={onOpenSettings}
           variant="ghost"
         >
-          <span className="flex size-7 items-center justify-center rounded-full bg-violet-100 font-medium text-violet-600 text-xs">
-            M
-          </span>
           <span className="min-w-0 flex-1 truncate text-left">设置</span>
           <SettingsIcon className="size-4 text-muted-foreground" />
         </Button>

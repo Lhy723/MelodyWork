@@ -1557,9 +1557,6 @@ function AppearanceThemeGroup({
       <PreferenceRow description="" label="半透明侧边栏">
         <PreferenceSwitch settingKey="translucentSidebar" />
       </PreferenceRow>
-      <PreferenceRow description="" label="对比度">
-        <UnavailableControl />
-      </PreferenceRow>
     </PreferenceGroup>
   );
 }

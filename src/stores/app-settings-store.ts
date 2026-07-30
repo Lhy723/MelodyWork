@@ -12,8 +12,6 @@ export interface AppSettings {
   uiFont: string;
   codeFont: string;
   translucentSidebar: boolean;
-  lightContrast: number;
-  darkContrast: number;
   pointerCursor: boolean;
   reducedMotion: "system" | "on" | "off";
   uiFontSize: number;
@@ -56,8 +54,6 @@ const defaultSettings: AppSettings = {
   uiFont: '"Geist Variable", sans-serif',
   codeFont: '"SFMono-Regular", Consolas, monospace',
   translucentSidebar: true,
-  lightContrast: 45,
-  darkContrast: 60,
   pointerCursor: false,
   reducedMotion: "system",
   uiFontSize: 14,
@@ -96,6 +92,8 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
           defaultPermission: _defaultPermission,
           autoReview: _autoReview,
           fullAccess: legacyFullAccess,
+          lightContrast: _lightContrast,
+          darkContrast: _darkContrast,
           ...persistedSettings
         } =
           (persistedState ?? {}) as Record<string, unknown>;
