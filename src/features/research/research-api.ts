@@ -2,6 +2,7 @@ import type {
   ResearchPaper,
   ResearchSearchResult,
   ResearchSource,
+  ResearchVerificationEvidence,
 } from "@/domain/research";
 import { fetchResearchResource } from "@/lib/melody-bridge";
 
@@ -38,6 +39,35 @@ const text = (value: unknown) =>
 const titleKey = (title: string) =>
   title.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
+const recordIdForPaper = (paper: ResearchPaper) =>
+  paper.id.replace(/^(?:doi|arxiv|pubmed|semantic-scholar):/i, "");
+
+const evidenceForPaper = (
+  paper: ResearchPaper,
+  checkedAt: number,
+): ResearchVerificationEvidence[] => [
+  ...(paper.verification?.evidence ?? []),
+  ...paper.sources.map((source) => ({
+    source,
+    status: "matched" as const,
+    checkedAt,
+    recordId: recordIdForPaper(paper),
+    title: paper.title,
+    url: paper.url,
+  })),
+];
+
+const mergeVerificationEvidence = (
+  evidence: ResearchVerificationEvidence[],
+) => {
+  const uniqueEvidence = new Map<string, ResearchVerificationEvidence>();
+  for (const item of evidence) {
+    const key = `${item.source}:${item.recordId ?? item.title ?? "unknown"}`;
+    if (!uniqueEvidence.has(key)) uniqueEvidence.set(key, item);
+  }
+  return Array.from(uniqueEvidence.values());
+};
+
 export const mergeResearchPapers = (
   papers: ResearchPaper[],
 ): ResearchPaper[] => {
@@ -57,6 +87,7 @@ export const mergeResearchPapers = (
       continue;
     }
     const sources = Array.from(new Set([...current.sources, ...paper.sources]));
+    const checkedAt = Date.now();
     merged.set(key, {
       ...current,
       ...paper,
@@ -69,6 +100,16 @@ export const mergeResearchPapers = (
       url: current.url || paper.url,
       sources,
       verified: sources.length > 1,
+      verification: {
+        status: sources.length > 1 ? "verified" : "single-source",
+        checkedAt,
+        matchedSources: sources,
+        method: "cross-source-metadata-match",
+        evidence: mergeVerificationEvidence([
+          ...evidenceForPaper(current, checkedAt),
+          ...evidenceForPaper(paper, checkedAt),
+        ]),
+      },
       saved: current.saved || paper.saved,
       addedAt: Math.min(current.addedAt, paper.addedAt),
     });
@@ -77,7 +118,18 @@ export const mergeResearchPapers = (
     (left, right) =>
       (right.year ?? 0) - (left.year ?? 0) ||
       (right.citationCount ?? 0) - (left.citationCount ?? 0),
-  );
+  ).map((paper) => ({
+    ...paper,
+    verification: {
+      status: paper.verified ? "verified" : "single-source",
+      checkedAt: Date.now(),
+      matchedSources: paper.sources,
+      method: "cross-source-metadata-match",
+      evidence: mergeVerificationEvidence(
+        evidenceForPaper(paper, Date.now()),
+      ),
+    },
+  }));
 };
 
 export const paperFromCrossref = (
@@ -427,13 +479,16 @@ const searchPubMed = async (query: string): Promise<ResearchPaper[]> => {
   );
 };
 
+const sourceRequestQuery = (source: ResearchSource, query: string) =>
+  source === "arXiv" ? `all:${query.replaceAll('"', " ")}` : query;
+
 export const searchResearchPapers = async (
   query: string,
   requestedSources: ResearchSource[] = DEFAULT_RESEARCH_SEARCH_SOURCES,
 ): Promise<ResearchSearchResult> => {
   const trimmed = query.trim();
   if (!trimmed) {
-    return { papers: [], sources: [], warnings: [] };
+    return { papers: [], sources: [], warnings: [], sourceRuns: [] };
   }
   const adapters: Array<
     [ResearchSource, (query: string) => Promise<ResearchPaper[]>]
@@ -456,19 +511,44 @@ export const searchResearchPapers = async (
   const sources: ResearchSource[] = [];
   const warnings: string[] = [];
   const papers: ResearchPaper[] = [];
+  const sourceRuns = [];
   for (const [index, attempt] of attempts.entries()) {
     const [source] = enabledAdapters[index];
+    const checkedAt = Date.now();
     if (attempt.status === "fulfilled") {
       sources.push(source);
       papers.push(...attempt.value);
+      sourceRuns.push({
+        source,
+        status: "success" as const,
+        resultCount: attempt.value.length,
+        query: trimmed,
+        requestQuery: sourceRequestQuery(source, trimmed),
+        checkedAt,
+      });
     } else {
-      warnings.push(`${source}：${attempt.reason}`);
+      const message = String(attempt.reason);
+      warnings.push(`${source}：${message}`);
+      sourceRuns.push({
+        source,
+        status: "error" as const,
+        resultCount: 0,
+        query: trimmed,
+        requestQuery: sourceRequestQuery(source, trimmed),
+        checkedAt,
+        message,
+      });
     }
   }
   if (sources.length === 0) {
     throw new Error(warnings.join("\n") || "学术数据源暂时不可用。");
   }
-  return { papers: mergeResearchPapers(papers), sources, warnings };
+  return {
+    papers: mergeResearchPapers(papers),
+    sources,
+    warnings,
+    sourceRuns,
+  };
 };
 
 const extractDoi = (candidate: string) => {
@@ -494,6 +574,27 @@ const openAlexByDoi = async (doi: string) => {
   return paperFromOpenAlex(payload);
 };
 
+export const verifyResearchPaper = async (
+  paper: ResearchPaper,
+): Promise<ResearchPaper> => {
+  const doi = cleanDoi(paper.doi);
+  if (!doi) {
+    throw new Error("只有带 DOI 的论文可以执行跨来源核验。请先补充 DOI 或打开原文。");
+  }
+  const attempts = await Promise.allSettled([
+    crossrefByDoi(doi),
+    openAlexByDoi(doi),
+  ]);
+  const records = attempts.flatMap((attempt) =>
+    attempt.status === "fulfilled" && attempt.value ? [attempt.value] : [],
+  );
+  if (records.length === 0) {
+    throw new Error("Crossref 与 OpenAlex 都没有返回该 DOI 的元数据。");
+  }
+  const merged = mergeResearchPapers([{ ...paper, doi }, ...records]);
+  return merged[0] ?? paper;
+};
+
 const importArxiv = async (candidate: string): Promise<ResearchPaper> => {
   const id = candidate.match(/(?:abs|pdf)\/([^?#/]+?)(?:\.pdf)?(?:[?#]|$)/i)?.[1];
   if (!id) throw new Error("无法从链接中识别 arXiv ID。");
@@ -503,7 +604,18 @@ const importArxiv = async (candidate: string): Promise<ResearchPaper> => {
   const entry = document.querySelector("entry");
   const paper = entry ? paperFromArxivEntry(entry) : undefined;
   if (!paper) throw new Error("arXiv 未返回该论文。");
-  return { ...paper, saved: true, verified: true };
+  return {
+    ...paper,
+    saved: true,
+    verified: false,
+    verification: {
+      status: "single-source",
+      checkedAt: Date.now(),
+      matchedSources: paper.sources,
+      method: "cross-source-metadata-match",
+      evidence: evidenceForPaper(paper, Date.now()),
+    },
+  };
 };
 
 export const importResearchPaper = async (

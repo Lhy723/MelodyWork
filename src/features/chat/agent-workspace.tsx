@@ -3,6 +3,7 @@ import {
   GitCompareArrowsIcon,
   PanelRightIcon,
 } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import {
   useEffect,
   useCallback,
@@ -13,16 +14,21 @@ import {
   type PointerEventHandler,
 } from "react";
 
+import { MotionPage } from "@/components/motion/page-transition";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
 import type { AgentPromptAttachment, AgentSubagent } from "@/domain/acp";
+import type { ResearchPaper } from "@/domain/research";
 import {
   AppSidebar,
   type ResearchSection,
   type WorkspaceMode,
 } from "@/features/sessions/app-sidebar";
 import { WindowNavigationControls } from "@/features/sessions/window-navigation-controls";
-import { ResearchMainWorkspace } from "@/features/research/research-main-workspace";
+import {
+  ResearchMainWorkspace,
+  type ResearchMainDetail,
+} from "@/features/research/research-main-workspace";
 import {
   SettingsWorkspace,
   type SettingsPage,
@@ -39,6 +45,8 @@ import { useGitChanges } from "@/hooks/use-git-changes";
 import { useSessionPersistence } from "@/hooks/use-session-persistence";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { useAgentStore } from "@/stores/agent-store";
+import { useResearchStore } from "@/features/research/research-store";
+import { buildResearchSkillContext } from "@/features/research/research-capability-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
@@ -198,6 +206,9 @@ export function AgentWorkspace() {
   const createSession = useWorkspaceStore((state) => state.createSession);
   const deleteSession = useWorkspaceStore((state) => state.deleteSession);
   const selectSession = useWorkspaceStore((state) => state.selectSession);
+  const setResearchActiveProject = useResearchStore(
+    (state) => state.setActiveProject,
+  );
 
   useAgentBridge(activeSession);
   useSessionPersistence();
@@ -263,13 +274,24 @@ export function AgentWorkspace() {
   const [workspaceMode, setWorkspaceMode] =
     useState<WorkspaceMode>(storedWorkspaceMode);
   const [researchSection, setResearchSection] =
-    useState<ResearchSection>("library");
-  const [researchMainOpen, setResearchMainOpen] = useState(false);
+    useState<ResearchSection>("overview");
+  const [researchDetail, setResearchDetail] =
+    useState<ResearchMainDetail>();
+  const [researchMainOpen, setResearchMainOpen] = useState(
+    () => storedWorkspaceMode() === "research",
+  );
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newTaskProjectId, setNewTaskProjectId] = useState<string>();
   const pendingNewTaskPrompt = useRef<
     | {
         attachments: AgentPromptAttachment[];
+        content: string;
+        sessionId: string;
+      }
+    | undefined
+  >(undefined);
+  const pendingResearchPrompt = useRef<
+    | {
         content: string;
         sessionId: string;
       }
@@ -312,6 +334,10 @@ export function AgentWorkspace() {
       .then(setAppUpdate)
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    setResearchActiveProject(activeProject?.id);
+  }, [activeProject?.id, setResearchActiveProject]);
 
   useEffect(() => {
     const sessionId = activeSession?.id;
@@ -528,7 +554,11 @@ export function AgentWorkspace() {
   };
 
   const openResearchSection = (section: ResearchSection) => {
+    setResearchDetail(undefined);
     setResearchSection(section);
+    if (section !== "skills" && window.matchMedia("(max-width: 720px)").matches) {
+      setSidebarVisibility(true);
+    }
     if (section !== "skills") {
       setResearchMainOpen(true);
       setSettingsOpen(false);
@@ -541,6 +571,67 @@ export function AgentWorkspace() {
       return;
     }
   };
+
+  const openResearchPaper = (paper: ResearchPaper) => {
+    setResearchDetail((current) => ({
+      paper,
+      returnTo: current?.type === "tracking" ? current : undefined,
+      type: "paper",
+    }));
+    setResearchMainOpen(true);
+    setSettingsOpen(false);
+    setWorkspacePanelOpen(false);
+  };
+
+  const openResearchTrackingTopic = (topicId: string) => {
+    setResearchDetail({ topicId, type: "tracking" });
+    setResearchSection("tracking");
+    setResearchMainOpen(true);
+    setSettingsOpen(false);
+    setWorkspacePanelOpen(false);
+  };
+
+  const askResearchPaper = useCallback(
+    (paper: {
+      abstract?: string;
+      authors: string[];
+      doi?: string;
+      title: string;
+      url: string;
+    }) => {
+      const skillContext = buildResearchSkillContext();
+      const content = [
+        "请帮我分析这篇论文，并把结论和证据边界说清楚：",
+        "请遵循以下已启用的 Research 技能约束：",
+        skillContext,
+        `标题：${paper.title}`,
+        `作者：${paper.authors.join("、") || "未知"}`,
+        paper.doi ? `DOI：${paper.doi}` : undefined,
+        `来源：${paper.url}`,
+        paper.abstract ? `摘要：${paper.abstract}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      setWorkspaceMode("work");
+      window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, "work");
+      setResearchMainOpen(false);
+      setSettingsOpen(false);
+      setNewTaskOpen(false);
+      setWorkspacePanelOpen(false);
+      if (chatStatus === "ready" && activeSession) {
+        void submitPrompt(content);
+        return;
+      }
+      if (activeSession) {
+        pendingResearchPrompt.current = {
+          content,
+          sessionId: activeSession.id,
+        };
+      }
+    },
+    [activeSession, chatStatus, submitPrompt],
+  );
 
   const closeWorkspaceTab = (tabId: string) => {
     setWorkspaceTabs((current) => {
@@ -590,9 +681,13 @@ export function AgentWorkspace() {
     window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, mode);
     setSettingsOpen(false);
     setNewTaskOpen(false);
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      setSidebarVisibility(true);
+    }
     if (mode === "research") {
-      openResearchSection("search");
+      openResearchSection("overview");
     } else {
+      setResearchDetail(undefined);
       setResearchMainOpen(false);
       setWorkspacePanelOpen(false);
     }
@@ -631,6 +726,19 @@ export function AgentWorkspace() {
       String(collapsed),
     );
   };
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 720px)");
+    const collapseForSmallViewport = () => {
+      if (mediaQuery.matches) {
+        setSidebarVisibility(true);
+      }
+    };
+    collapseForSmallViewport();
+    mediaQuery.addEventListener("change", collapseForSmallViewport);
+    return () =>
+      mediaQuery.removeEventListener("change", collapseForSmallViewport);
+  }, []);
 
   const findSessionById = (sessionId: string) => {
     for (const sessions of Object.values(sessionsByProject)) {
@@ -722,6 +830,25 @@ export function AgentWorkspace() {
     submitPrompt,
   ]);
 
+  useEffect(() => {
+    const pending = pendingResearchPrompt.current;
+    if (
+      !pending ||
+      pending.sessionId !== activeSession?.id ||
+      pending.sessionId !== agentLocalSessionId ||
+      chatStatus !== "ready"
+    ) {
+      return;
+    }
+    pendingResearchPrompt.current = undefined;
+    void submitPrompt(pending.content);
+  }, [
+    activeSession?.id,
+    agentLocalSessionId,
+    chatStatus,
+    submitPrompt,
+  ]);
+
   const renderComposer = (
     onSubmit: (
       content: string,
@@ -749,6 +876,12 @@ export function AgentWorkspace() {
       status={chatStatus}
     />
   );
+
+  const primaryViewKey = newTaskOpen
+    ? "new-task"
+    : workspaceMode === "research" && researchMainOpen && researchSection !== "skills"
+      ? "research"
+      : "conversation";
 
   return (
     <main className="relative flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
@@ -819,213 +952,238 @@ export function AgentWorkspace() {
           workspaceMode={workspaceMode}
         />
       </div>
-      <section className="relative flex min-w-0 flex-1 flex-col">
-        {settingsOpen ? (
-          <SettingsWorkspace
-            cwd={cwd}
-            initialPage={settingsPage}
-            macSafeArea={isMacOS}
-            onClose={returnToConversation}
-            projectId={activeProject?.id ?? "preview-project"}
-          />
-        ) : null}
-        <div
-          aria-hidden={settingsOpen}
-          className={cn(
-            "relative flex min-h-0 flex-1",
-            settingsOpen && "hidden",
-          )}
-        >
-          {newTaskOpen ? (
-            <NewTaskWorkspace
-              mode={workspaceMode}
-              onAddProject={() => {
-                void addProject().then((project) => {
-                  if (project) {
-                    setNewTaskProjectId(project.id);
-                  }
-                });
-              }}
-              onCancel={() => setNewTaskOpen(false)}
-              onSelectProject={(project) =>
-                setNewTaskProjectId(project.id)
-              }
-              projects={projects}
-              selectedProject={newTaskProject}
+      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <AnimatePresence initial={false} mode="wait">
+          {settingsOpen ? (
+            <MotionPage
+              className="absolute inset-0 flex min-h-0 flex-col"
+              key="settings"
             >
-              {renderComposer(createTaskFromPrompt)}
-            </NewTaskWorkspace>
-          ) : workspaceMode === "research" &&
-          researchMainOpen &&
-          researchSection !== "skills" ? (
-            <ResearchMainWorkspace
-              cwd={cwd}
-              kind={researchSection}
-              root={activeProject?.path ?? cwd}
-            />
+              <SettingsWorkspace
+                cwd={cwd}
+                initialPage={settingsPage}
+                macSafeArea={isMacOS}
+                onClose={returnToConversation}
+                projectId={activeProject?.id ?? "preview-project"}
+              />
+            </MotionPage>
           ) : (
-            <>
-          <div className="relative flex min-w-0 flex-1 flex-col">
-            <header
-              className={cn(
-                "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
-                sidebarCollapsed
-                  ? isMacOS
-                    ? "pl-52"
-                    : "pl-32"
-                  : "pl-6",
-              )}
-              data-tauri-drag-region
+            <MotionPage
+              className="absolute inset-0 flex min-h-0"
+              key={`workspace:${primaryViewKey}`}
             >
-              <div
-                className="flex min-w-0 flex-1 items-center gap-2"
-                data-tauri-drag-region
-              >
-                <h1
-                  className="min-w-0 truncate font-semibold text-base"
-                  data-tauri-drag-region
-                >
-                  {activeSession
-                    ? localizedSessionTitle(activeSession.title)
-                    : "正在打开工作区…"}
-                </h1>
-                <div
-                  className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
-                  data-tauri-drag-region
-                >
-                  <span
-                    aria-hidden="true"
-                    className="motion-status-dot size-1.5 rounded-full bg-current"
-                    data-tauri-drag-region
+              <div className="relative flex min-h-0 flex-1 overflow-hidden">
+                {newTaskOpen ? (
+                  <NewTaskWorkspace
+                    mode={workspaceMode}
+                    onAddProject={() => {
+                      void addProject().then((project) => {
+                        if (project) {
+                          setNewTaskProjectId(project.id);
+                        }
+                      });
+                    }}
+                    onCancel={() => setNewTaskOpen(false)}
+                    onSelectProject={(project) =>
+                      setNewTaskProjectId(project.id)
+                    }
+                    projects={projects}
+                    selectedProject={newTaskProject}
+                  >
+                    {renderComposer(createTaskFromPrompt)}
+                  </NewTaskWorkspace>
+                ) : workspaceMode === "research" &&
+                researchMainOpen &&
+                researchSection !== "skills" ? (
+                  <ResearchMainWorkspace
+                    cwd={cwd}
+                    detail={researchDetail}
+                    kind={researchSection}
+                    onAskPaper={askResearchPaper}
+                    onCloseDetail={() =>
+                      setResearchDetail((current) =>
+                        current?.type === "paper" && current.returnTo
+                          ? current.returnTo
+                          : undefined,
+                      )
+                    }
+                    onNavigate={openResearchSection}
+                    onOpenPaper={openResearchPaper}
+                    onOpenTrackingTopic={openResearchTrackingTopic}
+                    projectId={activeProject?.id}
+                    projectName={activeProject?.name ?? "未选择项目"}
+                    root={activeProject?.path ?? cwd}
                   />
-                  {sessionStatusLabel(status.phase, acpPhase)}
-                </div>
-              </div>
-              <Button
-                aria-label={
-                  git.loading
-                    ? "正在检查更改"
-                    : `${git.changes.length} 项更改`
-                }
-                className="gap-1 px-2"
-                onClick={openGit}
-                size="sm"
-                title={
-                  git.loading
-                    ? "正在检查更改"
-                    : `${git.changes.length} 项更改`
-                }
-                variant="outline"
-              >
-                <GitCompareArrowsIcon data-icon="inline-start" />
-                <span className="min-w-2 text-center tabular-nums">
-                  {git.loading ? "…" : git.changes.length}
-                </span>
-              </Button>
-              {appUpdate?.available ? (
-                <Button
-                  className="motion-view-enter"
-                  disabled={installingUpdate}
-                  onClick={() => void installAppUpdate()}
-                  variant="outline"
-                >
-                  <DownloadIcon />
-                  {installingUpdate
-                    ? "正在安装更新"
-                    : `更新到 ${appUpdate.version}`}
-                </Button>
-              ) : null}
-              <Button
-                aria-label={
-                  workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
-                }
-                aria-pressed={workspacePanelOpen}
-                onClick={() => setWorkspacePanelOpen((open) => !open)}
-                size="icon"
-                title={
-                  workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
-                }
-                variant={workspacePanelOpen ? "secondary" : "ghost"}
-              >
-                <span
-                  className={cn(
-                    "transition-transform duration-200 ease-out [&>svg]:size-4",
-                    workspacePanelOpen && "-translate-x-0.5",
-                  )}
-                >
-                  <PanelRightIcon />
-                </span>
-              </Button>
-            </header>
-            <Presence present={Boolean(visibleError)}>
-              {(motionState) => (
-                <div
-                  aria-live="polite"
-                  className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-                  data-motion-state={motionState}
-                  role="alert"
-                >
-                  {visibleError}
-                </div>
-              )}
-            </Presence>
+                ) : (
+                  <>
+                    <div className="relative flex min-w-0 flex-1 flex-col">
+                      <header
+                        className={cn(
+                          "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
+                          sidebarCollapsed
+                            ? isMacOS
+                              ? "pl-52"
+                              : "pl-32"
+                            : "pl-6",
+                        )}
+                        data-tauri-drag-region
+                      >
+                        <div
+                          className="flex min-w-0 flex-1 items-center gap-2"
+                          data-tauri-drag-region
+                        >
+                          <h1
+                            className="min-w-0 truncate font-semibold text-base"
+                            data-tauri-drag-region
+                          >
+                            {activeSession
+                              ? localizedSessionTitle(activeSession.title)
+                              : "正在打开工作区…"}
+                          </h1>
+                          <div
+                            className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                            data-tauri-drag-region
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="motion-status-dot size-1.5 rounded-full bg-current"
+                              data-tauri-drag-region
+                            />
+                            {sessionStatusLabel(status.phase, acpPhase)}
+                          </div>
+                        </div>
+                        <Button
+                          aria-label={
+                            git.loading
+                              ? "正在检查更改"
+                              : `${git.changes.length} 项更改`
+                          }
+                          className="gap-1 px-2"
+                          onClick={openGit}
+                          size="sm"
+                          title={
+                            git.loading
+                              ? "正在检查更改"
+                              : `${git.changes.length} 项更改`
+                          }
+                          variant="outline"
+                        >
+                          <GitCompareArrowsIcon data-icon="inline-start" />
+                          <span className="min-w-2 text-center tabular-nums">
+                            {git.loading ? "…" : git.changes.length}
+                          </span>
+                        </Button>
+                        {appUpdate?.available ? (
+                          <Button
+                            className="motion-view-enter"
+                            disabled={installingUpdate}
+                            onClick={() => void installAppUpdate()}
+                            variant="outline"
+                          >
+                            <DownloadIcon />
+                            {installingUpdate
+                              ? "正在安装更新"
+                              : `更新到 ${appUpdate.version}`}
+                          </Button>
+                        ) : null}
+                        <Button
+                          aria-label={
+                            workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
+                          }
+                          aria-pressed={workspacePanelOpen}
+                          onClick={() => setWorkspacePanelOpen((open) => !open)}
+                          size="icon"
+                          title={
+                            workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
+                          }
+                          variant={workspacePanelOpen ? "secondary" : "ghost"}
+                        >
+                          <span
+                            className={cn(
+                              "transition-transform duration-200 ease-out [&>svg]:size-4",
+                              workspacePanelOpen && "-translate-x-0.5",
+                            )}
+                          >
+                            <PanelRightIcon />
+                          </span>
+                        </Button>
+                      </header>
+                      <Presence present={Boolean(visibleError)}>
+                        {(motionState) => (
+                          <div
+                            aria-live="polite"
+                            className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+                            data-motion-state={motionState}
+                            role="alert"
+                          >
+                            {visibleError}
+                          </div>
+                        )}
+                      </Presence>
 
-            <AgentTimeline
-              cwd={cwd}
-              entries={timeline}
-              onPermission={resolvePermission}
-              onPlanDecision={resolvePlan}
-              onOpenProjectReference={openProjectReference}
-              projectRoot={activeProject?.path ?? cwd}
-            />
-            <SubagentTray
-              onOpenSubagent={openSubagent}
-              subagents={visibleSubagents}
-            />
-            {renderComposer(submitPrompt)}
-          </div>
-          <div
-            aria-hidden={!workspacePanelOpen}
-            className="motion-workspace-layer h-full min-h-0 shrink-0"
-            data-collapsed={!workspacePanelOpen}
-            data-resizing={Boolean(workspacePanelResize)}
-            inert={!workspacePanelOpen}
-            style={
-              {
-                "--workspace-panel-width": `${workspacePanelWidth}px`,
-                width: workspacePanelOpen ? workspacePanelWidth : 0,
-              } as CSSProperties
-            }
-          >
-            <WorkspaceSidePanel
-              activeTabId={activeWorkspaceTabId}
-              changes={git.changes}
-              cwd={cwd}
-              gitError={git.error}
-              gitLoading={git.loading}
-              onActivateTab={setActiveWorkspaceTabId}
-              onCloseTab={closeWorkspaceTab}
-              onNewTab={newWorkspaceToolTab}
-              onOpenFile={openFilePreview}
-              onOpenProjectReference={openProjectReference}
-              onRefreshGit={() => void git.refresh()}
-              onResetWidth={() =>
-                updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
-              }
-              onResizeBy={(delta) =>
-                updateWorkspacePanelWidth(
-                  workspacePanelWidthRef.current + delta,
-                )
-              }
-              onResizeStart={beginWorkspacePanelResize}
-              root={activeProject?.path ?? cwd}
-              subagents={subagents}
-              tabs={workspaceTabs}
-            />
-          </div>
-            </>
+                      <AgentTimeline
+                        cwd={cwd}
+                        entries={timeline}
+                        onPermission={resolvePermission}
+                        onPlanDecision={resolvePlan}
+                        onOpenProjectReference={openProjectReference}
+                        projectRoot={activeProject?.path ?? cwd}
+                        turnRunning={
+                          chatStatus === "submitted" ||
+                          chatStatus === "streaming"
+                        }
+                      />
+                      <SubagentTray
+                        onOpenSubagent={openSubagent}
+                        subagents={visibleSubagents}
+                      />
+                      {renderComposer(submitPrompt)}
+                    </div>
+                    <div
+                      aria-hidden={!workspacePanelOpen}
+                      className="motion-workspace-layer h-full min-h-0 shrink-0"
+                      data-collapsed={!workspacePanelOpen}
+                      data-resizing={Boolean(workspacePanelResize)}
+                      inert={!workspacePanelOpen}
+                      style={
+                        {
+                          "--workspace-panel-width": `${workspacePanelWidth}px`,
+                          width: workspacePanelOpen ? workspacePanelWidth : 0,
+                        } as CSSProperties
+                      }
+                    >
+                      <WorkspaceSidePanel
+                        activeTabId={activeWorkspaceTabId}
+                        changes={git.changes}
+                        cwd={cwd}
+                        gitError={git.error}
+                        gitLoading={git.loading}
+                        onActivateTab={setActiveWorkspaceTabId}
+                        onCloseTab={closeWorkspaceTab}
+                        onNewTab={newWorkspaceToolTab}
+                        onOpenFile={openFilePreview}
+                        onOpenProjectReference={openProjectReference}
+                        onRefreshGit={() => void git.refresh()}
+                        onResetWidth={() =>
+                          updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
+                        }
+                        onResizeBy={(delta) =>
+                          updateWorkspacePanelWidth(
+                            workspacePanelWidthRef.current + delta,
+                          )
+                        }
+                        onResizeStart={beginWorkspacePanelResize}
+                        root={activeProject?.path ?? cwd}
+                        subagents={subagents}
+                        tabs={workspaceTabs}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </MotionPage>
           )}
-        </div>
+        </AnimatePresence>
       </section>
     </main>
   );

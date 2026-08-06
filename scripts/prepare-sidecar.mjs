@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
+  readSync,
   realpathSync,
+  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -69,6 +73,55 @@ const siblingDebugSource = resolve(
   windowsTarget ? "melody-pager.exe" : "melody-pager",
 );
 const explicitSource = process.env.MELODY_PAGER_SOURCE;
+
+function filesEqual(leftPath, rightPath) {
+  const leftStats = statSync(leftPath);
+  const rightStats = statSync(rightPath);
+  if (leftStats.size !== rightStats.size) {
+    return false;
+  }
+
+  const leftFd = openSync(leftPath, "r");
+  const rightFd = openSync(rightPath, "r");
+  const leftBuffer = Buffer.allocUnsafe(1024 * 1024);
+  const rightBuffer = Buffer.allocUnsafe(1024 * 1024);
+
+  try {
+    while (true) {
+      const leftBytes = readSync(
+        leftFd,
+        leftBuffer,
+        0,
+        leftBuffer.length,
+        null,
+      );
+      const rightBytes = readSync(
+        rightFd,
+        rightBuffer,
+        0,
+        rightBuffer.length,
+        null,
+      );
+      if (leftBytes !== rightBytes) {
+        return false;
+      }
+      if (leftBytes === 0) {
+        return true;
+      }
+      if (
+        !leftBuffer
+          .subarray(0, leftBytes)
+          .equals(rightBuffer.subarray(0, rightBytes))
+      ) {
+        return false;
+      }
+    }
+  } finally {
+    closeSync(leftFd);
+    closeSync(rightFd);
+  }
+}
+
 if (developmentMode && !explicitSource && existsSync(embeddedManifest)) {
   const cargoArgs = [
     "build",
@@ -118,8 +171,18 @@ if (!source) {
 }
 
 mkdirSync(resolve("src-tauri", "binaries"), { recursive: true });
-copyFileSync(realpathSync(source), destination);
-if (!windowsTarget) {
+const resolvedSource = realpathSync(source);
+const destinationExists = existsSync(destination);
+const unchanged = destinationExists && filesEqual(resolvedSource, destination);
+
+if (!unchanged) {
+  copyFileSync(resolvedSource, destination);
+}
+if (!windowsTarget && (statSync(destination).mode & 0o777) !== 0o755) {
   chmodSync(destination, 0o755);
 }
-console.log(`Prepared ${destination} from ${source}`);
+console.log(
+  unchanged
+    ? `Sidecar unchanged: ${destination}`
+    : `Prepared ${destination} from ${source}`,
+);

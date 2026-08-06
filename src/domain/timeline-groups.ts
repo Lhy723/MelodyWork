@@ -46,6 +46,7 @@ const toolIsRunning = (tool: ToolTimelineEntry) =>
 
 export const groupTurnActivity = (
   entries: TimelineEntry[],
+  turnRunning = false,
 ): TimelineRenderEntry[] => {
   const result: TimelineRenderEntry[] = [];
   let activity: Array<ThoughtTimelineEntry | ToolTimelineEntry> = [];
@@ -84,11 +85,12 @@ export const groupTurnActivity = (
       nextEntry?.kind === "message" && nextEntry.role === "assistant"
         ? Boolean(nextEntry.streaming)
         : nextEntry === undefined &&
-          activity.some((entry) =>
-            entry.kind === "thought"
-              ? Boolean(entry.streaming)
-              : toolIsRunning(entry),
-          );
+          (turnRunning ||
+            activity.some((entry) =>
+              entry.kind === "thought"
+                ? Boolean(entry.streaming)
+                : toolIsRunning(entry),
+            ));
     const startedAt = turnStartedAt ?? entryStartedAt(activity[0]);
     const endedAt =
       nextEntry?.kind === "message" && nextEntry.role === "assistant"

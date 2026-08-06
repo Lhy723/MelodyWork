@@ -1,0 +1,31 @@
+{
+  "name": "melody-research",
+  "version": "0.1.0",
+  "description": "Evidence-first literature discovery, paper review, citation auditing, systematic review, and reproducible experiment design for Melody Research.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Melody Research",
+    "shortDescription": "Evidence-first research skills and literature tools.",
+    "longDescription": "A local Research plugin with six complementary skills, a provenance-aware literature MCP server, and prompts for paper review and reproducible study design.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Literature search",
+      "Paper review",
+      "Citation audit",
+      "Systematic review",
+      "Experiment design",
+      "Scientific writing",
+      "MCP tools"
+    ],
+    "defaultPrompt": [
+      "Turn my research question into a reproducible literature search.",
+      "Review this paper and separate evidence from interpretation.",
+      "Audit these citations before I use them in a manuscript."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

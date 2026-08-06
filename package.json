@@ -8,9 +8,10 @@
     "build": "tsc && vite build",
     "check": "tsc --noEmit",
     "check:updater-key": "node scripts/validate-updater-key.mjs",
+    "test:unit": "node --experimental-strip-types --test src/domain/*.test.mjs src/features/files/*.test.mjs src/features/research/*.test.mjs",
     "test:projection": "node --experimental-strip-types --test src/domain/session-projection.test.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "node scripts/tauri-cli.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -35,6 +36,7 @@
     "cmdk": "^1.1.1",
     "echarts": "^6.1.0",
     "embla-carousel-react": "^8.6.0",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.26.0",
     "media-chrome": "^4.19.2",
     "monaco-editor": "^0.52.2",

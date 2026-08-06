@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific writing"
+  short_description: "Write concise, evidence-first scientific prose."
+  default_prompt: "Rewrite this research section with clear evidence boundaries."

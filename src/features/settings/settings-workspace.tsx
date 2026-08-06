@@ -13,6 +13,7 @@ import {
   Trash2Icon,
   WebhookIcon,
 } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import {
   lazy,
   Suspense,
@@ -22,6 +23,7 @@ import {
   useState,
 } from "react";
 
+import { MotionPage } from "@/components/motion/page-transition";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -537,6 +539,11 @@ export function SettingsWorkspace({
   const ExtensionIcon = extensionKind
     ? kindIcon[extensionKind]
     : SparklesIcon;
+  const settingsViewKey = selectedPlugin
+    ? `${page}:${selectedPlugin.path}`
+    : page === "configuration"
+      ? `${page}:${scope}:${activeConfigSection}`
+      : page;
 
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background">
@@ -722,21 +729,23 @@ export function SettingsWorkspace({
           </nav>
         </aside>
 
-        {page === "statistics" ? (
-          <Suspense
-            fallback={
-              <p className="min-w-0 flex-1 p-8 text-muted-foreground text-sm">
-                正在加载统计…
-              </p>
-            }
+        <AnimatePresence initial={false} mode="wait">
+          <MotionPage
+            className="flex min-w-0 flex-1 flex-col"
+            key={settingsViewKey}
           >
-            <StatisticsPage cwd={cwd} />
-          </Suspense>
-        ) : page === "configuration" ? (
-          <section
-            className="motion-view-enter flex min-w-0 flex-1 flex-col"
-            key="configuration"
-          >
+            {page === "statistics" ? (
+              <Suspense
+                fallback={
+                  <p className="min-w-0 flex-1 p-8 text-muted-foreground text-sm">
+                    正在加载统计…
+                  </p>
+                }
+              >
+                <StatisticsPage cwd={cwd} />
+              </Suspense>
+            ) : page === "configuration" ? (
+              <section className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
               {(["user", "project"] as const).map((item) => (
                 <Button
@@ -814,19 +823,13 @@ export function SettingsWorkspace({
                 values={configValues}
               />
             )}
-          </section>
-        ) : page === "about" ? (
-          <section
-            className="motion-view-enter min-w-0 flex-1 overflow-y-auto"
-            key="about"
-          >
-            <AboutPage />
-          </section>
-        ) : extensionKind ? (
-          <section
-            className="motion-view-enter min-w-0 flex-1 overflow-y-auto p-6"
-            key={extensionKind}
-          >
+              </section>
+            ) : page === "about" ? (
+              <section className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                <AboutPage />
+              </section>
+            ) : extensionKind ? (
+              <section className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-4xl">
               {extensionKind === "plugins" && selectedPlugin ? (
                 <PluginDetailsView
@@ -1063,12 +1066,9 @@ export function SettingsWorkspace({
                 </>
               )}
             </div>
-          </section>
-        ) : (
-          <section
-            className="motion-view-enter min-w-0 flex-1 overflow-y-auto p-6"
-            key="permissions"
-          >
+              </section>
+            ) : (
+              <section className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-4xl">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
@@ -1138,8 +1138,10 @@ export function SettingsWorkspace({
                 ) : null}
               </div>
             </div>
-          </section>
-        )}
+              </section>
+            )}
+          </MotionPage>
+        </AnimatePresence>
       </div>
     </section>
   );

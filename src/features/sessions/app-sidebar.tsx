@@ -7,6 +7,8 @@ import {
   FlaskConicalIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
+  InboxIcon,
+  LayoutDashboardIcon,
   LibraryIcon,
   MoreHorizontalIcon,
   RadarIcon,
@@ -28,6 +30,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Presence } from "@/components/ui/presence";
 import {
   Dialog,
   DialogClose,
@@ -50,13 +53,16 @@ import { cn } from "@/lib/utils";
 
 export type WorkspaceMode = "work" | "research";
 export type ResearchSection =
+  | "overview"
   | "knowledge"
   | "library"
   | "experiments"
   | "sandbox"
   | "search"
   | "tracking"
-  | "skills";
+  | "inbox"
+  | "skills"
+  | "capabilities";
 
 interface AppSidebarProps {
   activeProject?: ProjectRecord;
@@ -222,20 +228,25 @@ export function AppSidebar({
         </Button>
       </div>
 
-      {searchOpen ? (
-        <div className="motion-view-enter px-1 pb-2">
-          <div className="flex h-8 items-center gap-2 rounded-lg border bg-background/70 px-2.5 shadow-xs">
-            <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <input
-              autoFocus
-              className="min-w-0 flex-1 bg-transparent text-sidebar-foreground text-sm outline-none placeholder:text-muted-foreground"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索项目和任务"
-              value={query}
-            />
+      <Presence present={searchOpen}>
+        {(motionState) => (
+          <div
+            className="motion-sidebar-search px-1 pb-2"
+            data-motion-state={motionState}
+          >
+            <div className="flex h-8 items-center gap-2 rounded-lg border bg-background/70 px-2.5 shadow-xs">
+              <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <input
+                autoFocus
+                className="min-w-0 flex-1 bg-transparent text-sidebar-foreground text-sm outline-none placeholder:text-muted-foreground"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索项目和任务"
+                value={query}
+              />
+            </div>
           </div>
-        </div>
-      ) : null}
+        )}
+      </Presence>
 
       <nav aria-label="主导航" className="mt-2 flex flex-col gap-0 px-1">
         <Button
@@ -252,6 +263,18 @@ export function AppSidebar({
         </Button>
         {workspaceMode === "research" ? (
           <>
+            <Button
+              className={cn(
+                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "overview" &&
+                  "bg-sidebar-selected",
+              )}
+              onClick={() => onSelectResearchSection("overview")}
+              variant="ghost"
+            >
+              <LayoutDashboardIcon data-icon="inline-start" />
+              研究总览
+            </Button>
             <Button
               className={cn(
                 "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
@@ -276,6 +299,18 @@ export function AppSidebar({
               <RadarIcon data-icon="inline-start" />
               科研追踪
             </Button>
+            <Button
+              className={cn(
+                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "inbox" &&
+                  "bg-sidebar-selected",
+              )}
+              onClick={() => onSelectResearchSection("inbox")}
+              variant="ghost"
+            >
+              <InboxIcon data-icon="inline-start" />
+              研究收件箱
+            </Button>
           </>
         ) : (
           <Button
@@ -293,14 +328,18 @@ export function AppSidebar({
             "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
             workspaceMode === "research" && "research-serif",
             workspaceMode === "research" &&
-              activeResearchSection === "skills" &&
+              activeResearchSection === "capabilities" &&
               "bg-sidebar-selected",
           )}
-          onClick={onOpenExtensions}
+          onClick={() =>
+            workspaceMode === "research"
+              ? onSelectResearchSection("capabilities")
+              : onOpenExtensions()
+          }
           variant="ghost"
         >
           <BlocksIcon data-icon="inline-start" />
-          扩展
+          {workspaceMode === "research" ? "科研能力" : "扩展"}
         </Button>
       </nav>
 

@@ -131,6 +131,7 @@ export function TurnActivityGroup({
               key={item.id}
               onPermission={onPermission}
               projectRoot={projectRoot}
+              turnRunning={running}
               tools={item.tools}
             />
           ),

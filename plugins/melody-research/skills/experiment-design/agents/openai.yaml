@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experiment design"
+  short_description: "Design reproducible studies with clear controls."
+  default_prompt: "Design a reproducible experiment for this research claim."

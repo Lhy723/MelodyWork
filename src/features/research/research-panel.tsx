@@ -14,8 +14,13 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 
+import {
+  MOTION_EASE,
+  MOTION_LEAVE_EASE,
+} from "@/components/motion/page-transition";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -200,7 +205,9 @@ function PaperDetail({
             <div className="flex items-center gap-2">
               <h4 className="font-medium text-xs">摘要</h4>
               {paper.verified ? (
-                <Badge variant="outline">Crossref / OpenAlex 已核验</Badge>
+                <Badge variant="outline">
+                  {paper.sources.join(" / ")} 已通过元信息核验
+                </Badge>
               ) : (
                 <Badge variant="secondary">
                   {paper.sources.join(" / ")}
@@ -376,7 +383,15 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">
-        <div className={cn("min-h-0 overflow-y-auto", selected ? "w-[46%]" : "w-full")}>
+        <motion.div
+          animate={{ width: selected ? "46%" : "100%" }}
+          className="min-h-0 shrink-0 overflow-y-auto"
+          initial={false}
+          transition={{
+            duration: selected ? 0.28 : 0.16,
+            ease: selected ? MOTION_EASE : MOTION_LEAVE_EASE,
+          }}
+        >
           <PaperList
             empty={
               searchMode
@@ -387,26 +402,37 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
             papers={visiblePapers}
             selectedId={selectedId}
           />
-        </div>
-        {selected ? (
-          <PaperDetail
-            canDelete={!searchMode}
-            onClose={() => setSelectedId(undefined)}
-            onDelete={() => {
-              removePaper(selected.id);
-              setSelectedId(undefined);
-            }}
-            onToggleSaved={() => {
-              if (selectedInLibrary) {
-                setPaperSaved(selected.id, !selectedInLibrary.saved);
-              } else {
-                addPapers([{ ...selected, saved: true }]);
-              }
-            }}
-            paper={selectedInLibrary ?? selected}
-            saved={selectedInLibrary?.saved ?? false}
-          />
-        ) : null}
+        </motion.div>
+        <AnimatePresence initial={false} mode="wait">
+          {selected ? (
+            <motion.div
+              animate={{ opacity: 1, x: 0 }}
+              className="min-h-0 min-w-0 flex-1"
+              exit={{ opacity: 0, x: 12 }}
+              initial={{ opacity: 0, x: 12 }}
+              key={selected.id}
+              transition={{ duration: 0.24, ease: MOTION_EASE }}
+            >
+              <PaperDetail
+                canDelete={!searchMode}
+                onClose={() => setSelectedId(undefined)}
+                onDelete={() => {
+                  removePaper(selected.id);
+                  setSelectedId(undefined);
+                }}
+                onToggleSaved={() => {
+                  if (selectedInLibrary) {
+                    setPaperSaved(selected.id, !selectedInLibrary.saved);
+                  } else {
+                    addPapers([{ ...selected, saved: true }]);
+                  }
+                }}
+                paper={selectedInLibrary ?? selected}
+                saved={selectedInLibrary?.saved ?? false}
+              />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
       {searchMode && results.length > 0 ? (
         <div className="flex h-10 shrink-0 items-center border-t px-3">

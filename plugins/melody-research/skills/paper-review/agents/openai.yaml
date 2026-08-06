@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paper review"
+  short_description: "Critical paper reading and evidence limits."
+  default_prompt: "Review this paper critically and separate evidence from interpretation."

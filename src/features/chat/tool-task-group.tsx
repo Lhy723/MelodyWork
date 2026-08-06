@@ -37,6 +37,7 @@ interface ToolTaskGroupProps {
   cwd: string;
   onPermission: (entryId: string, optionId: string) => void;
   projectRoot: string;
+  turnRunning: boolean;
   tools: ToolTimelineEntry[];
 }
 
@@ -410,10 +411,12 @@ const FileChangeRow = ({
 
 const ToolRow = ({
   cwd,
+  pathOverride,
   projectRoot,
   tool,
 }: {
   cwd: string;
+  pathOverride?: string;
   projectRoot: string;
   tool: ToolTimelineEntry;
 }) => {
@@ -421,12 +424,12 @@ const ToolRow = ({
   const operation = activity?.operation ?? "other";
   const Icon = operationIcon(operation);
   const running = isRunning(tool);
-  const path = activity?.path
-    ? displayPath(activity.path, projectRoot, cwd)
+  const path = (pathOverride ?? activity?.path)
+    ? displayPath(pathOverride ?? activity?.path ?? "", projectRoot, cwd)
     : undefined;
   const detail =
     operation === "search"
-      ? activity?.glob ?? path
+      ? path ?? activity?.glob
       : path ?? tool.command.trim().split(/\r?\n/u, 1)[0];
 
   return (
@@ -478,23 +481,24 @@ export function ToolTaskGroup({
   cwd,
   onPermission,
   projectRoot,
+  turnRunning,
   tools,
 }: ToolTaskGroupProps) {
   const running = tools.some(isRunning);
-  const [open, setOpen] = useState(running);
-  const wasRunning = useRef(running);
+  const [open, setOpen] = useState(turnRunning);
+  const wasTurnRunning = useRef(turnRunning);
 
   useEffect(() => {
-    if (running && !wasRunning.current) {
+    if (turnRunning && !wasTurnRunning.current) {
       setOpen(true);
     }
-    if (!running && wasRunning.current) {
+    if (!turnRunning && wasTurnRunning.current) {
       const timer = window.setTimeout(() => setOpen(false), 800);
-      wasRunning.current = running;
+      wasTurnRunning.current = turnRunning;
       return () => window.clearTimeout(timer);
     }
-    wasRunning.current = running;
-  }, [running]);
+    wasTurnRunning.current = turnRunning;
+  }, [turnRunning]);
 
   const headerOperation =
     tools.find((tool) =>
@@ -530,24 +534,40 @@ export function ToolTaskGroup({
       <TaskContent className="[&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-0 [&>div]:text-[13px] [&>div]:leading-5">
         {tools.flatMap((tool) => {
           const changes = tool.activity?.files ?? [];
-          const rows = changes.length
-            ? changes.map((change) => (
-                <FileChangeRow
-                  change={change}
-                  cwd={cwd}
-                  key={`${tool.id}-${change.path}`}
-                  projectRoot={projectRoot}
-                  running={isRunning(tool)}
-                />
-              ))
-            : [
-                <ToolRow
-                  cwd={cwd}
-                  key={tool.id}
-                  projectRoot={projectRoot}
-                  tool={tool}
-                />,
-              ];
+          const changePaths = new Set(changes.map((change) => change.path));
+          const extraPaths = (tool.activity?.paths ?? []).filter(
+            (path) => !changePaths.has(path),
+          );
+          const rows = [
+            ...changes.map((change) => (
+              <FileChangeRow
+                change={change}
+                cwd={cwd}
+                key={`${tool.id}-${change.path}`}
+                projectRoot={projectRoot}
+                running={isRunning(tool)}
+              />
+            )),
+            ...extraPaths.map((path) => (
+              <ToolRow
+                cwd={cwd}
+                key={`${tool.id}-${path}`}
+                pathOverride={path}
+                projectRoot={projectRoot}
+                tool={tool}
+              />
+            )),
+          ];
+          if (rows.length === 0) {
+            rows.push(
+              <ToolRow
+                cwd={cwd}
+                key={tool.id}
+                projectRoot={projectRoot}
+                tool={tool}
+              />,
+            );
+          }
           if (tool.permission !== "pending") {
             return rows;
           }

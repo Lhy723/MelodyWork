@@ -73,9 +73,12 @@ body {
   --motion-duration-fast: 150ms;
   --motion-duration-base: 220ms;
   --motion-duration-panel: 280ms;
+  --motion-duration-enter: 280ms;
+  --motion-duration-exit: 160ms;
   --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --motion-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-ease-leave: cubic-bezier(0.4, 0, 1, 1);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -329,6 +332,26 @@ body {
     opacity: 0;
     transform: translate3d(0, -6px, 0);
     pointer-events: none;
+  }
+
+  .motion-sidebar-search {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    transform-origin: top;
+    transition:
+      opacity var(--motion-duration-fast) var(--motion-ease-out),
+      transform var(--motion-duration-base) var(--motion-ease-out);
+    will-change: opacity, transform;
+  }
+
+  .motion-sidebar-search[data-motion-state="closed"] {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(0.985);
+    pointer-events: none;
+  }
+
+  .motion-page {
+    will-change: opacity, transform;
   }
 
   .motion-view-enter {
@@ -628,6 +651,12 @@ body {
     transition-property: opacity !important;
   }
 
+  .motion-page,
+  .motion-sidebar-search {
+    transform: none !important;
+    transition: opacity 160ms ease-out !important;
+  }
+
   .motion-dialog-content {
     transform: translate(-50%, -50%) !important;
   }
@@ -659,12 +688,6 @@ body {
   .sidebar-aware-header {
     transform: none !important;
     transition: none !important;
-  }
-}
-
-@media (hover: hover) and (pointer: fine) {
-  [data-slot="button"]:not(:disabled):hover > svg:first-child {
-    transform: translateY(-1px);
   }
 }
 

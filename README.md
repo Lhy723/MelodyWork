@@ -29,8 +29,14 @@ pnpm tauri dev
 ```
 
 `pnpm tauri dev` 会先增量编译项目内的 `vendor/melody-build` debug
-sidecar，再启动 Tauri 与 Vite；修改前端或 melody-build 源码后重新运行该命令即可。
+sidecar，再启动 Tauri 与 Vite。sidecar 会在 Tauri 文件监听启动前准备好，避免
+开发启动过程中因 sidecar 文件变化而重复唤起窗口；修改前端或 melody-build 源码后重新运行该命令即可。
 设置 `MELODY_PAGER_SOURCE` 时会跳过内置仓库编译并使用指定可执行文件。
+
+如果直接运行 `cargo build` 或 `cargo check --manifest-path src-tauri/Cargo.toml`，
+`src-tauri/build.rs` 也会自动从 vendor 的 debug/release 产物准备当前架构的
+sidecar；没有可用产物时，请先执行 `node scripts/prepare-sidecar.mjs` 或设置
+`MELODY_PAGER_SOURCE`。
 
 开发构建会从以下位置之一准备 sidecar：
 

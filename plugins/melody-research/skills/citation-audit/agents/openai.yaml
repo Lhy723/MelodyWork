@@ -1,0 +1,4 @@
+interface:
+  display_name: "Citation audit"
+  short_description: "Audit citation metadata and evidence provenance."
+  default_prompt: "Audit these citations and flag anything that cannot be verified."

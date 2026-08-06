@@ -107,3 +107,20 @@ test("starts a new activity group for the next user turn", () => {
     ],
   );
 });
+
+test("keeps an active turn open between completed tool calls", () => {
+  const entries = [
+    message("user-1", "user"),
+    { ...tool("read"), status: "completed" },
+  ];
+
+  const active = groupTurnActivity(entries, true).find(
+    (entry) => entry.kind === "activity-group",
+  );
+  const completed = groupTurnActivity(entries, false).find(
+    (entry) => entry.kind === "activity-group",
+  );
+
+  assert.equal(active?.running, true);
+  assert.equal(completed?.running, false);
+});

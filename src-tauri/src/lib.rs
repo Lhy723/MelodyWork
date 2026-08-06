@@ -28,8 +28,9 @@ use research_runtime::fetch_research_resource;
 use tauri::Manager;
 use update_runtime::check_app_update;
 use workspace_runtime::{
-    TerminalRuntime, close_terminal_session, create_terminal_session, read_workspace_file,
-    run_terminal_command, workspace_tree, write_terminal_input, write_workspace_file,
+    TerminalRuntime, close_terminal_session, create_terminal_session, read_workspace_binary_file,
+    read_workspace_file, run_terminal_command, workspace_tree, write_terminal_input,
+    write_workspace_file,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,6 +72,7 @@ pub fn run() {
             delete_session,
             get_usage_statistics,
             workspace_tree,
+            read_workspace_binary_file,
             read_workspace_file,
             write_workspace_file,
             create_terminal_session,

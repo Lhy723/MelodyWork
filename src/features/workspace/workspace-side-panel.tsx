@@ -5,18 +5,16 @@ import {
   GitCompareArrowsIcon,
   LibraryIcon,
   PlusIcon,
-  RefreshCwIcon,
   TerminalSquareIcon,
   XIcon,
 } from "lucide-react";
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useState,
-  type PointerEventHandler,
-} from "react";
+import { motion } from "motion/react";
+import { type PointerEventHandler } from "react";
 
+import {
+  MOTION_EASE,
+  MOTION_LEAVE_EASE,
+} from "@/components/motion/page-transition";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,6 +25,7 @@ import {
 import type { AgentSubagent } from "@/domain/acp";
 import type { GitChange } from "@/domain/git";
 import type { ProjectReference } from "@/domain/message-citations";
+import { FilePreview } from "@/features/files/file-preview";
 import { FileWorkspace } from "@/features/files/file-workspace";
 import { ChangeReview } from "@/features/git/change-review";
 import {
@@ -35,10 +34,7 @@ import {
 } from "@/features/research/research-panel";
 import { TerminalPanel } from "@/features/terminal/terminal-panel";
 import { SubagentConversation } from "@/features/workspace/subagent-conversation";
-import { readWorkspaceFile } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
-
-const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
 export type WorkspaceTab =
   | { id: string; kind: "files"; label: string }
@@ -84,28 +80,6 @@ interface WorkspaceSidePanelProps {
   tabs: WorkspaceTab[];
 }
 
-const languageFor = (path: string) => {
-  const extension = path.split(".").at(-1)?.toLowerCase();
-  return (
-    {
-      ts: "typescript",
-      tsx: "typescript",
-      js: "javascript",
-      jsx: "javascript",
-      rs: "rust",
-      json: "json",
-      md: "markdown",
-      css: "css",
-      html: "html",
-      toml: "toml",
-      yaml: "yaml",
-      yml: "yaml",
-      py: "python",
-      sh: "shell",
-    }[extension ?? ""] ?? "plaintext"
-  );
-};
-
 const tabIcon = (tab: WorkspaceTab) => {
   if (tab.kind === "files") {
     return <FilesIcon />;
@@ -124,111 +98,6 @@ const tabIcon = (tab: WorkspaceTab) => {
   }
   return <FileCode2Icon />;
 };
-
-function FilePreview({ path, root }: { path: string; root: string }) {
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
-  const editorTheme =
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark")
-      ? "vs-dark"
-      : "vs";
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(undefined);
-    void readWorkspaceFile(root, path)
-      .then((nextContent) => {
-        if (active) {
-          setContent(nextContent);
-        }
-      })
-      .catch((reason) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [path, root]);
-
-  return (
-    <section className="flex size-full min-h-0 flex-col bg-background">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <FileCode2Icon className="size-3.5 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-xs" title={path}>
-          {path}
-        </span>
-        <Button
-          aria-label="重新加载文件"
-          disabled={loading}
-          onClick={() => {
-            setLoading(true);
-            setError(undefined);
-            void readWorkspaceFile(root, path)
-              .then(setContent)
-              .catch((reason) =>
-                setError(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
-              )
-              .finally(() => setLoading(false));
-          }}
-          size="icon-xs"
-          variant="ghost"
-        >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
-      </header>
-      {error ? (
-        <p className="border-b bg-destructive/5 px-3 py-2 text-destructive text-xs">
-          {error}
-        </p>
-      ) : null}
-      <div className="min-h-0 flex-1">
-        {loading && !content ? (
-          <p className="p-4 text-muted-foreground text-xs">正在加载文件…</p>
-        ) : (
-          <Suspense
-            fallback={
-              <p className="p-4 text-muted-foreground text-xs">
-                正在加载预览…
-              </p>
-            }
-          >
-            <MonacoEditor
-              language={languageFor(path)}
-              loading="正在加载预览…"
-              options={{
-                fontFamily:
-                  '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-                fontSize: 12,
-                lineNumbersMinChars: 3,
-                minimap: { enabled: false },
-                padding: { top: 12 },
-                readOnly: true,
-                renderLineHighlight: "none",
-                scrollBeyondLastLine: false,
-                smoothScrolling: true,
-                wordWrap: "on",
-              }}
-              theme={editorTheme}
-              value={content}
-            />
-          </Suspense>
-        )}
-      </div>
-    </section>
-  );
-}
 
 export function WorkspaceSidePanel({
   activeTabId,
@@ -288,15 +157,25 @@ export function WorkspaceSidePanel({
           {tabs.map((tab) => (
             <div
               className={cn(
-                "group flex h-6 min-w-0 max-w-52 shrink-0 items-center rounded-md border border-transparent text-muted-foreground transition-colors",
+                "group relative flex h-6 min-w-0 max-w-52 shrink-0 items-center rounded-md border border-transparent text-muted-foreground transition-colors",
                 activeTabId === tab.id &&
-                  "border-border/80 bg-muted/70 text-foreground shadow-sm",
+                  "text-foreground",
               )}
               key={tab.id}
             >
+              {activeTabId === tab.id ? (
+                <motion.span
+                  className="absolute inset-0 rounded-md border border-border/80 bg-muted/70 shadow-sm"
+                  layoutId="workspace-tab-active"
+                  transition={{
+                    duration: 0.2,
+                    ease: MOTION_EASE,
+                  }}
+                />
+              ) : null}
               <button
                 aria-selected={activeTabId === tab.id}
-                className="flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-1 pl-2.5 text-xs outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-1 pl-2.5 text-xs outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 onClick={() => onActivateTab(tab.id)}
                 role="tab"
                 title={tab.kind === "file" ? tab.path : tab.label}
@@ -383,15 +262,27 @@ export function WorkspaceSidePanel({
           </div>
         ) : null}
         {tabs.map((tab) => (
-          <div
+          <motion.div
             aria-hidden={activeTabId !== tab.id}
-            className={cn(
-              "absolute inset-0",
-              activeTabId !== tab.id && "hidden",
-            )}
+            animate={{
+              opacity: activeTabId === tab.id ? 1 : 0,
+              scale: activeTabId === tab.id ? 1 : 0.99,
+              y: activeTabId === tab.id ? 0 : 8,
+            }}
+            className="absolute inset-0"
             inert={activeTabId !== tab.id}
             key={tab.id}
             role="tabpanel"
+            initial={false}
+            style={{
+              pointerEvents: activeTabId === tab.id ? "auto" : "none",
+              willChange: "opacity, transform",
+            }}
+            transition={{
+              duration: activeTabId === tab.id ? 0.28 : 0.16,
+              ease:
+                activeTabId === tab.id ? MOTION_EASE : MOTION_LEAVE_EASE,
+            }}
           >
             {tab.kind === "files" ? (
               <FileWorkspace
@@ -433,7 +324,7 @@ export function WorkspaceSidePanel({
                 </div>
               </div>
             )}
-          </div>
+          </motion.div>
         ))}
       </div>
     </aside>

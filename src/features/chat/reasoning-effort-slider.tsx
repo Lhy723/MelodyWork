@@ -1,5 +1,4 @@
 import {
-  BrainCircuitIcon,
   ChevronDownIcon,
   CircleHelpIcon,
   LoaderCircleIcon,
@@ -134,11 +133,7 @@ export function ReasoningEffortSlider({
           className="motion-view-enter max-w-40"
           disabled={disabled}
         >
-          {loading ? (
-            <LoaderCircleIcon className="animate-spin" />
-          ) : (
-            <BrainCircuitIcon />
-          )}
+          {loading ? <LoaderCircleIcon className="animate-spin" /> : null}
           <span className="truncate">
             {committedOption?.label ?? "思考强度"}
           </span>

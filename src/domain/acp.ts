@@ -142,6 +142,7 @@ export interface AgentToolDiffHunk {
 export interface AgentToolActivity {
   operation: AgentToolOperation;
   path?: string;
+  paths?: string[];
   query?: string;
   glob?: string;
   files?: AgentToolFileChange[];

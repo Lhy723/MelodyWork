@@ -481,7 +481,7 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
   const mostUsedEffort = statistics.reasoningEfforts[0];
 
   return (
-    <section className="motion-view-enter min-w-0 flex-1 overflow-y-auto">
+    <section className="motion-view-enter min-h-0 min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-5xl px-8 py-7">
         <div className="flex items-start justify-between gap-4">
           <div>

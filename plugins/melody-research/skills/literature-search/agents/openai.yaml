@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature search planning"
+  short_description: "Turn research questions into reproducible multi-source searches."
+  default_prompt: "Create a reproducible literature search plan for my research question."

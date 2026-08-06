@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "melody-research": {
+      "command": "node",
+      "args": [
+        "scripts/research-mcp-server.mjs"
+      ]
+    }
+  }
+}

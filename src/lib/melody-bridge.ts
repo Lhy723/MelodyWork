@@ -480,6 +480,16 @@ export const readWorkspaceFile = async (
   return invoke<string>("read_workspace_file", { root, path });
 };
 
+export const readWorkspaceBinaryFile = async (
+  root: string,
+  path: string,
+): Promise<ArrayBuffer> => {
+  if (!isTauriRuntime()) {
+    return new TextEncoder().encode(`Browser preview: ${root}/${path}`).buffer;
+  }
+  return invoke<ArrayBuffer>("read_workspace_binary_file", { root, path });
+};
+
 export const writeWorkspaceFile = async (
   root: string,
   path: string,

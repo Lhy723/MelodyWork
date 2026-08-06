@@ -38,6 +38,7 @@ interface AgentTimelineProps {
   ) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   projectRoot: string;
+  turnRunning?: boolean;
 }
 
 export function AgentTimeline({
@@ -47,6 +48,7 @@ export function AgentTimeline({
   onPlanDecision,
   onOpenProjectReference,
   projectRoot,
+  turnRunning = false,
 }: AgentTimelineProps) {
   const messageComponents = useMemo(
     () => ({
@@ -63,8 +65,8 @@ export function AgentTimeline({
     [cwd, onOpenProjectReference, projectRoot],
   );
   const renderEntries = useMemo(
-    () => groupTurnActivity(entries),
-    [entries],
+    () => groupTurnActivity(entries, turnRunning),
+    [entries, turnRunning],
   );
 
   return (

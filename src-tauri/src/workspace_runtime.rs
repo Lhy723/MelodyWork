@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, ipc::Response};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{ChildStdin, Command},
@@ -18,6 +18,7 @@ use uuid::Uuid;
 const MAX_TREE_ENTRIES: usize = 2_000;
 const MAX_TREE_DEPTH: usize = 8;
 const MAX_TEXT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PREVIEW_FILE_BYTES: u64 = 100 * 1024 * 1024;
 
 #[derive(Clone, Default)]
 pub struct TerminalRuntime {
@@ -154,6 +155,26 @@ pub fn read_workspace_file(root: String, path: String) -> Result<String, String>
         return Err("File is larger than the 2 MB editor limit".to_string());
     }
     fs::read_to_string(&path).map_err(|error| format!("File is not valid UTF-8 text: {error}"))
+}
+
+#[tauri::command]
+pub fn read_workspace_binary_file(root: String, path: String) -> Result<Response, String> {
+    read_workspace_binary_bytes(&root, &path).map(Response::new)
+}
+
+fn read_workspace_binary_bytes(root: &str, relative_path: &str) -> Result<Vec<u8>, String> {
+    let root = canonical_root(root)?;
+    let path = safe_existing_path(&root, relative_path)?;
+    let metadata = path
+        .metadata()
+        .map_err(|error| format!("Failed to read file metadata: {error}"))?;
+    if !metadata.is_file() {
+        return Err("Preview target is not a file".to_string());
+    }
+    if metadata.len() > MAX_PREVIEW_FILE_BYTES {
+        return Err("File is larger than the 100 MB preview limit".to_string());
+    }
+    fs::read(path).map_err(|error| format!("Failed to read preview file: {error}"))
 }
 
 #[tauri::command]
@@ -357,6 +378,48 @@ mod tests {
         assert!(is_ignored_directory("node_modules"));
         assert!(is_ignored_directory(".git"));
         assert!(!is_ignored_directory("src"));
+    }
+
+    #[test]
+    fn reads_binary_preview_bytes_inside_workspace() {
+        let root = std::env::temp_dir().join(format!("melody-preview-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("temporary workspace should be created");
+        fs::write(root.join("sample.bin"), [0_u8, 1, 2, 255]).expect("sample should be written");
+
+        let result = read_workspace_binary_bytes(root.to_str().unwrap(), "sample.bin")
+            .expect("workspace file should be readable");
+
+        assert_eq!(result, vec![0, 1, 2, 255]);
+        fs::remove_dir_all(root).expect("temporary workspace should be removed");
+    }
+
+    #[test]
+    fn rejects_binary_preview_directories_and_outside_paths() {
+        let root = std::env::temp_dir().join(format!("melody-preview-{}", Uuid::new_v4()));
+        let outside = root
+            .parent()
+            .expect("temporary workspace should have a parent")
+            .join(format!(
+                "{}-outside.bin",
+                root.file_name().unwrap().to_string_lossy()
+            ));
+        fs::create_dir_all(root.join("folder")).expect("temporary workspace should be created");
+        fs::write(&outside, [1_u8]).expect("outside fixture should be written");
+
+        let directory_error = read_workspace_binary_bytes(root.to_str().unwrap(), "folder")
+            .expect_err("directories should not be preview targets");
+        assert!(directory_error.contains("not a file"));
+
+        let outside_relative = format!(
+            "../{}-outside.bin",
+            root.file_name().unwrap().to_string_lossy()
+        );
+        let outside_error = read_workspace_binary_bytes(root.to_str().unwrap(), &outside_relative)
+            .expect_err("paths outside the workspace should be rejected");
+        assert!(outside_error.contains("outside the workspace"));
+
+        fs::remove_dir_all(root).expect("temporary workspace should be removed");
+        fs::remove_file(outside).expect("outside fixture should be removed");
     }
 
     #[tokio::test]

@@ -80,6 +80,41 @@ test("recognizes Melody grep metadata", () => {
   assert.equal(activity.glob, "*.ts");
 });
 
+test("preserves every ACP location for multi-file tool calls", () => {
+  const activity = extractToolActivity({
+    title: "Read project files",
+    kind: "read",
+    locations: [
+      { path: "/project/src/one.ts" },
+      { path: "/project/src/two.ts" },
+      { path: "/project/src/one.ts" },
+    ],
+  });
+
+  assert.deepEqual(activity.paths, [
+    "/project/src/one.ts",
+    "/project/src/two.ts",
+  ]);
+  assert.equal(activity.path, "/project/src/one.ts");
+});
+
+test("retains ACP locations when a later update only changes status", () => {
+  const previous = extractToolActivity({
+    title: "Read project files",
+    kind: "read",
+    locations: [
+      { path: "/project/src/one.ts" },
+      { path: "/project/src/two.ts" },
+    ],
+  });
+  const completed = extractToolActivity(
+    { status: "completed" },
+    previous,
+  );
+
+  assert.deepEqual(completed.paths, previous.paths);
+});
+
 test("retains the start diff when a completion update omits content", () => {
   const previous = extractToolActivity({
     title: "Write `src/new.ts`",

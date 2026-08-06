@@ -1,0 +1,4 @@
+interface:
+  display_name: "Systematic review"
+  short_description: "Build traceable evidence matrices for reviews."
+  default_prompt: "Build a traceable evidence matrix and review outline from these papers."

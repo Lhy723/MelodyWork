@@ -76,6 +76,62 @@ async fn run_git_dynamic(cwd: &Path, args: &[String]) -> Result<String, String> 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+async fn run_git_diff(cwd: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|error| format!("Failed to start git: {error}"))?;
+
+    if !output.status.success() && output.status.code() != Some(1) {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("git {} failed", args.join(" "))
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn null_device() -> &'static str {
+    if cfg!(windows) { "NUL" } else { "/dev/null" }
+}
+
+async fn untracked_diff(cwd: &Path, path: &str) -> Result<String, String> {
+    run_git_diff(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-index",
+            "--",
+            null_device(),
+            path,
+        ],
+    )
+    .await
+}
+
+async fn untracked_numstat(cwd: &Path, path: &str) -> Result<(usize, usize), String> {
+    let output = run_git_diff(
+        cwd,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-index",
+            "--numstat",
+            "--",
+            null_device(),
+            path,
+        ],
+    )
+    .await?;
+    parse_numstat_line(&output).ok_or_else(|| format!("git diff returned no line stats for {path}"))
+}
+
 fn parse_numstat(output: &str) -> std::collections::HashMap<String, (usize, usize)> {
     output
         .lines()
@@ -89,6 +145,16 @@ fn parse_numstat(output: &str) -> std::collections::HashMap<String, (usize, usiz
         .collect()
 }
 
+fn parse_numstat_line(output: &str) -> Option<(usize, usize)> {
+    output.lines().find_map(|line| {
+        let mut parts = line.splitn(3, '\t');
+        let additions = parts.next()?.parse().unwrap_or(0);
+        let deletions = parts.next()?.parse().unwrap_or(0);
+        parts.next()?;
+        Some((additions, deletions))
+    })
+}
+
 #[tauri::command]
 pub async fn git_changes(cwd: String) -> Result<Vec<GitChange>, String> {
     let cwd = Path::new(&cwd);
@@ -98,46 +164,56 @@ pub async fn git_changes(cwd: String) -> Result<Vec<GitChange>, String> {
     let unstaged_stats = parse_numstat(&unstaged_stats);
     let staged_stats = parse_numstat(&staged_stats);
 
-    Ok(status
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 4 {
-                return None;
-            }
-            let index = line.as_bytes()[0] as char;
-            let worktree = line.as_bytes()[1] as char;
-            let raw_path = line[3..].trim();
-            let path = raw_path
-                .rsplit_once(" -> ")
-                .map_or(raw_path, |(_, destination)| destination)
-                .to_string();
-            let staged = index != ' ' && index != '?';
-            let (additions, deletions) = unstaged_stats.get(&path).copied().unwrap_or_default();
-            let (staged_additions, staged_deletions) =
-                staged_stats.get(&path).copied().unwrap_or_default();
+    let mut changes = Vec::new();
+    for line in status.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let index = line.as_bytes()[0] as char;
+        let worktree = line.as_bytes()[1] as char;
+        let raw_path = line[3..].trim();
+        let path = raw_path
+            .rsplit_once(" -> ")
+            .map_or(raw_path, |(_, destination)| destination)
+            .to_string();
+        let staged = index != ' ' && index != '?';
+        let (additions, deletions) = if index == '?' && worktree == '?' {
+            untracked_numstat(cwd, &path).await?
+        } else {
+            unstaged_stats.get(&path).copied().unwrap_or_default()
+        };
+        let (staged_additions, staged_deletions) =
+            staged_stats.get(&path).copied().unwrap_or_default();
 
-            Some(GitChange {
-                path,
-                status: format!("{index}{worktree}"),
-                staged,
-                additions: additions + staged_additions,
-                deletions: deletions + staged_deletions,
-            })
-        })
-        .collect())
+        changes.push(GitChange {
+            path,
+            status: format!("{index}{worktree}"),
+            staged,
+            additions: additions + staged_additions,
+            deletions: deletions + staged_deletions,
+        });
+    }
+
+    Ok(changes)
 }
 
 #[tauri::command]
 pub async fn git_diff(cwd: String, path: String) -> Result<GitDiff, String> {
     let cwd = Path::new(&cwd);
-    let unstaged = run_git(cwd, &["diff", "--no-ext-diff", "--", &path]).await?;
-    let staged = run_git(cwd, &["diff", "--cached", "--no-ext-diff", "--", &path]).await?;
-    let content = if staged.is_empty() {
-        unstaged
-    } else if unstaged.is_empty() {
-        staged
+    let status = run_git(cwd, &["status", "--porcelain=v1", "-uall", "--", &path]).await?;
+    let is_untracked = status.lines().any(|line| line.starts_with("?? "));
+    let content = if is_untracked {
+        untracked_diff(cwd, &path).await?
     } else {
-        format!("{staged}\n{unstaged}")
+        let unstaged = run_git(cwd, &["diff", "--no-ext-diff", "--", &path]).await?;
+        let staged = run_git(cwd, &["diff", "--cached", "--no-ext-diff", "--", &path]).await?;
+        if staged.is_empty() {
+            unstaged
+        } else if unstaged.is_empty() {
+            staged
+        } else {
+            format!("{staged}\n{unstaged}")
+        }
     };
     let binary = content
         .lines()
@@ -304,6 +380,22 @@ pub async fn git_remove_worktree(cwd: String, path: String) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn create_untracked_repo() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("melody-git-review-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temporary git repository");
+        let status = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&root)
+            .status()
+            .expect("start git init");
+        assert!(status.success(), "git init should succeed");
+        fs::write(root.join("notes.txt"), "first line\nsecond line\n")
+            .expect("write untracked file");
+        root
+    }
 
     #[test]
     fn parses_numstat_and_ignores_binary_counts() {
@@ -320,5 +412,32 @@ mod tests {
         );
         assert_eq!(worktrees.len(), 2);
         assert_eq!(worktrees[1].branch.as_deref(), Some("feature"));
+    }
+
+    #[tokio::test]
+    async fn includes_untracked_text_files_in_review_stats_and_diff() {
+        let root = create_untracked_repo();
+        let root_string = root.to_string_lossy().into_owned();
+
+        let changes = git_changes(root_string.clone())
+            .await
+            .expect("read git changes");
+        let change = changes
+            .iter()
+            .find(|change| change.path == "notes.txt")
+            .expect("untracked file should be listed");
+        assert_eq!(change.status, "??");
+        assert_eq!(change.additions, 2);
+        assert_eq!(change.deletions, 0);
+
+        let diff = git_diff(root_string, "notes.txt".to_string())
+            .await
+            .expect("read untracked file diff");
+        assert!(!diff.binary);
+        assert!(diff.content.contains("new file mode"));
+        assert!(diff.content.contains("+first line"));
+        assert!(diff.content.contains("+second line"));
+
+        fs::remove_dir_all(root).expect("remove temporary git repository");
     }
 }

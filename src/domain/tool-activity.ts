@@ -135,6 +135,21 @@ const inputPath = (rawInput: JsonObject | undefined) =>
   stringValue(rawInput?.target_directory) ??
   stringValue(rawInput?.targetDirectory);
 
+const locationPaths = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value.flatMap((item) => {
+        const location = objectValue(item);
+        const path = stringValue(location?.path);
+        return path ? [normalizedPath(path)] : [];
+      }),
+    ),
+  ];
+};
+
 export const extractToolActivity = (
   tool: JsonObject,
   previous?: AgentToolActivity,
@@ -142,6 +157,8 @@ export const extractToolActivity = (
   const rawInput = objectValue(tool.rawInput);
   const title = stringValue(tool.title) ?? "";
   const files = diffFromContent(tool.content);
+  const paths = locationPaths(tool.locations);
+  const retainedPaths = paths.length > 0 ? paths : previous?.paths;
   const inferredOperation = operationFromKind(
     stringValue(tool.kind),
     title,
@@ -155,6 +172,7 @@ export const extractToolActivity = (
         : inferredOperation;
   const path =
     inputPath(rawInput) ??
+    retainedPaths?.[0] ??
     pathFromTitle(title) ??
     previous?.path;
   const query =
@@ -173,5 +191,6 @@ export const extractToolActivity = (
       stringValue(rawInput?.include) ??
       previous?.glob,
     files: files.length ? files : previous?.files,
+    ...(retainedPaths?.length ? { paths: retainedPaths } : {}),
   };
 };
