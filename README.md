@@ -1,5 +1,7 @@
 ![MelodyWork](docs/images/melodywork-hero.png)
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 # MelodyWork
 
 > A local-first desktop workspace for building with [Melody Build](https://github.com/Lhy723/melody-build).
