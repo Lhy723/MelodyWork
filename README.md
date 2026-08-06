@@ -23,21 +23,73 @@ Talk through a task, inspect the result, review the diff, and ship directly from
 Melody Build is the execution engine underneath MelodyWork. It is a terminal-based AI coding agent that can run interactively as a full-screen TUI, headlessly for scripts and CI, or embedded in another application through the Agent Client Protocol (ACP). MelodyWork provides the desktop control surface around that engine.
 
 ```mermaid
-flowchart TD
-  user["Developer intent"] --> app["MelodyWork desktop"]
+flowchart TB
+  developer["Developer"]
 
-  subgraph transport["ACP stdio transport"]
-    app <--> pager["melody-pager sidecar"]
+  subgraph desktop["MelodyWork desktop: control plane"]
+    direction LR
+    session["Project and session context"]
+    surface["Chat · Research · Timeline · Diff · Terminal"]
+    localdb[("Local SQLite")]
+    approval{"Permission decision"}
+    session --> surface
+    session <--> localdb
   end
 
-  pager --> runtime["Melody Build agent runtime"]
-  runtime --> model["Configured model endpoint"]
-  runtime --> tools["melody-tools\nterminal · files · search"]
-  tools --> workspace["melody-workspace\nfilesystem · VCS · execution · checkpoints"]
-  workspace --> repo["Local project and Git repository"]
-  repo --> runtime
-  runtime --> app
+  subgraph engine["Melody Build: execution engine"]
+    direction TB
+    pager["melody-pager\nACP stdio entry point"]
+
+    subgraph runtime["melody-shell: agent runtime"]
+      direction LR
+      context["Context and task orchestration"] --> agent["Agent loop"]
+      agent <--> model["Configured model endpoint"]
+      agent --> dispatch["Tool dispatcher"]
+    end
+
+    pager --> context
+  end
+
+  subgraph execution["Local execution plane"]
+    direction TB
+    tools["melody-tools\nterminal · file edit · search"]
+    extensions["MCP servers · Skills · Plugins · Hooks"]
+
+    subgraph workspace["melody-workspace"]
+      direction LR
+      workspaceApi["Workspace service"]
+      filesystem["Filesystem and codebase"]
+      vcs["Git / VCS and worktrees"]
+      commands["Process execution"]
+      checkpoints["Checkpoints"]
+      workspaceApi --> filesystem
+      workspaceApi --> vcs
+      workspaceApi --> commands
+      workspaceApi --> checkpoints
+    end
+
+    tools --> workspaceApi
+  end
+
+  repository[("Local project and Git repository")]
+
+  developer --> session
+  surface <-->|ACP stdio: messages and events| pager
+  dispatch --> tools
+  dispatch --> extensions
+  filesystem --> repository
+  vcs --> repository
+  commands --> repository
+  checkpoints --> repository
+
+  workspaceApi -. tool results and progress .-> dispatch
+  dispatch -. approval required .-> pager
+  pager -. permission request .-> approval
+  approval -. allow or deny .-> pager
+  pager -. decision .-> dispatch
 ```
+
+Solid arrows represent the execution path. Dashed arrows show events, tool results, and permission decisions flowing back to the desktop surface.
 
 ### One turn, end to end
 

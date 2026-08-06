@@ -23,21 +23,73 @@
 Melody Build 是 MelodyWork 底层的执行引擎。它是一个终端型 AI coding agent：可以作为全屏 TUI 交互运行，也可以用于脚本和 CI 的 headless 模式，或者通过 Agent Client Protocol（ACP）嵌入其他应用。MelodyWork 则为它提供完整的桌面控制面板。
 
 ```mermaid
-flowchart TD
-  user["开发者意图"] --> app["MelodyWork 桌面应用"]
+flowchart TB
+  developer["开发者"]
 
-  subgraph transport["ACP stdio 传输层"]
-    app <--> pager["melody-pager sidecar"]
+  subgraph desktop["MelodyWork 桌面端：控制面"]
+    direction LR
+    session["项目与会话上下文"]
+    surface["对话 · 研究 · 时间线 · Diff · 终端"]
+    localdb[("本地 SQLite")]
+    approval{"权限决策"}
+    session --> surface
+    session <--> localdb
   end
 
-  pager --> runtime["Melody Build Agent runtime"]
-  runtime --> model["已配置的模型接口"]
-  runtime --> tools["melody-tools\n终端 · 文件 · 搜索"]
-  tools --> workspace["melody-workspace\n文件系统 · VCS · 执行 · checkpoints"]
-  workspace --> repo["本地项目与 Git 仓库"]
-  repo --> runtime
-  runtime --> app
+  subgraph engine["Melody Build：执行引擎"]
+    direction TB
+    pager["melody-pager\nACP stdio 入口"]
+
+    subgraph runtime["melody-shell：Agent runtime"]
+      direction LR
+      context["上下文与任务编排"] --> agent["Agent loop"]
+      agent <--> model["已配置的模型接口"]
+      agent --> dispatch["工具调度器"]
+    end
+
+    pager --> context
+  end
+
+  subgraph execution["本地执行面"]
+    direction TB
+    tools["melody-tools\n终端 · 文件编辑 · 搜索"]
+    extensions["MCP servers · Skills · Plugins · Hooks"]
+
+    subgraph workspace["melody-workspace"]
+      direction LR
+      workspaceApi["工作区服务"]
+      filesystem["文件系统与代码库"]
+      vcs["Git / VCS 与 worktrees"]
+      commands["进程执行"]
+      checkpoints["检查点"]
+      workspaceApi --> filesystem
+      workspaceApi --> vcs
+      workspaceApi --> commands
+      workspaceApi --> checkpoints
+    end
+
+    tools --> workspaceApi
+  end
+
+  repository[("本地项目与 Git 仓库")]
+
+  developer --> session
+  surface <-->|ACP stdio：消息与事件| pager
+  dispatch --> tools
+  dispatch --> extensions
+  filesystem --> repository
+  vcs --> repository
+  commands --> repository
+  checkpoints --> repository
+
+  workspaceApi -. 工具结果与进度 .-> dispatch
+  dispatch -. 需要授权 .-> pager
+  pager -. 权限请求 .-> approval
+  approval -. 允许或拒绝 .-> pager
+  pager -. 决策 .-> dispatch
 ```
+
+实线表示执行路径；虚线表示事件、工具结果和权限决策如何返回桌面端。
 
 ### 一个任务如何完成
 
