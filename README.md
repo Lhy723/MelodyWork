@@ -1,25 +1,44 @@
+![MelodyWork](docs/images/melodywork-hero.png)
+
 # MelodyWork
 
-MelodyWork 是 [Melody Build](https://github.com/Lhy723/melody-build) 的本地桌面 GUI。它以 Agent 对话为中心，在需要时展开改动审查、文件编辑、终端、Git 和 Melody 配置。
+> A local-first desktop workspace for building with [Melody Build](https://github.com/Lhy723/melody-build).
 
-## Beta 功能
+MelodyWork brings the full agent loop into one focused desktop application: talk through a task, review the change, inspect files, run commands, and ship from the project you already have on disk. It is designed to keep developer control close at hand, with Git-native workflows and explicit permission boundaries.
 
-- ACP stdio 会话：启动内置 `melody-pager`、恢复会话、流式消息、工具调用与权限确认
-- 多项目与多会话：SQLite 本地持久化，默认共享项目目录
-- 改动审查：Git 状态、逐文件 Diff、暂存/取消暂存和提交
-- 分支与 worktree：查看、创建、切换和删除用户主动创建的 worktree
-- 文件与终端：受工作区边界保护的文本编辑器，以及用户主动运行的命令面板
-- Melody 配置：编辑用户级和项目级 `config.toml`，发现 MCP、Skills、Plugins 与 Hooks
-- 权限：一次、会话和项目级允许/拒绝；项目规则可查看和删除
-- macOS 与 Windows 安装包，以及签名更新包的 GitHub Actions 流水线
+**Local-first · Agent collaboration · Git-native · Built for delivery**
 
-所有数据都保存在本机；当前版本没有账号或云同步。
+## What You Can Do
 
-## 本地开发
+| Area | Capabilities |
+| --- | --- |
+| **Agent sessions** | Start and resume ACP stdio sessions with the bundled `melody-pager`, stream responses and tool activity, and handle permission requests in context. |
+| **Project control** | Work across multiple projects and sessions with local SQLite persistence and a shared project directory by default. |
+| **Git workflow** | Inspect repository state and per-file diffs, stage changes, commit, and manage branches and user-created worktrees. |
+| **Files and terminal** | Edit workspace-bounded text files, preview supported files, and run commands deliberately from an integrated terminal panel. |
+| **Research workspace** | Collect research context, organize source material, and keep the investigation beside the implementation work. |
+| **Configuration** | Manage user and project `config.toml` files; discover MCP servers, Skills, Plugins, and Hooks in the workspace. |
+| **Permissions** | Allow or deny actions once, for a session, or for a project. Project rules remain inspectable and removable. |
 
-需要 Node.js 22、pnpm、Rust、[DotSlash](https://dotslash-cli.com)、ripgrep
-和 Tauri 2 的系统依赖。`melody-build` 以 Git submodule 固定在
-`vendor/melody-build`；首次检出或上游版本更新后需要初始化：
+## Principles
+
+- **Your code stays yours.** Projects, session state, and working data are kept locally. MelodyWork has no account system or cloud sync in the current beta.
+- **The repository is the source of truth.** Git status, diffs, commits, branches, and worktrees are first-class rather than an afterthought.
+- **Automation stays visible.** Tool calls, terminal activity, file changes, and permission requests remain reviewable in the same workspace.
+- **Serious work deserves a serious surface.** The interface is purpose-built for sustained engineering work, not a thin chat wrapper around a shell.
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 22
+- pnpm
+- Rust toolchain
+- [DotSlash](https://dotslash-cli.com)
+- ripgrep
+- Tauri 2 system dependencies for your platform
+
+`melody-build` is pinned as the `vendor/melody-build` Git submodule. Initialize it on a fresh clone or after its pinned revision changes:
 
 ```bash
 git submodule update --init --recursive
@@ -28,50 +47,51 @@ cargo install dotslash --locked
 pnpm tauri dev
 ```
 
-`pnpm tauri dev` 会先增量编译项目内的 `vendor/melody-build` debug
-sidecar，再启动 Tauri 与 Vite。sidecar 会在 Tauri 文件监听启动前准备好，避免
-开发启动过程中因 sidecar 文件变化而重复唤起窗口；修改前端或 melody-build 源码后重新运行该命令即可。
-设置 `MELODY_PAGER_SOURCE` 时会跳过内置仓库编译并使用指定可执行文件。
+`pnpm tauri dev` incrementally builds the local `melody-build` debug sidecar before launching Tauri and Vite. This order prevents file-watcher changes from repeatedly reopening the app while the sidecar is being prepared.
 
-如果直接运行 `cargo build` 或 `cargo check --manifest-path src-tauri/Cargo.toml`，
-`src-tauri/build.rs` 也会自动从 vendor 的 debug/release 产物准备当前架构的
-sidecar；没有可用产物时，请先执行 `node scripts/prepare-sidecar.mjs` 或设置
-`MELODY_PAGER_SOURCE`。
+## Development
 
-开发构建会从以下位置之一准备 sidecar：
+| Command | Purpose |
+| --- | --- |
+| `pnpm dev` | Run the Vite frontend development server. |
+| `pnpm tauri dev` | Build or refresh the sidecar, then launch the desktop application. |
+| `pnpm check` | Run the TypeScript type check. |
+| `pnpm test:unit` | Run frontend and domain unit tests. |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests. |
+| `pnpm build` | Produce a production frontend build. |
 
-1. `MELODY_PAGER_SOURCE` 指向的本地可执行文件
-2. 自动增量编译的项目内 `vendor/melody-build/target/debug` 产物
-3. 兼容旧布局的同级 `melody-build/target/debug` 或 `target/release` 产物
-4. macOS/Linux 的 `~/.melody/bin/melody` 或 Windows 的 `%USERPROFILE%\.melody\bin\melody.exe`
-5. 旧版 `~/.grok/bin/grok`（仅作为兼容回退）
-6. 已存在的 `src-tauri/binaries/melody-pager-$TARGET_TRIPLE`
+Windows users need a system `git` installation available on `PATH` for the Git workspace features.
 
-常用验证命令：
+### Sidecar Resolution
 
-```bash
-pnpm check
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm build
-```
+For local development and direct Rust builds, MelodyWork resolves the `melody-pager` sidecar from the first usable source below:
 
-Windows 的 Git 页面依赖系统已安装 `git` 并可从 `PATH` 访问。
+1. `MELODY_PAGER_SOURCE`, when it points to a local executable
+2. The incrementally compiled `vendor/melody-build/target/debug` output
+3. A compatible sibling `melody-build/target/debug` or `target/release` output
+4. `~/.melody/bin/melody` on macOS/Linux or `%USERPROFILE%\\.melody\\bin\\melody.exe` on Windows
+5. The legacy `~/.grok/bin/grok` fallback
+6. An existing `src-tauri/binaries/melody-pager-$TARGET_TRIPLE` binary
 
-## 发布与自动更新
+Running `cargo build` or `cargo check --manifest-path src-tauri/Cargo.toml` also invokes `src-tauri/build.rs` to prepare a matching sidecar. When no usable artifact exists, run `node scripts/prepare-sidecar.mjs` first or set `MELODY_PAGER_SOURCE`.
 
-推送 `v*` 标签会在 GitHub Actions 中：
+## Releases and Updates
 
-1. 从仓库固定的 `vendor/melody-build` 提交分别为 Apple Silicon、Intel macOS 和 x64 Windows 编译 `melody-pager-bin`
-2. 生成 macOS/Windows 安装包
-3. 生成签名更新包和 `latest.json`
-4. 创建 beta 草稿 Release；人工发布后成为 updater 的 latest Release
+Pushing a `v*` tag starts the GitHub Actions release workflow. It builds the pinned Melody sidecar for Apple Silicon macOS, Intel macOS, and x64 Windows, produces signed update bundles and `latest.json`, then creates a beta draft release. Publishing that release makes it the updater's latest version.
 
-首次发布前需要生成 Tauri updater 密钥，并配置：
+Before the first release, generate a Tauri updater key and configure:
 
-- Repository variable `TAURI_UPDATER_PUBLIC_KEY`（Tauri 生成的完整 `.pub`
-  文件内容再进行 Base64 编码；必须与 `tauri.conf.json` 中的值一致）
-- Secrets `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- Repository variable `TAURI_UPDATER_PUBLIC_KEY`: the complete generated `.pub` file, Base64 encoded, matching `tauri.conf.json`
+- Secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
-私钥不得提交到仓库。应用会在启动时检查 GitHub Release 的 `latest.json`，发现新版本后在顶部提供安装入口。
+Never commit the private key. MelodyWork checks the GitHub Release `latest.json` at startup and offers an in-app installation path when a newer version is available.
 
-当前 macOS beta 不使用 Apple Developer ID 签名或公证。首次启动时可能需要用户在 Finder 中右键选择“打开”，或在“系统设置 → 隐私与安全性”中确认运行。Tauri updater 密钥只用于验证更新包，不能替代 Apple 平台签名。
+The current macOS beta is not signed with an Apple Developer ID or notarized. On first launch, macOS may require opening the app through Finder or confirming it in **System Settings → Privacy & Security**. The Tauri updater key verifies update bundles; it does not replace Apple platform signing.
+
+## Status
+
+MelodyWork is in active beta. The goal is a dependable local environment for working with Melody Build, while the product surface and release workflow continue to evolve.
+
+---
+
+Built around [Melody Build](https://github.com/Lhy723/melody-build), with a little more room to think, review, and deliver.
