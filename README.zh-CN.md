@@ -8,7 +8,7 @@
 
 围绕任务与 Agent 对话，查看结果，审查 Diff，并直接在本地项目中交付。MelodyWork 让 Agent 工作闭环始终扎根于仓库：工具活动可见，权限边界明确，开发者始终保有控制权。
 
-[开发指南](docs/development.md) · [发布指南](docs/releasing.md) · [文件预览交接说明](docs/handoff-file-preview.md)
+[开发指南](docs/development.md) · [发布指南](docs/releasing.md)
 
 `本地优先` `Git 原生` `macOS` `Windows`
 
@@ -111,9 +111,11 @@ flowchart TB
 
 当前 beta 没有账号系统或云同步。
 
-## 开始开发
+## Getting Started
 
-MelodyWork 通过 `vendor/melody-build` Git submodule 固定 Melody Build。首次克隆后执行：
+MelodyWork 当前需要从源码构建。你需要准备 Node.js 22、pnpm、Rust、[DotSlash](https://dotslash-cli.com)、ripgrep，以及对应平台的 Tauri 2 系统依赖。
+
+Melody Build 通过 `vendor/melody-build` Git submodule 固定。首次克隆后执行：
 
 ```bash
 git submodule update --init --recursive
@@ -122,14 +124,24 @@ cargo install dotslash --locked
 pnpm tauri dev
 ```
 
-环境要求、验证命令和 sidecar 行为请参阅[开发指南](docs/development.md)。
+验证命令和 sidecar 行为请参阅[开发指南](docs/development.md)。
 
 ## 文档
 
 - [开发指南](docs/development.md)：环境要求、常用命令和 sidecar 查找顺序
 - [发布指南](docs/releasing.md)：标签发布、updater 签名和平台发布说明
-- [文件预览交接说明](docs/handoff-file-preview.md)：当前文件预览实现说明
 
-## 项目状态
+## Contributing
 
-MelodyWork 是面向 macOS 和 Windows 的活跃 beta。产品界面和发布流程仍在持续完善，但本地优先、Git 原生始终是它的核心。
+欢迎参与贡献。提交 Pull Request 前请：
+
+1. 保持改动聚焦，并说明它改变了什么用户行为。
+2. 当改动涉及对应模块时，运行 `pnpm check`、`pnpm test:unit`、`pnpm build` 和 `cargo test --manifest-path src-tauri/Cargo.toml`。
+3. 当行为或公开工作流发生变化时，同步补充测试和文档。
+4. 不要提交生成的 sidecar、构建产物、凭据或 updater 私钥。
+
+提交问题时，请附上操作系统、复现步骤、预期行为和相关日志。较大的改动建议先创建 issue，以便实现方向与项目规划保持一致。
+
+## License
+
+MelodyWork 当前尚未声明许可证。在添加 `LICENSE` 文件之前，仓库内容不授予再分发或修改权限。

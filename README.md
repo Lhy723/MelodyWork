@@ -8,7 +8,7 @@
 
 Talk through a task, inspect the result, review the diff, and ship directly from the project already on your machine. MelodyWork keeps the agent loop grounded in the repository, with visible tool activity and explicit permission boundaries.
 
-[Development guide](docs/development.md) · [Release guide](docs/releasing.md) · [File preview handoff](docs/handoff-file-preview.md)
+[Development guide](docs/development.md) · [Release guide](docs/releasing.md)
 
 `Local-first` `Git-native` `macOS` `Windows`
 
@@ -111,9 +111,11 @@ This separation is intentional: Melody Build owns the agent loop and tool execut
 
 The current beta has no account system or cloud sync.
 
-## Start Developing
+## Getting Started
 
-MelodyWork pins Melody Build as the `vendor/melody-build` Git submodule. On a fresh clone:
+MelodyWork is currently built from source. You will need Node.js 22, pnpm, Rust, [DotSlash](https://dotslash-cli.com), ripgrep, and the Tauri 2 system dependencies for your platform.
+
+Melody Build is pinned as the `vendor/melody-build` Git submodule. On a fresh clone:
 
 ```bash
 git submodule update --init --recursive
@@ -122,14 +124,24 @@ cargo install dotslash --locked
 pnpm tauri dev
 ```
 
-See the [development guide](docs/development.md) for prerequisites, validation commands, and sidecar behavior.
+See the [development guide](docs/development.md) for validation commands and sidecar behavior.
 
 ## Documentation
 
 - [Development guide](docs/development.md): prerequisites, commands, and sidecar resolution
 - [Release guide](docs/releasing.md): tags, updater signing, and platform release notes
-- [File preview handoff](docs/handoff-file-preview.md): current file-preview implementation notes
 
-## Status
+## Contributing
 
-MelodyWork is an active beta for macOS and Windows. The product surface and release workflow are evolving, while the local-first and Git-native foundation remains the point.
+Contributions are welcome. Before opening a pull request:
+
+1. Keep the change focused and explain the user-facing behavior it changes.
+2. Run `pnpm check`, `pnpm test:unit`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml` when the change touches the relevant surface.
+3. Include or update tests and documentation when behavior or public workflows change.
+4. Do not commit generated sidecars, build output, credentials, or updater private keys.
+
+For bugs, include the operating system, reproduction steps, expected behavior, and relevant logs. For larger changes, open an issue first so the implementation can stay aligned with the project direction.
+
+## License
+
+MelodyWork does not currently declare a license. Until a `LICENSE` file is added, the source is not granted for redistribution or modification.
