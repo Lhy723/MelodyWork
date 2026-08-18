@@ -14,10 +14,7 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import type {
-  AgentPlanDecision,
-  TimelineEntry,
-} from "@/domain/acp";
+import type { AgentPlanDecision, TimelineEntry } from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
 import { groupTurnActivity } from "@/domain/timeline-groups";
 import { MessageCitations } from "@/features/chat/message-citations";
@@ -70,8 +67,8 @@ export function AgentTimeline({
   );
 
   return (
-    <Conversation className="min-h-0">
-      <ConversationContent className="mx-auto w-full max-w-5xl gap-3 px-4 py-8 sm:px-6">
+    <Conversation className="harness-chat-scroll min-h-0">
+      <ConversationContent className="harness-chat-content mx-auto w-full max-w-3xl gap-5 px-4 py-8 sm:px-6">
         {renderEntries.map((entry, index) => {
           const motionStyle = {
             animationDelay: `${Math.min(index, 6) * 24}ms`,
@@ -80,22 +77,19 @@ export function AgentTimeline({
           if (entry.kind === "message") {
             return (
               <Message
-                className="motion-list-item"
+                className="harness-chat-message motion-list-item"
                 from={entry.role}
                 key={entry.id}
                 style={motionStyle}
               >
-                <MessageContent>
+                <MessageContent className="harness-chat-message-content">
                   {entry.attachments?.length ? (
                     <Attachments
                       className={entry.role === "user" ? "justify-end" : ""}
                       variant="inline"
                     >
                       {entry.attachments.map((attachment) => (
-                        <Attachment
-                          data={attachment}
-                          key={attachment.id}
-                        >
+                        <Attachment data={attachment} key={attachment.id}>
                           <AttachmentPreview />
                           <AttachmentInfo />
                         </Attachment>

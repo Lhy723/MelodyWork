@@ -31,8 +31,8 @@ export function WindowNavigationControls({
   return (
     <div
       className={cn(
-        "flex h-8 shrink-0 items-center gap-1.5 pr-1",
-        macSafeArea ? "pl-20" : "pl-1",
+        "harness-window-titlebar flex shrink-0 items-center gap-1.5 pr-1",
+        macSafeArea ? "pl-24" : "pl-1",
         className,
       )}
       data-tauri-drag-region
@@ -46,10 +46,7 @@ export function WindowNavigationControls({
         variant="ghost"
       >
         <span
-          className={cn(
-            "flex size-5 items-center justify-center",
-            macSafeArea && "translate-y-0.5",
-          )}
+          className="flex size-5 items-center justify-center"
         >
           <PanelLeftIcon className="size-5" />
         </span>
@@ -64,10 +61,7 @@ export function WindowNavigationControls({
         variant="ghost"
       >
         <span
-          className={cn(
-            "flex size-5 items-center justify-center",
-            macSafeArea && "translate-y-0.5",
-          )}
+          className="flex size-5 items-center justify-center"
         >
           <ArrowLeftIcon className="size-5" />
         </span>
@@ -82,10 +76,7 @@ export function WindowNavigationControls({
         variant="ghost"
       >
         <span
-          className={cn(
-            "flex size-5 items-center justify-center",
-            macSafeArea && "translate-y-0.5",
-          )}
+          className="flex size-5 items-center justify-center"
         >
           <ArrowRightIcon className="size-5" />
         </span>

@@ -5,11 +5,12 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tokio::process::Command;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 use crate::agent_runtime;
+use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
@@ -232,7 +233,16 @@ fn config_document(
 }
 
 #[tauri::command]
-pub fn read_melody_config(scope: String, cwd: String) -> Result<MelodyConfigDocument, String> {
+pub fn read_melody_config(
+    registry: State<'_, WorkspaceRegistry>,
+    scope: String,
+    cwd: String,
+) -> Result<MelodyConfigDocument, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
+    read_melody_config_inner(scope, cwd)
+}
+
+fn read_melody_config_inner(scope: String, cwd: String) -> Result<MelodyConfigDocument, String> {
     let path = config_path(&scope, &cwd)?;
     let exists = path.is_file();
     let content = if exists {
@@ -322,7 +332,24 @@ fn apply_patch(document: &mut DocumentMut, patch: &MelodyConfigPatch) -> Result<
 }
 
 #[tauri::command]
-pub fn update_melody_config(
+pub async fn update_melody_config(
+    app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
+    scope: String,
+    cwd: String,
+    patches: Vec<MelodyConfigPatch>,
+) -> Result<MelodyConfigDocument, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
+    confirm_action(
+        &app,
+        "确认修改 Melody 配置",
+        format!("允许修改 {} 范围的 Melody 配置吗？", scope),
+    )
+    .await?;
+    update_melody_config_inner(scope, cwd, patches)
+}
+
+fn update_melody_config_inner(
     scope: String,
     cwd: String,
     patches: Vec<MelodyConfigPatch>,
@@ -376,12 +403,18 @@ fn scan_kind(
     };
     for entry in entries.flatten() {
         let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
         let valid = if kind == "hooks" {
-            path.is_file() || path.is_dir()
+            file_type.is_file() || file_type.is_dir()
         } else if kind == "skills" {
-            path.is_dir() && path.join("SKILL.md").is_file()
+            file_type.is_dir() && path.join("SKILL.md").is_file()
         } else {
-            path.is_dir()
+            file_type.is_dir()
         };
         if !valid {
             continue;
@@ -415,7 +448,7 @@ fn extension_config_names(
     kind: &str,
     field: &str,
 ) -> Result<HashSet<String>, String> {
-    let document = read_melody_config(scope.to_string(), cwd.to_string())?;
+    let document = read_melody_config_inner(scope.to_string(), cwd.to_string())?;
     Ok(document
         .values
         .get(kind)
@@ -430,13 +463,16 @@ fn extension_config_names(
 }
 
 #[tauri::command]
-pub fn set_melody_extension_enabled(
+pub async fn set_melody_extension_enabled(
+    app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     scope: String,
     cwd: String,
     kind: String,
     name: String,
     enabled: bool,
 ) -> Result<MelodyConfigDocument, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     if !matches!(kind.as_str(), "skills" | "plugins") {
         return Err("Only skills and plugins can be enabled or disabled".to_string());
     }
@@ -444,6 +480,16 @@ pub fn set_melody_extension_enabled(
     if name.is_empty() {
         return Err("Extension name cannot be empty".to_string());
     }
+    confirm_action(
+        &app,
+        "确认修改扩展状态",
+        format!(
+            "允许{}扩展 {} 吗？",
+            if enabled { "启用" } else { "停用" },
+            name
+        ),
+    )
+    .await?;
     let mut disabled = extension_config_names(&scope, &cwd, &kind, "disabled")?;
     let mut patches = Vec::with_capacity(if kind == "plugins" { 2 } else { 1 });
     if enabled {
@@ -471,11 +517,15 @@ pub fn set_melody_extension_enabled(
             value: serde_json::json!(explicitly_enabled),
         });
     }
-    update_melody_config(scope, cwd, patches)
+    update_melody_config_inner(scope, cwd, patches)
 }
 
 #[tauri::command]
-pub fn list_melody_extensions(cwd: String) -> Result<Vec<MelodyExtension>, String> {
+pub fn list_melody_extensions(
+    registry: State<'_, WorkspaceRegistry>,
+    cwd: String,
+) -> Result<Vec<MelodyExtension>, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let user_root = melody_home()?;
     let project_root = project_melody_root(&cwd)?;
     let mut extensions = Vec::new();
@@ -611,8 +661,10 @@ fn melody_skill_extensions(cwd: &str, document: MelodyInspectDocument) -> Vec<Me
 #[tauri::command]
 pub async fn list_melody_skills(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
 ) -> Result<Vec<MelodyExtension>, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let document = run_melody_inspect(&app, &cwd).await?;
     Ok(melody_skill_extensions(&cwd, document))
 }
@@ -794,13 +846,37 @@ pub fn list_marketplace_sources() -> Result<Vec<MarketplaceSource>, String> {
 }
 
 #[tauri::command]
-pub fn add_marketplace_source(input: String) -> Result<Vec<MarketplaceSource>, String> {
+pub async fn add_marketplace_source(
+    app: AppHandle,
+    input: String,
+) -> Result<Vec<MarketplaceSource>, String> {
     let source = marketplace_source_from_input(&input)?;
-    save_marketplace_source(None, source)
+    confirm_action(
+        &app,
+        "确认添加 Marketplace",
+        format!("允许将以下来源写入 Melody 配置吗？\n{}", source.location),
+    )
+    .await?;
+    save_marketplace_source_inner(None, source)
 }
 
 #[tauri::command]
-pub fn save_marketplace_source(
+pub async fn save_marketplace_source(
+    app: AppHandle,
+    original_name: Option<String>,
+    mut source: MarketplaceSource,
+) -> Result<Vec<MarketplaceSource>, String> {
+    validate_marketplace_source(&mut source)?;
+    confirm_action(
+        &app,
+        "确认保存 Marketplace",
+        format!("允许将 Marketplace {} 写入 Melody 配置吗？", source.name),
+    )
+    .await?;
+    save_marketplace_source_inner(original_name, source)
+}
+
+fn save_marketplace_source_inner(
     original_name: Option<String>,
     mut source: MarketplaceSource,
 ) -> Result<Vec<MarketplaceSource>, String> {
@@ -847,7 +923,16 @@ pub fn save_marketplace_source(
 }
 
 #[tauri::command]
-pub fn delete_marketplace_source(name: String) -> Result<Vec<MarketplaceSource>, String> {
+pub async fn delete_marketplace_source(
+    app: AppHandle,
+    name: String,
+) -> Result<Vec<MarketplaceSource>, String> {
+    confirm_action(
+        &app,
+        "确认删除 Marketplace",
+        format!("允许从 Melody 配置删除 Marketplace {} 吗？", name.trim()),
+    )
+    .await?;
     let (path, mut document) = read_user_config_document()?;
     let sources = marketplace_sources_mut(&mut document)?;
     let index = sources
@@ -862,6 +947,7 @@ pub fn delete_marketplace_source(name: String) -> Result<Vec<MarketplaceSource>,
 #[tauri::command]
 pub async fn install_melody_plugin(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     source: String,
 ) -> Result<PluginInstallResult, String> {
@@ -872,10 +958,17 @@ pub async fn install_melody_plugin(
     if source.len() > 4096 {
         return Err("Plugin source is too long".to_string());
     }
-    let workspace = PathBuf::from(&cwd);
-    if !workspace.is_dir() {
-        return Err(format!("Workspace does not exist: {}", workspace.display()));
-    }
+    let workspace = registry.authorize(&cwd)?;
+    confirm_action(
+        &app,
+        "确认安装 Melody 插件",
+        format!(
+            "允许在 {} 以信任模式安装以下插件来源吗？\n{}",
+            workspace.display(),
+            source
+        ),
+    )
+    .await?;
     let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
         "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
             .to_string()
@@ -952,10 +1045,18 @@ async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result
 #[tauri::command]
 pub async fn scan_marketplace_plugins(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     refresh: bool,
 ) -> Result<Vec<MarketplacePlugin>, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     if refresh {
+        confirm_action(
+            &app,
+            "确认刷新 Marketplace",
+            format!("允许 Melody 在 {} 更新 Marketplace 索引吗？", cwd),
+        )
+        .await?;
         run_plugin_command(&app, &cwd, &["plugin", "marketplace", "update"]).await?;
     }
     let output =
@@ -1025,6 +1126,7 @@ fn marketplace_plugins_from_json(output: &str) -> Result<Vec<MarketplacePlugin>,
 #[tauri::command]
 pub async fn update_melody_plugin(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     name: String,
 ) -> Result<PluginInstallResult, String> {
@@ -1032,6 +1134,13 @@ pub async fn update_melody_plugin(
     if name.is_empty() {
         return Err("Plugin name cannot be empty".to_string());
     }
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
+    confirm_action(
+        &app,
+        "确认更新 Melody 插件",
+        format!("允许在 {} 更新插件 {} 吗？", cwd, name),
+    )
+    .await?;
     let message = run_plugin_command(&app, &cwd, &["plugin", "update", name]).await?;
     Ok(PluginInstallResult {
         source: name.to_string(),
@@ -1046,8 +1155,10 @@ pub async fn update_melody_plugin(
 #[tauri::command]
 pub async fn list_installed_melody_plugins(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
 ) -> Result<Vec<MelodyExtension>, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
         "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
             .to_string()
@@ -1099,6 +1210,8 @@ pub async fn list_installed_melody_plugins(
 #[tauri::command]
 pub async fn uninstall_melody_plugin(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
+    cwd: String,
     name: String,
     keep_data: bool,
 ) -> Result<String, String> {
@@ -1106,12 +1219,30 @@ pub async fn uninstall_melody_plugin(
     if name.is_empty() {
         return Err("Plugin name cannot be empty".to_string());
     }
+    let workspace = registry.authorize(&cwd)?;
+    confirm_action(
+        &app,
+        "确认卸载 Melody 插件",
+        format!(
+            "允许从 {} 卸载插件 {} 吗？{}",
+            workspace.display(),
+            name,
+            if keep_data {
+                "（保留插件数据）"
+            } else {
+                ""
+            }
+        ),
+    )
+    .await?;
     let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
         "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
             .to_string()
     })?;
     let mut command = Command::new(binary);
-    command.args(["plugin", "uninstall", name, "--confirm"]);
+    command
+        .args(["plugin", "uninstall", name, "--confirm"])
+        .current_dir(workspace);
     if keep_data {
         command.arg("--keep-data");
     }
@@ -1448,10 +1579,12 @@ fn allowed_plugin_path(cwd: &str, path: &Path) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn get_melody_plugin_details(
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     name: String,
     path: String,
 ) -> Result<PluginDetails, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let root = allowed_plugin_path(&cwd, Path::new(&path))?;
     Ok(plugin_details_from_directory(&root, &name))
 }
@@ -1572,10 +1705,12 @@ fn allowed_skill_path(cwd: &str, path: &Path) -> Result<PathBuf, String> {
 #[tauri::command]
 pub async fn get_melody_skill_details(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     name: String,
     path: String,
 ) -> Result<SkillDetails, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let root = PathBuf::from(path)
         .canonicalize()
         .map_err(|error| format!("Skill path is unavailable: {error}"))?;
@@ -1596,8 +1731,21 @@ pub async fn get_melody_skill_details(
 }
 
 #[tauri::command]
-pub fn delete_melody_skill(cwd: String, name: String, path: String) -> Result<String, String> {
+pub async fn delete_melody_skill(
+    app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
+    cwd: String,
+    name: String,
+    path: String,
+) -> Result<String, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let root = allowed_skill_path(&cwd, Path::new(&path))?;
+    confirm_action(
+        &app,
+        "确认删除 Melody 技能",
+        format!("允许删除技能目录 {} 吗？", root.display()),
+    )
+    .await?;
     fs::remove_dir_all(&root).map_err(|error| format!("Failed to delete skill: {error}"))?;
     Ok(format!("Skill {} was deleted", name.trim()))
 }

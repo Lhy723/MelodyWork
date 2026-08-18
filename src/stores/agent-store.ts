@@ -18,9 +18,10 @@ import type {
   TimelineEntry,
 } from "@/domain/acp";
 import {
-  settlePlanApproval,
-  upsertPlanApproval,
-} from "@/domain/plan-approval";
+  applySessionUpdate as reduceSessionUpdate,
+  type SessionUpdateResult,
+} from "@/domain/agent-session-reducer";
+import { settlePlanApproval, upsertPlanApproval } from "@/domain/plan-approval";
 import {
   isSessionUpdateMethod,
   notificationMetadata,
@@ -33,6 +34,12 @@ import {
   sessionModeIdFromUpdate,
   sessionModeState,
 } from "@/domain/session-mode";
+import {
+  markPromptStarted,
+  markPromptResponseReceived,
+  promptResponseDisposition,
+  shouldCancelBeforeFirstEvent,
+} from "@/domain/prompt-timeout";
 import { extractToolActivity } from "@/domain/tool-activity";
 import {
   findPermissionRule,
@@ -50,6 +57,9 @@ const SET_MODEL_REQUEST_ID = 4;
 const SET_REASONING_EFFORT_REQUEST_ID = 5;
 const SET_SESSION_MODE_REQUEST_ID = 6;
 const SETUP_TIMEOUT_MS = 20_000;
+const PROMPT_FIRST_EVENT_TIMEOUT_MS = 30_000;
+const TRANSIENT_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+const TRANSIENT_STATE_SWEEP_MS = 60 * 1000;
 let nextPromptRequestId = 100;
 let nextSessionOpenRequestId = -1;
 const sessionEventDeduplicator = new SessionEventDeduplicator();
@@ -58,22 +68,100 @@ const loadFallbackTimelines = new Map<string, TimelineEntry[]>();
 const pendingUserEchoBlocks = new Map<string, number>();
 const pendingSessionOpens = new Map<
   number,
-  { localSessionId: string; requestedSessionId?: string }
+  { localSessionId: string; requestedSessionId?: string; createdAt: number }
 >();
 
 // prompt 请求 ID → 前后端会话映射，用于路由后台响应和运行状态。
 const pendingPrompts = new Map<
   number,
-  { acpSessionId: string; localSessionId: string }
+  {
+    acpSessionId: string;
+    localSessionId: string;
+    promptId: string;
+    createdAt: number;
+    firstEventAt?: number;
+    responseReceivedAt?: number;
+  }
 >();
+const promptTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
+const cancelledPromptIds = new Set<string>();
+
+const clearPromptTimeout = (requestId: number) => {
+  const timeout = promptTimeouts.get(requestId);
+  if (timeout !== undefined) {
+    clearTimeout(timeout);
+    promptTimeouts.delete(requestId);
+  }
+};
+
+const clearPromptTimeouts = () => {
+  for (const requestId of promptTimeouts.keys()) {
+    clearPromptTimeout(requestId);
+  }
+};
+
+const rememberCancelledPrompt = (promptId: string) => {
+  cancelledPromptIds.add(promptId);
+  while (cancelledPromptIds.size > 256) {
+    const oldest = cancelledPromptIds.values().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    cancelledPromptIds.delete(oldest);
+  }
+};
+
+const pruneTransientState = () => {
+  const cutoff = Date.now() - TRANSIENT_STATE_MAX_AGE_MS;
+  for (const [requestId, request] of pendingSessionOpens) {
+    if (request.createdAt < cutoff) {
+      pendingSessionOpens.delete(requestId);
+      loadFallbackTimelines.delete(request.localSessionId);
+    }
+  }
+  for (const [requestId, request] of pendingPrompts) {
+    if (request.createdAt < cutoff) {
+      pendingPrompts.delete(requestId);
+      clearPromptTimeout(requestId);
+      pendingUserEchoBlocks.delete(request.acpSessionId);
+    }
+  }
+  if (fullReplayStarted.size > 128) {
+    fullReplayStarted.clear();
+    sessionEventDeduplicator.clear();
+  }
+};
+
+const clearTransientState = () => {
+  pendingSessionOpens.clear();
+  pendingPrompts.clear();
+  clearPromptTimeouts();
+  pendingUserEchoBlocks.clear();
+  loadFallbackTimelines.clear();
+  fullReplayStarted.clear();
+  sessionEventDeduplicator.clear();
+  cancelledPromptIds.clear();
+};
+
+// A dead ACP process may never deliver another event to trigger pruning.
+// Keep the module-level registries bounded even while the desktop remains open.
+const scheduleTransientStateSweep = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.setTimeout(() => {
+    pruneTransientState();
+    scheduleTransientStateSweep();
+  }, TRANSIENT_STATE_SWEEP_MS);
+};
+scheduleTransientStateSweep();
 
 const previewTimeline: TimelineEntry[] = [
   {
     id: "user-1",
     kind: "message",
     role: "user",
-    content:
-      "通过 ACP stdio 将 MelodyWork 连接到内置 Melody Build 智能体。",
+    content: "通过 ACP stdio 将 MelodyWork 连接到内置 Melody Build 智能体。",
   },
   {
     id: "assistant-1",
@@ -146,6 +234,7 @@ interface AgentStore {
     content: string,
     attachments?: AgentPromptAttachment[],
   ) => Promise<void>;
+  cancelPrompt: (reason?: "user" | "timeout") => Promise<void>;
   selectModel: (modelId: string) => Promise<void>;
   selectReasoningEffort: (effort: string) => Promise<void>;
   selectSessionMode: (modeId: string) => Promise<void>;
@@ -157,6 +246,65 @@ interface AgentStore {
     feedback?: string,
   ) => Promise<void>;
 }
+
+const pendingPromptForSession = (sessionId: string) =>
+  [...pendingPrompts.entries()].find(
+    ([, pending]) => pending.acpSessionId === sessionId,
+  );
+
+const removePendingPrompt = (requestId: number) => {
+  const pending = pendingPrompts.get(requestId);
+  if (!pending) {
+    return undefined;
+  }
+  pendingPrompts.delete(requestId);
+  clearPromptTimeout(requestId);
+  pendingUserEchoBlocks.delete(pending.acpSessionId);
+  return pending;
+};
+
+const armPromptFirstEventTimeout = (requestId: number) => {
+  clearPromptTimeout(requestId);
+  promptTimeouts.set(
+    requestId,
+    setTimeout(() => {
+      clearPromptTimeout(requestId);
+      const pending = pendingPrompts.get(requestId);
+      const state = useAgentStore.getState();
+      if (
+        !pending ||
+        state.localSessionId !== pending.localSessionId ||
+        state.acpSessionId !== pending.acpSessionId ||
+        !shouldCancelBeforeFirstEvent(
+          pending,
+          Date.now(),
+          PROMPT_FIRST_EVENT_TIMEOUT_MS,
+        ) ||
+        (state.chatStatus !== "submitted" && state.chatStatus !== "streaming")
+      ) {
+        return;
+      }
+      // This only guards a completely silent prompt. Tool-level deadlines
+      // belong to the sidecar, while a started tool remains user-cancellable.
+      void state.cancelPrompt("timeout");
+    }, PROMPT_FIRST_EVENT_TIMEOUT_MS),
+  );
+};
+
+const markPromptActivity = (sessionId?: string) => {
+  if (!sessionId) {
+    return;
+  }
+  const pending = pendingPromptForSession(sessionId);
+  if (!pending || pending[1].firstEventAt !== undefined) {
+    return;
+  }
+  clearPromptTimeout(pending[0]);
+  pendingPrompts.set(
+    pending[0],
+    markPromptStarted(pending[1], Date.now()),
+  );
+};
 
 const objectValue = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object"
@@ -222,18 +370,18 @@ const appendAgentChunk = (
   text: string,
 ): TimelineEntry[] => {
   const now = Date.now();
+  const last = timeline.at(-1);
+  if (last?.kind === "message" && last.role === "assistant" && last.streaming) {
+    return [
+      ...timeline.slice(0, -1),
+      { ...last, content: `${last.content}${text}` },
+    ];
+  }
   const settledTimeline = timeline.map((entry) =>
     entry.kind === "thought" && entry.streaming
       ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
       : entry,
   );
-  const last = settledTimeline.at(-1);
-  if (last?.kind === "message" && last.role === "assistant" && last.streaming) {
-    return [
-      ...settledTimeline.slice(0, -1),
-      { ...last, content: `${last.content}${text}` },
-    ];
-  }
   return [
     ...settledTimeline,
     {
@@ -346,8 +494,7 @@ const appendUserChunk = (
     return timeline;
   }
   const text =
-    stringValue(contentMeta?.displayText) ??
-    stringValue(content?.text);
+    stringValue(contentMeta?.displayText) ?? stringValue(content?.text);
   if (!text) {
     return timeline;
   }
@@ -445,13 +592,10 @@ const upsertTool = (
       stringValue(tool.title) ??
       (existing?.kind === "tool" ? existing.title : "工具调用"),
     command:
-      toolCommand(tool) ||
-      (existing?.kind === "tool" ? existing.command : ""),
+      toolCommand(tool) || (existing?.kind === "tool" ? existing.command : ""),
     output:
-      toolOutput(tool) ||
-      (existing?.kind === "tool" ? existing.output : ""),
-    startedAt:
-      existing?.kind === "tool" ? existing.startedAt : Date.now(),
+      toolOutput(tool) || (existing?.kind === "tool" ? existing.output : ""),
+    startedAt: existing?.kind === "tool" ? existing.startedAt : Date.now(),
     completedAt:
       existing?.kind === "tool" && existing.completedAt
         ? existing.completedAt
@@ -463,8 +607,7 @@ const upsertTool = (
       existing?.kind === "tool" ? existing.activity : undefined,
     ),
     status,
-    permission:
-      existing?.kind === "tool" ? existing.permission : undefined,
+    permission: existing?.kind === "tool" ? existing.permission : undefined,
     permissionRequestId:
       existing?.kind === "tool" ? existing.permissionRequestId : undefined,
     permissionOptions:
@@ -486,9 +629,7 @@ const parsePermissionOptions = (value: unknown): PermissionOption[] =>
         const optionId = stringValue(item?.optionId);
         const name = stringValue(item?.name);
         const kind = stringValue(item?.kind) as PermissionOption["kind"];
-        return optionId && name && kind
-          ? [{ optionId, name, kind }]
-          : [];
+        return optionId && name && kind ? [{ optionId, name, kind }] : [];
       })
     : [];
 
@@ -530,17 +671,13 @@ const attachmentPromptBlocks = (
   attachments.map((attachment) => {
     const parsed = parseDataUrl(attachment.url);
     if (!parsed) {
-      throw new Error(
-        `无法读取附件 ${attachment.filename ?? "文件"}。`,
-      );
+      throw new Error(`无法读取附件 ${attachment.filename ?? "文件"}。`);
     }
 
     const mediaType = attachment.mediaType || parsed.mediaType;
     if (mediaType.startsWith("image/")) {
       if (!parsed.base64) {
-        throw new Error(
-          `无法编码图片 ${attachment.filename ?? "附件"}。`,
-        );
+        throw new Error(`无法编码图片 ${attachment.filename ?? "附件"}。`);
       }
       return {
         type: "image",
@@ -613,8 +750,7 @@ const modelOptions = (message: AcpEnvelope) => {
         if (!id) {
           return [];
         }
-        const meta =
-          objectValue(model?._meta) ?? objectValue(model?.meta);
+        const meta = objectValue(model?._meta) ?? objectValue(model?.meta);
         const supportsReasoningEffort =
           booleanValue(meta?.supportsReasoningEffort) ?? false;
         const configuredOptions = Array.isArray(meta?.reasoningEfforts)
@@ -722,7 +858,9 @@ const contextUsageValue = (
   const amount = numberValue(rawCost?.amount);
   const currency = stringValue(rawCost?.currency);
   const normalizedCurrency =
-    currency && /^[a-z]{3}$/i.test(currency) ? currency.toUpperCase() : undefined;
+    currency && /^[a-z]{3}$/i.test(currency)
+      ? currency.toUpperCase()
+      : undefined;
   return {
     usedTokens,
     maxTokens,
@@ -793,20 +931,14 @@ const billingUsageValue = (
   };
 };
 
-const billingUsageFromResult = (
-  result: Record<string, unknown> | undefined,
-): AgentBillingUsage | undefined => {
-  const meta = objectValue(result?._meta);
-  return billingUsageValue(objectValue(meta?.usage));
-};
-
 const contextUsageForModel = (
   models: AgentModelOption[],
   modelId: string | undefined,
   current?: AgentContextUsage,
 ): AgentContextUsage | undefined => {
-  const maxTokens = models.find((model) => model.id === modelId)
-    ?.contextWindowTokens;
+  const maxTokens = models.find(
+    (model) => model.id === modelId,
+  )?.contextWindowTokens;
   if (maxTokens === undefined || maxTokens <= 0) {
     return current;
   }
@@ -834,108 +966,26 @@ const extractSessionUpdateParams = (
 };
 
 // 将 session update 应用到指定 timeline，返回更新后的 timeline 和状态标志。
-interface SessionUpdateResult {
-  timeline: TimelineEntry[];
-  error?: string;
-  streaming?: boolean;
-  contextUsage?: AgentContextUsage;
-}
+const sessionUpdateDependencies = {
+  objectValue,
+  stringValue,
+  appendUserChunk,
+  appendAgentChunk,
+  appendThoughtChunk,
+  appendAgentError,
+  settleStreamingEntries,
+  stampLatestTurnAnalytics,
+  upsertTool,
+  contextUsageValue,
+  billingUsageValue,
+};
+
 const applySessionUpdate = (
   timeline: TimelineEntry[],
   update: Record<string, unknown> | undefined,
   eventId?: string,
-): SessionUpdateResult => {
-  const updateType = stringValue(update?.sessionUpdate);
-
-  if (updateType === "usage_update") {
-    return {
-      timeline,
-      contextUsage: contextUsageValue(update),
-    };
-  }
-
-  if (updateType === "user_message_chunk" && update) {
-    return {
-      timeline: appendUserChunk(timeline, update, eventId),
-    };
-  }
-
-  if (updateType === "agent_message_chunk") {
-    const content = objectValue(update?.content);
-    const text = stringValue(content?.text);
-    if (text) {
-      return {
-        timeline: appendAgentChunk(timeline, text),
-        streaming: true,
-      };
-    }
-    return { timeline };
-  }
-
-  if (updateType === "agent_thought_chunk") {
-    const content = objectValue(update?.content);
-    const text = stringValue(content?.text);
-    if (text) {
-      return {
-        timeline: appendThoughtChunk(timeline, text),
-        streaming: true,
-      };
-    }
-    return { timeline };
-  }
-
-  if (
-    updateType === "retry_state" &&
-    stringValue(update?.type) === "failed"
-  ) {
-    const detail =
-      stringValue(update?.message) ?? "模型请求失败。";
-    return {
-      timeline: appendAgentError(timeline, detail),
-      error: detail,
-    };
-  }
-
-  if (updateType === "turn_completed") {
-    const billingUsage = billingUsageValue(objectValue(update?.usage));
-    const stopReason =
-      stringValue(update?.stopReason) ??
-      stringValue(update?.stop_reason);
-    const detail =
-      stringValue(update?.agentResult) ??
-      stringValue(update?.agent_result);
-    if (stopReason === "error") {
-      const failure = detail ?? "本轮 Melody 对话发生错误。";
-      return {
-        timeline: stampLatestTurnAnalytics(
-          appendAgentError(timeline, failure),
-          undefined,
-          billingUsage,
-          undefined,
-          undefined,
-        ),
-        error: failure,
-      };
-    }
-    return {
-      timeline: stampLatestTurnAnalytics(
-        timeline,
-        undefined,
-        billingUsage,
-        undefined,
-        undefined,
-      ),
-    };
-  }
-
-  if (updateType === "tool_call" || updateType === "tool_call_update") {
-    return {
-      timeline: upsertTool(settleStreamingEntries(timeline), update ?? {}),
-    };
-  }
-
-  return { timeline };
-};
+): SessionUpdateResult =>
+  reduceSessionUpdate(timeline, update, eventId, sessionUpdateDependencies);
 
 const applySubagentUpdate = (
   subagents: Record<string, AgentSubagent>,
@@ -1013,24 +1063,14 @@ const applySubagentUpdate = (
       [subagentId]: {
         ...current,
         updatedAt: now,
-        durationMs: numberValue(
-          wireValue(update, "durationMs", "duration_ms"),
-        ),
-        turnCount: numberValue(
-          wireValue(update, "turnCount", "turn_count"),
-        ),
+        durationMs: numberValue(wireValue(update, "durationMs", "duration_ms")),
+        turnCount: numberValue(wireValue(update, "turnCount", "turn_count")),
         toolCallCount: numberValue(
           wireValue(update, "toolCallCount", "tool_call_count"),
         ),
-        tokensUsed: numberValue(
-          wireValue(update, "tokensUsed", "tokens_used"),
-        ),
+        tokensUsed: numberValue(wireValue(update, "tokensUsed", "tokens_used")),
         contextWindowTokens: numberValue(
-          wireValue(
-            update,
-            "contextWindowTokens",
-            "context_window_tokens",
-          ),
+          wireValue(update, "contextWindowTokens", "context_window_tokens"),
         ),
         contextUsagePct: numberValue(
           wireValue(update, "contextUsagePct", "context_usage_pct"),
@@ -1038,9 +1078,7 @@ const applySubagentUpdate = (
         toolsUsed: Array.isArray(toolsUsed)
           ? toolsUsed.filter((tool): tool is string => typeof tool === "string")
           : current.toolsUsed,
-        errorCount: numberValue(
-          wireValue(update, "errorCount", "error_count"),
-        ),
+        errorCount: numberValue(wireValue(update, "errorCount", "error_count")),
       },
     };
   }
@@ -1051,9 +1089,7 @@ const applySubagentUpdate = (
     [subagentId]: {
       ...current,
       status:
-        status === "failed" || status === "cancelled"
-          ? status
-          : "completed",
+        status === "failed" || status === "cancelled" ? status : "completed",
       updatedAt: now,
       durationMs:
         numberValue(wireValue(update, "durationMs", "duration_ms")) ??
@@ -1064,9 +1100,7 @@ const applySubagentUpdate = (
         current.turnCount,
       toolCallCount:
         numberValue(wireValue(update, "toolCalls", "tool_calls")) ??
-        numberValue(
-          wireValue(update, "toolCallCount", "tool_call_count"),
-        ) ??
+        numberValue(wireValue(update, "toolCallCount", "tool_call_count")) ??
         current.toolCallCount,
       tokensUsed:
         numberValue(wireValue(update, "tokensUsed", "tokens_used")) ??
@@ -1096,6 +1130,7 @@ const sendSessionOpen = async (
   pendingSessionOpens.set(requestId, {
     localSessionId,
     requestedSessionId: acpSessionId,
+    createdAt: Date.now(),
   });
   try {
     await sendAcp({
@@ -1135,13 +1170,39 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   permissionMode: useAppSettingsStore.getState().defaultPermissionMode,
   runningSessions: {},
   chatStatus: "ready",
-  setStatus: (status) =>
-    set({
+  setStatus: (status) => {
+    const current = get();
+    const sessionLost =
+      status.phase === "stopped" &&
+      (current.chatStatus === "submitted" || current.chatStatus === "streaming");
+    if (
+      status.phase === "stopped" ||
+      status.phase === "missing" ||
+      status.phase === "failed"
+    ) {
+      clearTransientState();
+    }
+    set((state) => ({
       status,
-      ...(status.phase === "missing" || status.phase === "failed"
-        ? { chatStatus: "error" as const, acpPhase: "error" as const }
+      ...(status.phase === "missing" || status.phase === "failed" || sessionLost
+        ? {
+            chatStatus: "error" as const,
+            acpPhase: "error" as const,
+          }
         : {}),
-    }),
+      ...(sessionLost
+        ? {
+            timeline: appendAgentError(
+              state.timeline,
+              status.message ?? "ACP sidecar 已停止，当前请求已结束。",
+            ),
+            runningSessions: state.localSessionId
+              ? { ...state.runningSessions, [state.localSessionId]: false }
+              : state.runningSessions,
+          }
+        : {}),
+    }));
+  },
   appendStderr: (line) =>
     set((state) => ({ stderr: [...state.stderr.slice(-49), line] })),
   beginSession: async (
@@ -1169,14 +1230,38 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         cwd,
         acpSessionId,
         acpCursor: restoredCursor,
-        acpPhase: "ready",
         timeline:
-          localSessionId === "implement-acp-bridge" && restoredTimeline.length === 0
+          localSessionId === "implement-acp-bridge" &&
+          restoredTimeline.length === 0
             ? previewTimeline
             : restoredTimeline,
         contextUsage: undefined,
-        chatStatus: "ready",
+        acpPhase: "initializing",
+        chatStatus: "submitted",
       });
+      try {
+        await sendAcp({
+          jsonrpc: "2.0",
+          id: INITIALIZE_REQUEST_ID,
+          method: "initialize",
+          params: {
+            protocolVersion: 1,
+            clientCapabilities: { fs: {}, terminal: false },
+            _meta: { clientType: "melody-work-preview" },
+          },
+        });
+        armSetupTimeout(
+          localSessionId,
+          "initializing",
+          "浏览器预览 ACP 初始化超时。",
+        );
+      } catch (reason) {
+        set({
+          acpPhase: "error",
+          chatStatus: "error",
+          status: { ...get().status, message: reasonMessage(reason) },
+        });
+      }
       return;
     }
 
@@ -1217,11 +1302,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const restoredFromBuffer = acpSessionId
       ? backgroundTimelines[acpSessionId]
       : undefined;
-    const finalTimeline =
-      restoredFromBuffer ?? restoredTimeline;
-    const finalCursor = restoredFromBuffer && acpSessionId
-      ? backgroundCursors[acpSessionId]
-      : restoredCursor;
+    const finalTimeline = restoredFromBuffer ?? restoredTimeline;
+    const finalCursor =
+      restoredFromBuffer && acpSessionId
+        ? backgroundCursors[acpSessionId]
+        : restoredCursor;
     const restoredContextUsage = acpSessionId
       ? backgroundContextUsage[acpSessionId]
       : undefined;
@@ -1249,10 +1334,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       backgroundCursors,
       contextUsage:
         restoredContextUsage ??
-        contextUsageForModel(
-          state.availableModels,
-          state.selectedModelId,
-        ),
+        contextUsageForModel(state.availableModels, state.selectedModelId),
       backgroundContextUsage,
       availableSessionModes: [],
       selectedSessionModeId: undefined,
@@ -1270,11 +1352,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           state.permissionMode,
           finalCursor,
         );
-        armSetupTimeout(
-          localSessionId,
-          "creating",
-          "打开 Melody 会话超时。",
-        );
+        armSetupTimeout(localSessionId, "creating", "打开 Melody 会话超时。");
         return;
       }
       await sendAcp({
@@ -1315,54 +1393,78 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
   },
   receiveAcp: async (message) => {
-    if (message.id === INITIALIZE_REQUEST_ID) {
-      if (message.error) {
-        set({
-          acpPhase: "error",
-          chatStatus: "error",
-          status: {
-            ...get().status,
-            message: errorMessage(message, "ACP 初始化失败"),
-          },
-        });
-        return;
-      }
-      const models = modelOptions(message);
-      const selectedModelId =
-        models.selectedModelId ?? get().selectedModelId;
-      set({
-        availableModels: models.availableModels,
-        selectedModelId,
-        selectedReasoningEffort:
-          models.selectedReasoningEffort ??
-          get().selectedReasoningEffort,
-        contextUsage: contextUsageForModel(
-          models.availableModels,
-          selectedModelId,
-          get().contextUsage,
-        ),
-      });
-      const methodId = preferredAuthMethod(message);
-      if (methodId) {
-        set({ acpPhase: "authenticating" });
-        try {
-          await sendAcp({
-            jsonrpc: "2.0",
-            id: AUTHENTICATE_REQUEST_ID,
-            method: "authenticate",
-            params: {
-              methodId,
-              _meta: { headless: false },
+    pruneTransientState();
+    try {
+      if (message.id === INITIALIZE_REQUEST_ID) {
+        if (message.error) {
+          set({
+            acpPhase: "error",
+            chatStatus: "error",
+            status: {
+              ...get().status,
+              message: errorMessage(message, "ACP 初始化失败"),
             },
           });
-          const localSessionId = get().localSessionId;
-          if (localSessionId) {
-            armSetupTimeout(
-              localSessionId,
-              "authenticating",
-              "Melody Build 身份验证超时。请通过 Melody CLI 登录后重试。",
-            );
+          return;
+        }
+        const models = modelOptions(message);
+        const selectedModelId = models.selectedModelId ?? get().selectedModelId;
+        set({
+          availableModels: models.availableModels,
+          selectedModelId,
+          selectedReasoningEffort:
+            models.selectedReasoningEffort ?? get().selectedReasoningEffort,
+          contextUsage: contextUsageForModel(
+            models.availableModels,
+            selectedModelId,
+            get().contextUsage,
+          ),
+        });
+        const methodId = preferredAuthMethod(message);
+        if (methodId) {
+          set({ acpPhase: "authenticating" });
+          try {
+            await sendAcp({
+              jsonrpc: "2.0",
+              id: AUTHENTICATE_REQUEST_ID,
+              method: "authenticate",
+              params: {
+                methodId,
+                _meta: { headless: false },
+              },
+            });
+            const localSessionId = get().localSessionId;
+            if (localSessionId) {
+              armSetupTimeout(
+                localSessionId,
+                "authenticating",
+                "Melody Build 身份验证超时。请通过 Melody CLI 登录后重试。",
+              );
+            }
+          } catch (reason) {
+            set({
+              acpPhase: "error",
+              chatStatus: "error",
+              status: { ...get().status, message: reasonMessage(reason) },
+            });
           }
+          return;
+        }
+        set({ acpPhase: "creating" });
+        try {
+          const localSessionId = get().localSessionId;
+          if (!localSessionId) {
+            return;
+          }
+          await sendSessionOpen(
+            localSessionId,
+            get().cwd,
+            get().acpSessionId,
+            get().selectedModelId,
+            get().permissionMode,
+            get().acpCursor,
+          );
+          armSetupTimeout(localSessionId, "creating", "打开 Melody 会话超时。");
         } catch (reason) {
           set({
             acpPhase: "error",
@@ -1372,198 +1474,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         }
         return;
       }
-      set({ acpPhase: "creating" });
-      try {
-        const localSessionId = get().localSessionId;
-        if (!localSessionId) {
-          return;
-        }
-        await sendSessionOpen(
-          localSessionId,
-          get().cwd,
-          get().acpSessionId,
-          get().selectedModelId,
-          get().permissionMode,
-          get().acpCursor,
-        );
-        armSetupTimeout(
-          localSessionId,
-          "creating",
-          "打开 Melody 会话超时。",
-        );
-      } catch (reason) {
-        set({
-          acpPhase: "error",
-          chatStatus: "error",
-          status: { ...get().status, message: reasonMessage(reason) },
-        });
-      }
-      return;
-    }
 
-    if (message.id === AUTHENTICATE_REQUEST_ID) {
-      if (message.error) {
-        set({
-          acpPhase: "error",
-          chatStatus: "error",
-          status: {
-            ...get().status,
-            message: errorMessage(
-              message,
-              "Melody 身份验证失败。请通过 Melody CLI 登录后重试。",
-            ),
-          },
-        });
-        return;
-      }
-      set({ acpPhase: "creating" });
-      try {
-        const localSessionId = get().localSessionId;
-        if (!localSessionId) {
-          return;
-        }
-        await sendSessionOpen(
-          localSessionId,
-          get().cwd,
-          get().acpSessionId,
-          get().selectedModelId,
-          get().permissionMode,
-          get().acpCursor,
-        );
-        armSetupTimeout(
-          localSessionId,
-          "creating",
-          "打开 Melody 会话超时。",
-        );
-      } catch (reason) {
-        set({
-          acpPhase: "error",
-          chatStatus: "error",
-          status: { ...get().status, message: reasonMessage(reason) },
-        });
-      }
-      return;
-    }
-
-    if (message.id === SET_MODEL_REQUEST_ID) {
-      const pendingModelId = get().pendingModelId;
-      if (message.error || !pendingModelId) {
-        const detail = errorMessage(message, "切换 Melody 模型失败");
-        set({
-          pendingModelId: undefined,
-          acpPhase: "error",
-          chatStatus: "error",
-          status: { ...get().status, message: detail },
-        });
-        return;
-      }
-      const selectedModel = get().availableModels.find(
-        (model) => model.id === pendingModelId,
-      );
-      set({
-        selectedModelId: pendingModelId,
-        selectedReasoningEffort: selectedModel?.reasoningEffort,
-        contextUsage: contextUsageForModel(
-          get().availableModels,
-          pendingModelId,
-        ),
-        pendingModelId: undefined,
-        acpPhase: "ready",
-        chatStatus: "ready",
-        status: {
-          ...get().status,
-          message: `正在使用 ${pendingModelId}`,
-        },
-      });
-      return;
-    }
-
-    if (message.id === SET_REASONING_EFFORT_REQUEST_ID) {
-      const pendingReasoningEffort = get().pendingReasoningEffort;
-      if (message.error || !pendingReasoningEffort) {
-        const detail = errorMessage(
-          message,
-          "更改推理强度失败",
-        );
-        set({
-          pendingReasoningEffort: undefined,
-          acpPhase: "error",
-          chatStatus: "error",
-          status: { ...get().status, message: detail },
-        });
-        return;
-      }
-      set({
-        selectedReasoningEffort: pendingReasoningEffort,
-        pendingReasoningEffort: undefined,
-        acpPhase: "ready",
-        chatStatus: "ready",
-        status: {
-          ...get().status,
-          message: `推理强度：${pendingReasoningEffort}`,
-        },
-      });
-      return;
-    }
-
-    if (message.id === SET_SESSION_MODE_REQUEST_ID) {
-      const pendingSessionModeId = get().pendingSessionModeId;
-      if (message.error) {
-        const detail = errorMessage(message, "切换 Melody 会话模式失败");
-        set({
-          pendingSessionModeId: undefined,
-          status: { ...get().status, message: detail },
-        });
-        return;
-      }
-      if (pendingSessionModeId) {
-        set({
-          selectedSessionModeId: pendingSessionModeId,
-          pendingSessionModeId: undefined,
-          status: {
-            ...get().status,
-            message: `会话模式：${pendingSessionModeId}`,
-          },
-        });
-      }
-      return;
-    }
-
-    const pendingOpen =
-      typeof message.id === "number"
-        ? pendingSessionOpens.get(message.id)
-        : undefined;
-    if (pendingOpen) {
-      pendingSessionOpens.delete(message.id as number);
-      const sessionId =
-        stringValue(message.result?.sessionId) ??
-        pendingOpen.requestedSessionId;
-      const isCurrent =
-        pendingOpen.localSessionId === get().localSessionId;
-      if (message.error && pendingOpen.requestedSessionId) {
-        if (!isCurrent) {
-          return;
-        }
-        const fallback = loadFallbackTimelines.get(
-          pendingOpen.localSessionId,
-        );
-        const detail = errorMessage(message, "无法加载 Melody 会话");
-        set((state) => ({
-          acpPhase: "error",
-          chatStatus: "error",
-          timeline:
-            state.timeline.length > 0
-              ? state.timeline
-              : (fallback ?? state.timeline),
-          status: {
-            ...state.status,
-            message: `${detail}。已保留本地只读缓存，没有创建替代会话。`,
-          },
-        }));
-        return;
-      }
-      if (message.error || !sessionId) {
-        if (isCurrent) {
+      if (message.id === AUTHENTICATE_REQUEST_ID) {
+        if (message.error) {
           set({
             acpPhase: "error",
             chatStatus: "error",
@@ -1571,109 +1484,317 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
               ...get().status,
               message: errorMessage(
                 message,
-                "Melody 没有返回会话 ID",
+                "Melody 身份验证失败。请通过 Melody CLI 登录后重试。",
               ),
+            },
+          });
+          return;
+        }
+        set({ acpPhase: "creating" });
+        try {
+          const localSessionId = get().localSessionId;
+          if (!localSessionId) {
+            return;
+          }
+          await sendSessionOpen(
+            localSessionId,
+            get().cwd,
+            get().acpSessionId,
+            get().selectedModelId,
+            get().permissionMode,
+            get().acpCursor,
+          );
+          armSetupTimeout(localSessionId, "creating", "打开 Melody 会话超时。");
+        } catch (reason) {
+          set({
+            acpPhase: "error",
+            chatStatus: "error",
+            status: { ...get().status, message: reasonMessage(reason) },
+          });
+        }
+        return;
+      }
+
+      if (message.id === SET_MODEL_REQUEST_ID) {
+        const pendingModelId = get().pendingModelId;
+        if (message.error || !pendingModelId) {
+          const detail = errorMessage(message, "切换 Melody 模型失败");
+          set({
+            pendingModelId: undefined,
+            acpPhase: "error",
+            chatStatus: "error",
+            status: { ...get().status, message: detail },
+          });
+          return;
+        }
+        const selectedModel = get().availableModels.find(
+          (model) => model.id === pendingModelId,
+        );
+        set({
+          selectedModelId: pendingModelId,
+          selectedReasoningEffort: selectedModel?.reasoningEffort,
+          contextUsage: contextUsageForModel(
+            get().availableModels,
+            pendingModelId,
+          ),
+          pendingModelId: undefined,
+          acpPhase: "ready",
+          chatStatus: "ready",
+          status: {
+            ...get().status,
+            message: `正在使用 ${pendingModelId}`,
+          },
+        });
+        return;
+      }
+
+      if (message.id === SET_REASONING_EFFORT_REQUEST_ID) {
+        const pendingReasoningEffort = get().pendingReasoningEffort;
+        if (message.error || !pendingReasoningEffort) {
+          const detail = errorMessage(message, "更改推理强度失败");
+          set({
+            pendingReasoningEffort: undefined,
+            acpPhase: "error",
+            chatStatus: "error",
+            status: { ...get().status, message: detail },
+          });
+          return;
+        }
+        set({
+          selectedReasoningEffort: pendingReasoningEffort,
+          pendingReasoningEffort: undefined,
+          acpPhase: "ready",
+          chatStatus: "ready",
+          status: {
+            ...get().status,
+            message: `推理强度：${pendingReasoningEffort}`,
+          },
+        });
+        return;
+      }
+
+      if (message.id === SET_SESSION_MODE_REQUEST_ID) {
+        const pendingSessionModeId = get().pendingSessionModeId;
+        if (message.error) {
+          const detail = errorMessage(message, "切换 Melody 会话模式失败");
+          set({
+            pendingSessionModeId: undefined,
+            status: { ...get().status, message: detail },
+          });
+          return;
+        }
+        if (pendingSessionModeId) {
+          set({
+            selectedSessionModeId: pendingSessionModeId,
+            pendingSessionModeId: undefined,
+            status: {
+              ...get().status,
+              message: `会话模式：${pendingSessionModeId}`,
             },
           });
         }
         return;
       }
-      const sessionUsage = contextUsageFromResult(message.result);
-      const modes = sessionModeState(message.result);
-      if (isCurrent) {
-        set({
-          acpPhase: "ready",
-          acpSessionId: sessionId,
-          chatStatus: "ready",
-          ...(sessionUsage ? { contextUsage: sessionUsage } : {}),
-          ...(modes
-            ? {
-                availableSessionModes: modes.availableSessionModes,
-                selectedSessionModeId: modes.selectedSessionModeId,
-                pendingSessionModeId: undefined,
-              }
-            : {}),
-        });
-      }
-      loadFallbackTimelines.delete(pendingOpen.localSessionId);
-      if (!pendingOpen.requestedSessionId) {
-        const updated = await updateStoredSession({
-          id: pendingOpen.localSessionId,
-          acpSessionId: sessionId,
-        });
-        useWorkspaceStore.getState().replaceSession(updated);
-      }
-      return;
-    }
 
-    if (
-      message.method === "x.ai/exit_plan_mode" &&
-      message.id !== undefined
-    ) {
-      const params = message.params ?? {};
-      const sessionId = stringValue(params.sessionId);
-      const toolCallId =
-        stringValue(params.toolCallId) ??
-        `exit-plan-${String(message.id)}`;
-      const content =
-        stringValue(params.planContent)?.trim() ||
-        "Melody 没有返回计划内容。";
-      const request = {
-        content,
-        requestId: message.id,
-        toolCallId,
-      };
-      const currentSessionId = get().acpSessionId;
+      const pendingOpen =
+        typeof message.id === "number"
+          ? pendingSessionOpens.get(message.id)
+          : undefined;
+      if (pendingOpen) {
+        pendingSessionOpens.delete(message.id as number);
+        const sessionId =
+          stringValue(message.result?.sessionId) ??
+          pendingOpen.requestedSessionId;
+        const isCurrent = pendingOpen.localSessionId === get().localSessionId;
+        if (message.error && pendingOpen.requestedSessionId) {
+          if (!isCurrent) {
+            return;
+          }
+          const fallback = loadFallbackTimelines.get(
+            pendingOpen.localSessionId,
+          );
+          const detail = errorMessage(message, "无法加载 Melody 会话");
+          set((state) => ({
+            acpPhase: "error",
+            chatStatus: "error",
+            timeline:
+              state.timeline.length > 0
+                ? state.timeline
+                : (fallback ?? state.timeline),
+            status: {
+              ...state.status,
+              message: `${detail}。已保留本地只读缓存，没有创建替代会话。`,
+            },
+          }));
+          return;
+        }
+        if (message.error || !sessionId) {
+          if (isCurrent) {
+            set({
+              acpPhase: "error",
+              chatStatus: "error",
+              status: {
+                ...get().status,
+                message: errorMessage(message, "Melody 没有返回会话 ID"),
+              },
+            });
+          }
+          return;
+        }
+        const sessionUsage = contextUsageFromResult(message.result);
+        const modes = sessionModeState(message.result);
+        if (isCurrent) {
+          set({
+            acpPhase: "ready",
+            acpSessionId: sessionId,
+            chatStatus: "ready",
+            ...(sessionUsage ? { contextUsage: sessionUsage } : {}),
+            ...(modes
+              ? {
+                  availableSessionModes: modes.availableSessionModes,
+                  selectedSessionModeId: modes.selectedSessionModeId,
+                  pendingSessionModeId: undefined,
+                }
+              : {}),
+          });
+        }
+        loadFallbackTimelines.delete(pendingOpen.localSessionId);
+        if (!pendingOpen.requestedSessionId) {
+          const updated = await updateStoredSession({
+            id: pendingOpen.localSessionId,
+            acpSessionId: sessionId,
+          });
+          useWorkspaceStore.getState().replaceSession(updated);
+        }
+        return;
+      }
 
       if (
-        sessionId &&
-        currentSessionId &&
-        sessionId !== currentSessionId
+        message.method === "x.ai/exit_plan_mode" &&
+        message.id !== undefined
       ) {
-        set((state) => ({
-          backgroundTimelines: {
-            ...state.backgroundTimelines,
-            [sessionId]: upsertPlanApproval(
-              state.backgroundTimelines[sessionId] ?? [],
-              request,
-            ),
-          },
-        }));
-      } else {
-        set((state) => ({
-          timeline: upsertPlanApproval(state.timeline, request),
-        }));
+        const params = message.params ?? {};
+        const sessionId = stringValue(params.sessionId);
+        markPromptActivity(sessionId ?? get().acpSessionId);
+        const toolCallId =
+          stringValue(params.toolCallId) ?? `exit-plan-${String(message.id)}`;
+        const content =
+          stringValue(params.planContent)?.trim() ||
+          "Melody 没有返回计划内容。";
+        const request = {
+          content,
+          requestId: message.id,
+          toolCallId,
+        };
+        const currentSessionId = get().acpSessionId;
+
+        if (sessionId && currentSessionId && sessionId !== currentSessionId) {
+          set((state) => ({
+            backgroundTimelines: {
+              ...state.backgroundTimelines,
+              [sessionId]: upsertPlanApproval(
+                state.backgroundTimelines[sessionId] ?? [],
+                request,
+              ),
+            },
+          }));
+        } else {
+          set((state) => ({
+            timeline: upsertPlanApproval(state.timeline, request),
+          }));
+        }
+        return;
       }
-      return;
-    }
 
-    if (
-      typeof message.id === "number" &&
-      message.id >= 100 &&
-      !message.method
-    ) {
-      const promptId = message.id;
-      const pendingPrompt = pendingPrompts.get(promptId);
-      const promptSessionId = pendingPrompt?.acpSessionId;
-      const currentAcpSessionId = get().acpSessionId;
-
-      // 后台会话的 prompt 响应：更新缓冲 timeline 的 streaming 标记，
-      // 不污染当前会话的 chatStatus / acpPhase。
       if (
-        promptSessionId &&
-        currentAcpSessionId &&
-        promptSessionId !== currentAcpSessionId
+        typeof message.id === "number" &&
+        message.id >= 100 &&
+        !message.method
       ) {
-        pendingPrompts.delete(promptId);
-        pendingUserEchoBlocks.delete(promptSessionId);
-        const promptUsage = contextUsageFromResult(
-          message.result,
-          get().backgroundContextUsage[promptSessionId],
-        );
-        const promptBillingUsage = billingUsageFromResult(message.result);
+        const promptId = message.id;
+        const pendingPrompt = pendingPrompts.get(promptId);
+        const responsePromptId = stringValue(responseMeta(message)?.promptId);
+        if (
+          responsePromptId &&
+          cancelledPromptIds.has(responsePromptId)
+        ) {
+          return;
+        }
+        if (!pendingPrompt) {
+          return;
+        }
         const promptError = message.error
           ? errorMessage(message, "Melody 请求失败")
           : undefined;
+        const promptResponse = promptResponseDisposition(
+          Boolean(message.error),
+          pendingPrompt.responseReceivedAt !== undefined,
+        );
+        if (promptResponse === "duplicate") {
+          return;
+        }
+        const promptSessionId = pendingPrompt?.acpSessionId;
+        const currentAcpSessionId = get().acpSessionId;
+        const isBackgroundPrompt =
+          Boolean(promptSessionId) &&
+          Boolean(currentAcpSessionId) &&
+          promptSessionId !== currentAcpSessionId;
+        const promptUsage = contextUsageFromResult(
+          message.result,
+          isBackgroundPrompt && promptSessionId
+            ? get().backgroundContextUsage[promptSessionId]
+            : get().contextUsage,
+        );
+
+        // 后台会话的 prompt 响应只更新缓冲上下文，不污染当前会话状态。
+        if (isBackgroundPrompt && promptSessionId) {
+          if (promptResponse === "accepted") {
+            pendingPrompts.set(
+              promptId,
+              markPromptResponseReceived(pendingPrompt, Date.now()),
+            );
+            if (promptUsage) {
+              set((state) => ({
+                backgroundContextUsage: {
+                  ...state.backgroundContextUsage,
+                  [promptSessionId]: promptUsage,
+                },
+              }));
+            }
+            return;
+          }
+
+          removePendingPrompt(promptId);
+          set((state) => ({
+            runningSessions: pendingPrompt
+              ? {
+                  ...state.runningSessions,
+                  [pendingPrompt.localSessionId]: false,
+                }
+              : state.runningSessions,
+            backgroundTimelines: {
+              ...state.backgroundTimelines,
+              [promptSessionId]: appendAgentError(
+                state.backgroundTimelines[promptSessionId] ?? [],
+                promptError ?? "Melody 请求失败",
+              ),
+            },
+          }));
+          return;
+        }
+
+        if (promptResponse === "accepted") {
+          pendingPrompts.set(
+            promptId,
+            markPromptResponseReceived(pendingPrompt, Date.now()),
+          );
+          if (promptUsage) {
+            set({ contextUsage: promptUsage });
+          }
+          return;
+        }
+
+        removePendingPrompt(promptId);
         set((state) => ({
           runningSessions: pendingPrompt
             ? {
@@ -1681,258 +1802,253 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
                 [pendingPrompt.localSessionId]: false,
               }
             : state.runningSessions,
+          acpPhase: "error",
+          chatStatus: "error",
+          status: promptError
+            ? { ...state.status, message: promptError }
+            : state.status,
+          timeline: appendAgentError(
+            state.timeline,
+            promptError ?? "Melody 请求失败",
+          ),
+        }));
+        return;
+      }
+
+      if (
+        message.method === "session/request_permission" &&
+        message.id !== undefined
+      ) {
+        const params = message.params ?? {};
+        markPromptActivity(
+          stringValue(params.sessionId) ?? get().acpSessionId,
+        );
+        const tool = objectValue(params.toolCall) ?? {};
+        const toolCallId =
+          stringValue(tool.toolCallId) ?? `permission-${String(message.id)}`;
+        const options = parsePermissionOptions(params.options);
+
+        set((state) => {
+          const withTool = upsertTool(state.timeline, {
+            ...tool,
+            toolCallId,
+          });
+          return {
+            timeline: withTool.map((entry) =>
+              entry.kind === "tool" && entry.toolCallId === toolCallId
+                ? {
+                    ...entry,
+                    permission: "pending",
+                    permissionRequestId: message.id,
+                    permissionOptions: options,
+                  }
+                : entry,
+            ),
+          };
+        });
+
+        const projectId = useWorkspaceStore.getState().activeProject?.id;
+        const title = stringValue(tool.title) ?? "工具调用";
+        const command = toolCommand(tool);
+        if (projectId) {
+          const rule = await findPermissionRule(
+            projectId,
+            permissionToolKey(title, command),
+          );
+          const option = rule
+            ? options.find((item) =>
+                rule.decision === "deny"
+                  ? item.kind.startsWith("reject")
+                  : item.kind.startsWith("allow"),
+              )
+            : undefined;
+          if (rule && option) {
+            set((state) => ({
+              timeline: state.timeline.map((entry) =>
+                entry.kind === "tool" && entry.toolCallId === toolCallId
+                  ? {
+                      ...entry,
+                      permission:
+                        rule.decision === "deny" ? "denied" : "allowed",
+                    }
+                  : entry,
+              ),
+            }));
+            await sendAcp({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: {
+                outcome: {
+                  outcome: "selected",
+                  optionId: option.optionId,
+                },
+              },
+            });
+          }
+        }
+        return;
+      }
+
+      if (!isSessionUpdateMethod(message.method)) {
+        return;
+      }
+
+      const updateParams = extractSessionUpdateParams(message);
+      const update = objectValue(updateParams?.update);
+      const messageSessionId = updateParams
+        ? stringValue(updateParams.sessionId)
+        : undefined;
+      const currentAcpSessionId = get().acpSessionId;
+      const routedSessionId = messageSessionId ?? currentAcpSessionId;
+      if (!routedSessionId) {
+        return;
+      }
+      const metadata = notificationMetadata(updateParams);
+      if (
+        metadata.promptId &&
+        cancelledPromptIds.has(metadata.promptId)
+      ) {
+        return;
+      }
+      markPromptActivity(routedSessionId);
+      let startsFullReplay = false;
+      if (metadata.isReplay && !fullReplayStarted.has(routedSessionId)) {
+        fullReplayStarted.add(routedSessionId);
+        sessionEventDeduplicator.reset(routedSessionId);
+        startsFullReplay = true;
+      }
+      if (!sessionEventDeduplicator.accept(routedSessionId, metadata.eventId)) {
+        return;
+      }
+      const updateType = stringValue(update?.sessionUpdate);
+      const echoBlocks = pendingUserEchoBlocks.get(routedSessionId) ?? 0;
+      const skipUserEcho =
+        updateType === "user_message_chunk" &&
+        !metadata.isReplay &&
+        echoBlocks > 0;
+      if (skipUserEcho) {
+        if (echoBlocks === 1) {
+          pendingUserEchoBlocks.delete(routedSessionId);
+        } else {
+          pendingUserEchoBlocks.set(routedSessionId, echoBlocks - 1);
+        }
+      }
+      set((state) => {
+        const nextSubagents = applySubagentUpdate(
+          state.subagents,
+          update,
+          routedSessionId,
+          startsFullReplay,
+        );
+        return nextSubagents === state.subagents
+          ? state
+          : { subagents: nextSubagents };
+      });
+
+      // 后台会话的 update：缓冲到 backgroundTimelines，不污染当前会话。
+      if (
+        messageSessionId &&
+        currentAcpSessionId &&
+        messageSessionId !== currentAcpSessionId
+      ) {
+        const buffered = startsFullReplay
+          ? []
+          : (get().backgroundTimelines[messageSessionId] ?? []);
+        const result: SessionUpdateResult = skipUserEcho
+          ? { timeline: buffered }
+          : applySessionUpdate(buffered, update, metadata.eventId);
+        if (result.completed) {
+          const pending = metadata.promptId
+            ? [...pendingPrompts.entries()].find(
+                ([, value]) => value.promptId === metadata.promptId,
+              )
+            : pendingPromptForSession(messageSessionId);
+          if (pending) {
+            removePendingPrompt(pending[0]);
+          }
+        }
+        set((state) => ({
           backgroundTimelines: {
             ...state.backgroundTimelines,
-            [promptSessionId]: promptError
-              ? appendAgentError(
-                  state.backgroundTimelines[promptSessionId] ?? [],
-                  promptError,
-                )
-              : stampLatestTurnAnalytics(
-                  state.backgroundTimelines[promptSessionId] ?? [],
-                  promptUsage,
-                  promptBillingUsage,
-                  undefined,
-                  undefined,
-                ),
+            [messageSessionId]: result.timeline,
           },
-          backgroundContextUsage: promptUsage
+          backgroundCursors: metadata.eventId
+            ? {
+                ...state.backgroundCursors,
+                [messageSessionId]: metadata.eventId,
+              }
+            : state.backgroundCursors,
+          backgroundContextUsage: result.contextUsage
             ? {
                 ...state.backgroundContextUsage,
-                [promptSessionId]: promptUsage,
+                [messageSessionId]: result.contextUsage,
               }
             : state.backgroundContextUsage,
         }));
         return;
       }
 
-      pendingPrompts.delete(promptId);
-      if (promptSessionId) {
-        pendingUserEchoBlocks.delete(promptSessionId);
-      }
-      const promptError = message.error
-        ? errorMessage(message, "Melody 请求失败")
-        : undefined;
-      const promptUsage = contextUsageFromResult(
-        message.result,
-        get().contextUsage,
-      );
-      const promptBillingUsage = billingUsageFromResult(message.result);
-      set((state) => ({
-        runningSessions: pendingPrompt
-          ? {
-              ...state.runningSessions,
-              [pendingPrompt.localSessionId]: false,
-            }
-          : state.runningSessions,
-        acpPhase: message.error ? "error" : "ready",
-        chatStatus: message.error ? "error" : "ready",
-        status: promptError
-          ? { ...state.status, message: promptError }
-          : state.status,
-        timeline: promptError
-          ? appendAgentError(state.timeline, promptError)
-          : stampLatestTurnAnalytics(
-              state.timeline,
-              promptUsage,
-              promptBillingUsage,
-              state.selectedReasoningEffort,
-              state.selectedSessionModeId,
-            ),
-        ...(promptUsage ? { contextUsage: promptUsage } : {}),
-      }));
-      return;
-    }
-
-    if (message.method === "session/request_permission" && message.id !== undefined) {
-      const params = message.params ?? {};
-      const tool = objectValue(params.toolCall) ?? {};
-      const toolCallId =
-        stringValue(tool.toolCallId) ?? `permission-${String(message.id)}`;
-      const options = parsePermissionOptions(params.options);
-
-      set((state) => {
-        const withTool = upsertTool(state.timeline, {
-          ...tool,
-          toolCallId,
-        });
-        return {
-          timeline: withTool.map((entry) =>
-            entry.kind === "tool" && entry.toolCallId === toolCallId
-              ? {
-                  ...entry,
-                  permission: "pending",
-                  permissionRequestId: message.id,
-                  permissionOptions: options,
-                }
-              : entry,
-          ),
-        };
-      });
-
-      const projectId =
-        useWorkspaceStore.getState().activeProject?.id;
-      const title = stringValue(tool.title) ?? "工具调用";
-      const command = toolCommand(tool);
-      if (projectId) {
-        const rule = await findPermissionRule(
-          projectId,
-          permissionToolKey(title, command),
-        );
-        const option = rule
-          ? options.find((item) =>
-              rule.decision === "deny"
-                ? item.kind.startsWith("reject")
-                : item.kind.startsWith("allow"),
+      // 当前会话的 update：正常处理。
+      const currentTimeline = startsFullReplay ? [] : get().timeline;
+      const authoritativeSessionModeId = sessionModeIdFromUpdate(update);
+      const result: SessionUpdateResult = skipUserEcho
+        ? { timeline: currentTimeline }
+        : applySessionUpdate(currentTimeline, update, metadata.eventId);
+      if (result.completed) {
+        const pending = metadata.promptId
+          ? [...pendingPrompts.entries()].find(
+              ([, value]) => value.promptId === metadata.promptId,
             )
-          : undefined;
-        if (rule && option) {
-          set((state) => ({
-            timeline: state.timeline.map((entry) =>
-              entry.kind === "tool" && entry.toolCallId === toolCallId
-                ? {
-                    ...entry,
-                    permission:
-                      rule.decision === "deny" ? "denied" : "allowed",
-                  }
-                : entry,
-            ),
-          }));
-          await sendAcp({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: {
-              outcome: {
-                outcome: "selected",
-                optionId: option.optionId,
-              },
-            },
-          });
+          : pendingPromptForSession(routedSessionId);
+        if (pending) {
+          removePendingPrompt(pending[0]);
         }
       }
-      return;
-    }
-
-    if (!isSessionUpdateMethod(message.method)) {
-      return;
-    }
-
-    const updateParams = extractSessionUpdateParams(message);
-    const update = objectValue(updateParams?.update);
-    const messageSessionId = updateParams
-      ? stringValue(updateParams.sessionId)
-      : undefined;
-    const currentAcpSessionId = get().acpSessionId;
-    const routedSessionId = messageSessionId ?? currentAcpSessionId;
-    if (!routedSessionId) {
-      return;
-    }
-    const metadata = notificationMetadata(updateParams);
-    let startsFullReplay = false;
-    if (metadata.isReplay && !fullReplayStarted.has(routedSessionId)) {
-      fullReplayStarted.add(routedSessionId);
-      sessionEventDeduplicator.reset(routedSessionId);
-      startsFullReplay = true;
-    }
-    if (
-      !sessionEventDeduplicator.accept(
-        routedSessionId,
-        metadata.eventId,
-      )
-    ) {
-      return;
-    }
-    const updateType = stringValue(update?.sessionUpdate);
-    const echoBlocks = pendingUserEchoBlocks.get(routedSessionId) ?? 0;
-    const skipUserEcho =
-      updateType === "user_message_chunk" &&
-      !metadata.isReplay &&
-      echoBlocks > 0;
-    if (skipUserEcho) {
-      if (echoBlocks === 1) {
-        pendingUserEchoBlocks.delete(routedSessionId);
-      } else {
-        pendingUserEchoBlocks.set(routedSessionId, echoBlocks - 1);
-      }
-    }
-    set((state) => {
-      const nextSubagents = applySubagentUpdate(
-        state.subagents,
-        update,
-        routedSessionId,
-        startsFullReplay,
-      );
-      return nextSubagents === state.subagents
-        ? state
-        : { subagents: nextSubagents };
-    });
-
-    // 后台会话的 update：缓冲到 backgroundTimelines，不污染当前会话。
-    if (
-      messageSessionId &&
-      currentAcpSessionId &&
-      messageSessionId !== currentAcpSessionId
-    ) {
-      const buffered = startsFullReplay
-        ? []
-        : (get().backgroundTimelines[messageSessionId] ?? []);
-      const result: SessionUpdateResult = skipUserEcho
-        ? { timeline: buffered }
-        : applySessionUpdate(buffered, update, metadata.eventId);
       set((state) => ({
-        backgroundTimelines: {
-          ...state.backgroundTimelines,
-          [messageSessionId]: result.timeline,
-        },
-        backgroundCursors: metadata.eventId
+        timeline: result.timeline,
+        ...(metadata.eventId ? { acpCursor: metadata.eventId } : {}),
+        ...(result.streaming ? { chatStatus: "streaming" as const } : {}),
+        ...(result.completed
           ? {
-              ...state.backgroundCursors,
-              [messageSessionId]: metadata.eventId,
+              acpPhase: result.error ? ("error" as const) : ("ready" as const),
+              chatStatus: result.error
+                ? ("error" as const)
+                : ("ready" as const),
+              runningSessions: state.localSessionId
+                ? { ...state.runningSessions, [state.localSessionId]: false }
+                : state.runningSessions,
             }
-          : state.backgroundCursors,
-        backgroundContextUsage: result.contextUsage
+          : {}),
+        ...(result.error
           ? {
-              ...state.backgroundContextUsage,
-              [messageSessionId]: result.contextUsage,
+              acpPhase: "error" as const,
+              chatStatus: "error" as const,
+              status: { ...state.status, message: result.error },
             }
-          : state.backgroundContextUsage,
+          : {}),
+        ...(result.contextUsage ? { contextUsage: result.contextUsage } : {}),
+        ...(authoritativeSessionModeId
+          ? {
+              selectedSessionModeId: authoritativeSessionModeId,
+              pendingSessionModeId: undefined,
+            }
+          : {}),
       }));
-      return;
+    } catch (reason) {
+      const detail = reasonMessage(reason);
+      clearTransientState();
+      set((state) => ({
+        acpPhase: "error",
+        chatStatus: "error",
+        runningSessions: state.localSessionId
+          ? { ...state.runningSessions, [state.localSessionId]: false }
+          : state.runningSessions,
+        status: {
+          ...state.status,
+          message: `ACP 事件处理失败：${detail}`,
+        },
+      }));
     }
-
-    // 当前会话的 update：正常处理。
-    const currentTimeline = startsFullReplay ? [] : get().timeline;
-    const authoritativeSessionModeId = sessionModeIdFromUpdate(update);
-    const result: SessionUpdateResult = skipUserEcho
-      ? { timeline: currentTimeline }
-      : applySessionUpdate(
-          currentTimeline,
-          update,
-          metadata.eventId,
-        );
-    set((state) => ({
-      timeline: result.timeline,
-      ...(metadata.eventId ? { acpCursor: metadata.eventId } : {}),
-      ...(result.streaming
-        ? { chatStatus: "streaming" as const }
-        : {}),
-      ...(result.error
-        ? {
-            acpPhase: "error" as const,
-            chatStatus: "error" as const,
-            status: { ...state.status, message: result.error },
-          }
-        : {}),
-      ...(result.contextUsage
-        ? { contextUsage: result.contextUsage }
-        : {}),
-      ...(authoritativeSessionModeId
-        ? {
-            selectedSessionModeId: authoritativeSessionModeId,
-            pendingSessionModeId: undefined,
-          }
-        : {}),
-    }));
   },
   submitPrompt: async (content, attachments = []) => {
     const trimmed = content.trim();
@@ -2041,27 +2157,49 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }));
 
     if (!isTauriRuntime()) {
-      window.setTimeout(() => {
+      const sessionId = get().acpSessionId;
+      if (!sessionId || !localSessionId) {
         set((state) => ({
-          chatStatus: "ready",
-          runningSessions: localSessionId
-            ? {
-                ...state.runningSessions,
-                [localSessionId]: false,
-              }
-            : state.runningSessions,
-          timeline: [
-            ...state.timeline,
-            {
-              id: `assistant-${Date.now()}`,
-              kind: "message",
-              role: "assistant",
-              content:
-                "浏览器预览使用相同的时间线渲染器；在桌面应用中，此请求会通过 ACP session/prompt 发送。",
-            },
-          ],
+          acpPhase: "error",
+          chatStatus: "error",
+          status: {
+            ...state.status,
+            message: "预览 ACP 会话尚未就绪，请重新打开会话。",
+          },
         }));
-      }, 500);
+        return;
+      }
+      const id = nextPromptRequestId++;
+      const promptId = `melody-work-${localSessionId}-${id}`;
+      pendingPrompts.set(id, {
+        acpSessionId: sessionId,
+        localSessionId,
+        promptId,
+        createdAt: Date.now(),
+      });
+      set({ acpPhase: "prompting" });
+      try {
+        await sendAcp({
+          jsonrpc: "2.0",
+          id,
+          method: "session/prompt",
+          params: { sessionId, prompt, _meta: { promptId } },
+        });
+        if (pendingPrompts.has(id)) {
+          armPromptFirstEventTimeout(id);
+        }
+      } catch (reason) {
+        removePendingPrompt(id);
+        set((state) => ({
+          acpPhase: "error",
+          chatStatus: "error",
+          runningSessions: {
+            ...state.runningSessions,
+            [localSessionId]: false,
+          },
+          status: { ...state.status, message: reasonMessage(reason) },
+        }));
+      }
       return;
     }
 
@@ -2087,7 +2225,13 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
     const id = nextPromptRequestId++;
-    pendingPrompts.set(id, { acpSessionId: sessionId, localSessionId });
+    const promptId = `melody-work-${localSessionId}-${id}`;
+    pendingPrompts.set(id, {
+      acpSessionId: sessionId,
+      localSessionId,
+      promptId,
+      createdAt: Date.now(),
+    });
     pendingUserEchoBlocks.set(sessionId, prompt.length);
     set({ acpPhase: "prompting" });
     try {
@@ -2098,11 +2242,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         params: {
           sessionId,
           prompt,
+          _meta: { promptId },
         },
       });
+      if (pendingPrompts.has(id)) {
+        armPromptFirstEventTimeout(id);
+      }
     } catch (reason) {
-      pendingPrompts.delete(id);
-      pendingUserEchoBlocks.delete(sessionId);
+      removePendingPrompt(id);
       set((state) => ({
         acpPhase: "error",
         chatStatus: "error",
@@ -2115,13 +2262,77 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       throw reason;
     }
   },
+  cancelPrompt: async (reason = "user") => {
+    const stateBeforeCancel = get();
+    const localSessionId = stateBeforeCancel.localSessionId;
+    const sessionId = stateBeforeCancel.acpSessionId;
+    const pending = sessionId
+      ? pendingPromptForSession(sessionId)
+      : undefined;
+    if (
+      stateBeforeCancel.chatStatus !== "submitted" &&
+      stateBeforeCancel.chatStatus !== "streaming" &&
+      !pending
+    ) {
+      return;
+    }
+
+    const pendingRequestId = pending?.[0];
+    const pendingPrompt = pending?.[1];
+    if (pendingRequestId !== undefined) {
+      removePendingPrompt(pendingRequestId);
+      if (pendingPrompt) {
+        rememberCancelledPrompt(pendingPrompt.promptId);
+      }
+    }
+
+    const timeoutMessage =
+      "发送请求后 30 秒内未收到任何 ACP 进展事件，已自动停止。";
+    try {
+      if (sessionId && isTauriRuntime()) {
+        await sendAcp({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: {
+            sessionId,
+            _meta: {
+              ...(pendingPrompt ? { cancelPromptId: pendingPrompt.promptId } : {}),
+              cancelSubagents: true,
+              cancelTrigger: reason === "timeout" ? "timeout" : "mouse",
+            },
+          },
+        });
+      }
+      set((state) => ({
+        acpPhase: "ready",
+        chatStatus: "ready",
+        timeline:
+          reason === "timeout"
+            ? appendAgentError(state.timeline, timeoutMessage)
+            : settleStreamingEntries(state.timeline),
+        runningSessions: localSessionId
+          ? { ...state.runningSessions, [localSessionId]: false }
+          : state.runningSessions,
+        ...(reason === "timeout"
+          ? { status: { ...state.status, message: timeoutMessage } }
+          : {}),
+      }));
+    } catch (cancelError) {
+      const detail = reasonMessage(cancelError);
+      set((state) => ({
+        acpPhase: "error",
+        chatStatus: "error",
+        timeline: appendAgentError(state.timeline, `取消当前请求失败：${detail}`),
+        runningSessions: localSessionId
+          ? { ...state.runningSessions, [localSessionId]: false }
+          : state.runningSessions,
+        status: { ...state.status, message: detail },
+      }));
+    }
+  },
   selectModel: async (modelId) => {
     const state = get();
-    if (
-      !modelId ||
-      modelId === state.selectedModelId ||
-      state.pendingModelId
-    ) {
+    if (!modelId || modelId === state.selectedModelId || state.pendingModelId) {
       return;
     }
     if (!isTauriRuntime()) {
@@ -2131,20 +2342,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       set({
         selectedModelId: modelId,
         selectedReasoningEffort: selectedModel?.reasoningEffort,
-        contextUsage: contextUsageForModel(
-          state.availableModels,
-          modelId,
-        ),
+        contextUsage: contextUsageForModel(state.availableModels, modelId),
       });
       return;
     }
     if (!state.acpSessionId) {
       set({
         selectedModelId: modelId,
-        contextUsage: contextUsageForModel(
-          state.availableModels,
-          modelId,
-        ),
+        contextUsage: contextUsageForModel(state.availableModels, modelId),
         status: {
           ...state.status,
           message: "所选模型将在下一个会话中使用。",
@@ -2285,11 +2490,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           ? "abandoned"
           : "changes-requested";
     set((state) => ({
-      timeline: settlePlanApproval(
-        state.timeline,
-        entryId,
-        settledStatus,
-      ),
+      timeline: settlePlanApproval(state.timeline, entryId, settledStatus),
     }));
 
     if (!isTauriRuntime()) {
@@ -2301,9 +2502,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         id: entry.requestId,
         result: {
           outcome,
-          ...(normalizedFeedback
-            ? { feedback: normalizedFeedback }
-            : {}),
+          ...(normalizedFeedback ? { feedback: normalizedFeedback } : {}),
         },
       });
     } catch (reason) {
@@ -2327,10 +2526,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
   resolvePermission: async (entryId, optionId) => {
     const entry = get().timeline.find((item) => item.id === entryId);
-    if (
-      entry?.kind !== "tool" ||
-      entry.permissionRequestId === undefined
-    ) {
+    if (entry?.kind !== "tool" || entry.permissionRequestId === undefined) {
       return;
     }
     const projectDecision = optionId.startsWith("project:")
@@ -2346,12 +2542,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     if (!option) {
       return;
     }
-    const permission =
-      option?.kind.startsWith("reject") ? "denied" : "allowed";
+    const permission = option?.kind.startsWith("reject") ? "denied" : "allowed";
 
     if (projectDecision) {
-      const projectId =
-        useWorkspaceStore.getState().activeProject?.id;
+      const projectId = useWorkspaceStore.getState().activeProject?.id;
       if (projectId) {
         await upsertPermissionRule({
           projectId,

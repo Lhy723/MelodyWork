@@ -93,6 +93,7 @@ interface AgentComposerProps {
   status: "ready" | "submitted" | "streaming" | "error";
   onModelChange: (modelId: string) => void;
   onReasoningEffortChange: (effort: string) => void;
+  onStop: () => void;
   onSubmit: (
     content: string,
     attachments: AgentPromptAttachment[],
@@ -104,8 +105,7 @@ const permissionModes = [
     id: "ask",
     label: "操作前询问",
     shortLabel: "询问",
-    description:
-      "编辑外部文件或使用网络前始终询问。",
+    description: "编辑外部文件或使用网络前始终询问。",
     icon: HandIcon,
   },
   {
@@ -119,8 +119,7 @@ const permissionModes = [
     id: "always-approve",
     label: "完全访问",
     shortLabel: "完全访问",
-    description:
-      "允许不受限制地访问本机文件和网络。",
+    description: "允许不受限制地访问本机文件和网络。",
     icon: ShieldAlertIcon,
   },
 ] satisfies {
@@ -210,6 +209,7 @@ export function AgentComposer({
   status,
   onModelChange,
   onReasoningEffortChange,
+  onStop,
   onSubmit,
 }: AgentComposerProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
@@ -221,10 +221,7 @@ export function AgentComposer({
   const selectedModelProvider = selectedModel
     ? modelProvider(selectedModel)
     : undefined;
-  const modelGroups = useMemo(
-    () => groupModelsByProvider(models),
-    [models],
-  );
+  const modelGroups = useMemo(() => groupModelsByProvider(models), [models]);
   const effectiveContextUsage =
     contextUsage ??
     (selectedModel?.contextWindowTokens
@@ -250,10 +247,10 @@ export function AgentComposer({
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 pb-5 sm:px-6">
+    <div className="harness-composer-wrap mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6">
       <PromptInput
         accept="image/*,.txt,.md,.json,.toml"
-        className="[&_[data-slot=input-group]]:rounded-2xl"
+        className="harness-composer [&_[data-slot=input-group]]:rounded-[18px]"
         maxFileSize={8 * 1024 * 1024}
         maxFiles={8}
         multiple
@@ -292,9 +289,7 @@ export function AgentComposer({
                     {modelChanging ? (
                       <LoaderCircleIcon className="animate-spin" />
                     ) : selectedModelProvider ? (
-                      <ModelProviderMark
-                        provider={selectedModelProvider}
-                      />
+                      <ModelProviderMark provider={selectedModelProvider} />
                     ) : (
                       <BotIcon />
                     )}
@@ -310,9 +305,7 @@ export function AgentComposer({
                 >
                   <ModelSelectorInput placeholder="搜索模型…" />
                   <ModelSelectorList>
-                    <ModelSelectorEmpty>
-                      没有找到匹配的模型
-                    </ModelSelectorEmpty>
+                    <ModelSelectorEmpty>没有找到匹配的模型</ModelSelectorEmpty>
                     {modelGroups.map(({ provider, models: groupModels }) => (
                       <ModelSelectorGroup
                         heading={provider.name}
@@ -332,9 +325,7 @@ export function AgentComposer({
                             value={`${model.name} ${model.id} ${provider.name}`}
                           >
                             <ModelProviderMark provider={provider} />
-                            <ModelSelectorName>
-                              {model.name}
-                            </ModelSelectorName>
+                            <ModelSelectorName>{model.name}</ModelSelectorName>
                             <span className="max-w-44 truncate text-muted-foreground text-xs">
                               {model.id}
                             </span>
@@ -458,16 +449,14 @@ export function AgentComposer({
                         <Icon
                           className={cn(
                             "mt-px size-4",
-                            mode.id === "always-approve" &&
-                              "text-orange-600",
+                            mode.id === "always-approve" && "text-orange-600",
                           )}
                         />
                         <span className="min-w-0">
                           <span
                             className={cn(
                               "block font-medium text-sm leading-4",
-                              mode.id === "always-approve" &&
-                                "text-orange-600",
+                              mode.id === "always-approve" && "text-orange-600",
                             )}
                           >
                             {mode.label}
@@ -475,8 +464,7 @@ export function AgentComposer({
                           <span
                             className={cn(
                               "block whitespace-normal text-[11px] text-muted-foreground leading-3.5",
-                              mode.id === "always-approve" &&
-                                "text-orange-600",
+                              mode.id === "always-approve" && "text-orange-600",
                             )}
                           >
                             {mode.description}
@@ -507,7 +495,7 @@ export function AgentComposer({
               </Context>
             ) : null}
           </PromptInputTools>
-          <PromptInputSubmit status={status} />
+          <PromptInputSubmit onStop={onStop} status={status} />
         </PromptInputFooter>
       </PromptInput>
     </div>

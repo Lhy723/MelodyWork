@@ -19,6 +19,7 @@ export const isSessionUpdateMethod = (method?: string): boolean =>
 export interface NotificationMetadata {
   eventId?: string;
   isReplay: boolean;
+  promptId?: string;
 }
 
 export const parseTimelineProjection = (
@@ -76,9 +77,9 @@ export const notificationMetadata = (
       ? (value as Record<string, unknown>)
       : undefined;
   return {
-    eventId:
-      typeof meta?.eventId === "string" ? meta.eventId : undefined,
+    eventId: typeof meta?.eventId === "string" ? meta.eventId : undefined,
     isReplay: meta?.isReplay === true,
+    ...(typeof meta?.promptId === "string" ? { promptId: meta.promptId } : {}),
   };
 };
 
@@ -90,17 +91,23 @@ export const notificationMetadata = (
  */
 export class SessionEventDeduplicator {
   readonly capacityPerSession: number;
+  readonly maxSessions: number;
   readonly #eventIds = new Map<
     string,
     { order: string[]; values: Set<string> }
   >();
 
-  constructor(capacityPerSession = 4096) {
+  constructor(capacityPerSession = 4096, maxSessions = 128) {
     this.capacityPerSession = capacityPerSession;
+    this.maxSessions = maxSessions;
   }
 
   reset(sessionId: string) {
     this.#eventIds.delete(sessionId);
+  }
+
+  clear() {
+    this.#eventIds.clear();
   }
 
   accept(sessionId: string, eventId?: string): boolean {
@@ -120,6 +127,15 @@ export class SessionEventDeduplicator {
       const expired = tracked.order.shift();
       if (expired) {
         tracked.values.delete(expired);
+      }
+    }
+    if (
+      !this.#eventIds.has(sessionId) &&
+      this.#eventIds.size >= this.maxSessions
+    ) {
+      const oldestSession = this.#eventIds.keys().next().value;
+      if (oldestSession !== undefined) {
+        this.#eventIds.delete(oldestSession);
       }
     }
     this.#eventIds.set(sessionId, tracked);

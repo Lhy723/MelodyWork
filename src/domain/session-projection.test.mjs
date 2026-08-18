@@ -62,36 +62,42 @@ test("recognizes live and durable Melody session update rails", () => {
 
 test("does not mark legacy tool rows as a current projection", () => {
   assert.equal(
-    timelineProjectionVersion([{
-      id: "tool-legacy",
-      kind: "tool",
-      title: "Edit file",
-      command: "src/app.ts",
-      output: "",
-    }]),
+    timelineProjectionVersion([
+      {
+        id: "tool-legacy",
+        kind: "tool",
+        title: "Edit file",
+        command: "src/app.ts",
+        output: "",
+      },
+    ]),
     TIMELINE_PROJECTION_VERSION - 1,
   );
   assert.equal(
-    timelineProjectionVersion([{
-      id: "tool-current",
-      kind: "tool",
-      title: "Edit file",
-      command: "src/app.ts",
-      output: "",
-      activity: { operation: "edit" },
-    }]),
+    timelineProjectionVersion([
+      {
+        id: "tool-current",
+        kind: "tool",
+        title: "Edit file",
+        command: "src/app.ts",
+        output: "",
+        activity: { operation: "edit" },
+      },
+    ]),
     TIMELINE_PROJECTION_VERSION,
   );
 });
 
 test("replays an orphaned stream but preserves an active stream", () => {
-  const streamingTimeline = [{
-    id: "assistant-streaming",
-    kind: "message",
-    role: "assistant",
-    content: "已经完成的内容",
-    streaming: true,
-  }];
+  const streamingTimeline = [
+    {
+      id: "assistant-streaming",
+      kind: "message",
+      role: "assistant",
+      content: "已经完成的内容",
+      streaming: true,
+    },
+  ];
   assert.equal(
     timelineProjectionVersion(streamingTimeline),
     TIMELINE_PROJECTION_VERSION - 1,
@@ -111,6 +117,19 @@ test("reads the Melody Build replay and cursor metadata", () => {
   );
 });
 
+test("preserves the prompt id used to ignore late cancelled events", () => {
+  assert.deepEqual(
+    notificationMetadata({
+      _meta: { eventId: "turn-3", promptId: "melody-work-session-101" },
+    }),
+    {
+      eventId: "turn-3",
+      isReplay: false,
+      promptId: "melody-work-session-101",
+    },
+  );
+});
+
 test("applies an event id once per session without comparing counters", () => {
   const events = new SessionEventDeduplicator(2);
   assert.equal(events.accept("s1", "s1-9"), true);
@@ -119,4 +138,12 @@ test("applies an event id once per session without comparing counters", () => {
   assert.equal(events.accept("s2", "s1-9"), true);
   assert.equal(events.accept("s1", "s1-3"), true);
   assert.equal(events.accept("s1", "s1-9"), true);
+});
+
+test("bounds the number of sessions retained by the deduplicator", () => {
+  const events = new SessionEventDeduplicator(2, 2);
+  assert.equal(events.accept("s1", "event-1"), true);
+  assert.equal(events.accept("s2", "event-2"), true);
+  assert.equal(events.accept("s3", "event-3"), true);
+  assert.equal(events.accept("s1", "event-1"), true);
 });

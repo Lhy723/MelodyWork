@@ -20,7 +20,7 @@ import {
   MessageSquareTextIcon,
   RotateCcwIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 
 type PlanTimelineEntryValue = Extract<TimelineEntry, { kind: "plan" }>;
 
@@ -51,7 +51,7 @@ const planDescription = (entry: PlanTimelineEntryValue) => {
   }
 };
 
-export function PlanTimelineEntry({
+export const PlanTimelineEntry = memo(function PlanTimelineEntry({
   entry,
   onDecision,
   renderedContent,
@@ -153,4 +153,4 @@ export function PlanTimelineEntry({
       ) : null}
     </Plan>
   );
-}
+});

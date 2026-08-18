@@ -86,7 +86,7 @@ export function PluginDetailsView({
     setDeleting(true);
     setDeleteError(undefined);
     try {
-      await uninstallMelodyPlugin(plugin.name);
+      await uninstallMelodyPlugin(cwd, plugin.name);
       setDeleteOpen(false);
       await onDeleted();
     } catch (reason) {

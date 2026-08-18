@@ -3,8 +3,8 @@
 ## Source truth
 
 - Reference: `/var/folders/j8/z9355vvj0yl2ycxnt1j2fj1r0000gn/T/codex-clipboard-e76561a5-e27b-45c4-9ef7-af4e30c7dccc.png`
-- Implementation capture: `design-qa-implementation.png`
-- Side-by-side comparison: `design-qa-comparison.png`
+- Implementation capture: generated locally; large PNG artifacts are intentionally not tracked.
+- Side-by-side comparison: generated locally; large PNG artifacts are intentionally not tracked.
 - Focused region: the complete left sidebar, including navigation, project/task hierarchy, selection state, and bottom settings row.
 
 ## Render conditions

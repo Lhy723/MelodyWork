@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { strFromU8, unzipSync, type Unzipped } from "fflate";
+import { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
 
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,7 @@ import {
 } from "@/features/files/file-preview-utils";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
+loader.config({ monaco });
 
 const kindLabel: Record<PreviewKind, string> = {
   audio: "音频",

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   getAgentStatus,
@@ -14,6 +14,11 @@ export const useAgentBridge = (session?: SessionRecord) => {
   const appendStderr = useAgentStore((state) => state.appendStderr);
   const receiveAcp = useAgentStore((state) => state.receiveAcp);
   const beginSession = useAgentStore((state) => state.beginSession);
+  const sessionId = session?.id;
+  const sessionCwd = session?.cwd;
+  const sessionAcpId = session?.acpSessionId;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     let disposed = false;
@@ -26,11 +31,19 @@ export const useAgentBridge = (session?: SessionRecord) => {
     };
 
     const connect = async () => {
-      if (!session) {
+      if (!sessionId || !sessionCwd) {
+        return;
+      }
+      const currentSession = sessionRef.current;
+      if (!currentSession) {
         return;
       }
       try {
-        const listeners = await subscribeToAcp(receiveAcp, appendStderr);
+        const listeners = await subscribeToAcp(
+          receiveAcp,
+          appendStderr,
+          setStatus,
+        );
         if (disposed) {
           removeListeners(listeners);
           return;
@@ -43,7 +56,7 @@ export const useAgentBridge = (session?: SessionRecord) => {
         setStatus(current);
         let running = current;
         if (current.phase === "stopped") {
-          running = await startAgent(session.cwd);
+          running = await startAgent(sessionCwd);
           if (!disposed) {
             setStatus(running);
           }
@@ -53,12 +66,12 @@ export const useAgentBridge = (session?: SessionRecord) => {
           (running.phase === "running" || !isTauriRuntime())
         ) {
           await beginSession(
-            session.cwd,
-            session.id,
-            session.acpSessionId,
-            session.timelineJson,
-            session.acpCursor,
-            session.timelineVersion,
+            sessionCwd,
+            sessionId,
+            sessionAcpId,
+            currentSession.timelineJson,
+            currentSession.acpCursor,
+            currentSession.timelineVersion,
           );
         }
       } catch (reason) {
@@ -82,7 +95,9 @@ export const useAgentBridge = (session?: SessionRecord) => {
     appendStderr,
     beginSession,
     receiveAcp,
-    session?.id,
+    sessionAcpId,
+    sessionCwd,
+    sessionId,
     setStatus,
   ]);
 };

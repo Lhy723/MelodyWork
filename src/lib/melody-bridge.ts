@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AcpEnvelope, AgentStatus } from "@/domain/acp";
@@ -34,6 +33,12 @@ import type {
   UpdateSessionRequest,
   WorkspaceEntry,
 } from "@/domain/workspace";
+import {
+  PREVIEW_AGENT_MESSAGE,
+  PREVIEW_FIXTURE_VERSION,
+  PREVIEW_GIT_CHANGES,
+  previewGitDiff,
+} from "@/lib/preview-fixtures";
 
 declare global {
   interface Window {
@@ -139,11 +144,176 @@ export const startAgent = async (cwd: string): Promise<AgentStatus> => {
   });
 };
 
-export const stopAgent = async (): Promise<AgentStatus> =>
-  invoke<AgentStatus>("stop_agent");
+export const stopAgent = async (): Promise<AgentStatus> => {
+  if (!isTauriRuntime()) {
+    return { phase: "stopped", message: "浏览器预览" };
+  }
+  return invoke<AgentStatus>("stop_agent");
+};
+
+type PreviewAcpListener = (message: AcpEnvelope) => void;
+const previewAcpListeners = new Set<PreviewAcpListener>();
+const previewAcpStderrListeners = new Set<(line: string) => void>();
+let previewSequence = 0;
+
+const emitPreviewAcp = (message: AcpEnvelope, delay = 0) => {
+  window.setTimeout(() => {
+    for (const listener of previewAcpListeners) {
+      listener(message);
+    }
+  }, delay);
+};
+
+const dispatchPreviewAcp = (message: AcpEnvelope) => {
+  const method = message.method;
+  const params = message.params ?? {};
+  const sessionId =
+    typeof params.sessionId === "string" ? params.sessionId : undefined;
+  const requestMeta =
+    params._meta !== null && typeof params._meta === "object"
+      ? (params._meta as Record<string, unknown>)
+      : undefined;
+  const promptId =
+    typeof requestMeta?.promptId === "string" ? requestMeta.promptId : undefined;
+  const fixtureMeta = { fixtureVersion: PREVIEW_FIXTURE_VERSION };
+  if (method === "initialize") {
+    emitPreviewAcp({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        _meta: {
+          ...fixtureMeta,
+          modelState: {
+            currentModelId: "grok-4.5",
+            availableModels: [
+              {
+                modelId: "grok-4.5",
+                name: "Grok 4.5",
+                _meta: {
+                  totalContextTokens: 128_000,
+                  supportsReasoningEffort: true,
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+    return;
+  }
+  if (method === "authenticate") {
+    emitPreviewAcp({ jsonrpc: "2.0", id: message.id, result: fixtureMeta });
+    return;
+  }
+  if (method === "session/new" || method === "session/load") {
+    const nextSessionId =
+      typeof params.sessionId === "string"
+        ? params.sessionId
+        : `preview-acp-${++previewSequence}`;
+    emitPreviewAcp({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        sessionId: nextSessionId,
+        _meta: fixtureMeta,
+        modes: {
+          currentModeId: "default",
+          availableModes: [
+            { id: "default", name: "标准" },
+            { id: "fast", name: "快速", description: "降低延迟的预览模式" },
+          ],
+        },
+      },
+    });
+    return;
+  }
+  if (method === "session/prompt" && sessionId) {
+    const eventPrefix = `preview-${++previewSequence}`;
+    emitPreviewAcp(
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: PREVIEW_AGENT_MESSAGE },
+          },
+          _meta: {
+            ...fixtureMeta,
+            eventId: `${eventPrefix}-chunk`,
+            ...(promptId ? { promptId } : {}),
+          },
+        },
+      },
+      20,
+    );
+    emitPreviewAcp(
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "turn_completed",
+            stopReason: "end_turn",
+            usage: {
+              inputTokens: 24,
+              outputTokens: 18,
+              modelCalls: 1,
+              apiDurationMs: 18,
+            },
+          },
+          _meta: {
+            ...fixtureMeta,
+            eventId: `${eventPrefix}-complete`,
+            ...(promptId ? { promptId } : {}),
+          },
+        },
+      },
+      40,
+    );
+    // ACP may acknowledge session/prompt before the turn emits its final
+    // session/update. Keep this ordering aligned with the desktop runtime.
+    emitPreviewAcp(
+      {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          _meta: {
+            ...fixtureMeta,
+            ...(promptId ? { promptId } : {}),
+            usage: {
+              inputTokens: 24,
+              outputTokens: 18,
+              cachedReadTokens: 0,
+              reasoningTokens: 0,
+              modelCalls: 1,
+              apiDurationMs: 18,
+              usageIsIncomplete: false,
+              costIsPartial: true,
+            },
+          },
+        },
+      },
+      10,
+    );
+    return;
+  }
+  if (method === "session/cancel" && sessionId) {
+    return;
+  }
+  if (
+    method === "session/set_model" ||
+    method === "session/set_mode"
+  ) {
+    emitPreviewAcp({ jsonrpc: "2.0", id: message.id, result: fixtureMeta });
+  }
+};
 
 export const sendAcp = async (message: AcpEnvelope): Promise<void> => {
   if (!isTauriRuntime()) {
+    dispatchPreviewAcp(message);
     return;
   }
   return invoke("send_acp", { message });
@@ -151,29 +321,7 @@ export const sendAcp = async (message: AcpEnvelope): Promise<void> => {
 
 export const getGitChanges = async (cwd: string): Promise<GitChange[]> => {
   if (!isTauriRuntime()) {
-    return [
-      {
-        path: "src-tauri/src/agent_runtime.rs",
-        status: " M",
-        staged: false,
-        additions: 48,
-        deletions: 6,
-      },
-      {
-        path: "src/stores/agent-store.ts",
-        status: " M",
-        staged: false,
-        additions: 72,
-        deletions: 21,
-      },
-      {
-        path: "src/features/git/change-review.tsx",
-        status: "??",
-        staged: false,
-        additions: 184,
-        deletions: 0,
-      },
-    ];
+    return PREVIEW_GIT_CHANGES.map((change) => ({ ...change }));
   }
   return invoke<GitChange[]>("git_changes", { cwd });
 };
@@ -183,23 +331,7 @@ export const getGitDiff = async (
   path: string,
 ): Promise<GitDiff> => {
   if (!isTauriRuntime()) {
-    return {
-      path,
-      binary: false,
-      content: [
-        `diff --git a/${path} b/${path}`,
-        `--- a/${path}`,
-        `+++ b/${path}`,
-        "@@ -18,6 +18,10 @@",
-        " export function AgentWorkspace() {",
-        "+  const changes = useGitChanges();",
-        "+  const [reviewOpen, setReviewOpen] = useState(false);",
-        "+",
-        "   useAgentBridge();",
-        "-  const status = \"Preview\";",
-        "+  const status = useAgentStore((state) => state.status);",
-      ].join("\n"),
-    };
+    return previewGitDiff(path);
   }
   return invoke<GitDiff>("git_diff", { cwd, path });
 };
@@ -294,9 +426,17 @@ export const removeGitWorktree = async (
 export const subscribeToAcp = async (
   onMessage: (message: AcpEnvelope) => void,
   onStderr: (line: string) => void,
+  onStatus?: (status: AgentStatus) => void,
 ): Promise<UnlistenFn[]> => {
   if (!isTauriRuntime()) {
-    return [];
+    const onMessageListener: PreviewAcpListener = onMessage;
+    const onStderrListener = onStderr;
+    previewAcpListeners.add(onMessageListener);
+    previewAcpStderrListeners.add(onStderrListener);
+    return [
+      () => previewAcpListeners.delete(onMessageListener),
+      () => previewAcpStderrListeners.delete(onStderrListener),
+    ];
   }
 
   const unlistenMessage = await listen<AcpEnvelope>(
@@ -307,7 +447,17 @@ export const subscribeToAcp = async (
     "melody://acp-stderr",
     (event) => onStderr(event.payload),
   );
-  return [unlistenMessage, unlistenStderr];
+  const unlistenStatus = onStatus
+    ? await listen<AgentStatus>(
+        "melody://agent-status",
+        (event) => onStatus(event.payload),
+      )
+    : undefined;
+  return [
+    unlistenMessage,
+    unlistenStderr,
+    ...(unlistenStatus ? [unlistenStatus] : []),
+  ];
 };
 
 const previewProject: ProjectRecord = {
@@ -366,12 +516,7 @@ export const pickWorkspaceDirectory = async (): Promise<string | undefined> => {
   if (!isTauriRuntime()) {
     return undefined;
   }
-  const selected = await open({
-    directory: true,
-    multiple: false,
-    title: "打开工作区",
-  });
-  return typeof selected === "string" ? selected : undefined;
+  return invoke<string | undefined>("pick_workspace_directory");
 };
 
 export const listStoredSessions = async (
@@ -498,16 +643,6 @@ export const writeWorkspaceFile = async (
   if (isTauriRuntime()) {
     await invoke("write_workspace_file", { root, path, content });
   }
-};
-
-export const runTerminalCommand = async (
-  cwd: string,
-  command: string,
-): Promise<string> => {
-  if (!isTauriRuntime()) {
-    return `preview-${Date.now()}`;
-  }
-  return invoke<string>("run_terminal_command", { cwd, command });
 };
 
 export const createTerminalSession = async (
@@ -848,11 +983,12 @@ export const setMelodyExtensionEnabled = async (
 };
 
 export const uninstallMelodyPlugin = async (
+  cwd: string,
   name: string,
   keepData = false,
 ): Promise<string> =>
   isTauriRuntime()
-    ? invoke<string>("uninstall_melody_plugin", { name, keepData })
+    ? invoke<string>("uninstall_melody_plugin", { cwd, name, keepData })
     : `已删除插件 ${name}。`;
 
 export const getMelodyPluginDetails = async (

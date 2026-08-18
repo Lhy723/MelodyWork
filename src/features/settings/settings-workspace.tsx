@@ -549,7 +549,7 @@ export function SettingsWorkspace({
     <section className="flex min-h-0 flex-1 flex-col bg-background">
       <header
         className={cn(
-          "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-4",
+          "harness-window-titlebar sidebar-aware-header flex shrink-0 items-center gap-3 border-b pr-4",
           macSafeArea ? "pl-24" : "pl-2",
         )}
         data-tauri-drag-region

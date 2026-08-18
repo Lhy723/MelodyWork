@@ -5,11 +5,7 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
-import {
-  Task,
-  TaskContent,
-  TaskTrigger,
-} from "@/components/ai-elements/task";
+import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import type {
   AgentToolDiffHunk,
@@ -126,8 +122,7 @@ const sequenceDiff = (oldLines: string[], newLines: string[]) => {
     } else if (
       newIndex < newLines.length &&
       (oldIndex === oldLines.length ||
-        matrix[oldIndex][newIndex + 1] >
-          matrix[oldIndex + 1][newIndex])
+        matrix[oldIndex][newIndex + 1] > matrix[oldIndex + 1][newIndex])
     ) {
       lines.push({ kind: "addition", text: newLines[newIndex] });
       newIndex += 1;
@@ -150,10 +145,7 @@ const numberedDiffLines = ({
   oldStartLine?: number;
   newStartLine?: number;
 }) => {
-  const rawLines = sequenceDiff(
-    splitLines(oldText),
-    splitLines(newText),
-  );
+  const rawLines = sequenceDiff(splitLines(oldText), splitLines(newText));
   let oldNumber = oldStartLine;
   let newNumber = newStartLine;
   return rawLines.map((line): DiffLine => {
@@ -175,10 +167,16 @@ const linesForHunk = (hunk: AgentToolDiffHunk) => {
   const contextBefore = splitLines(hunk.contextBefore);
   const contextAfter = splitLines(hunk.contextAfter);
   return numberedDiffLines({
-    oldText: [...contextBefore, ...splitLines(hunk.oldText), ...contextAfter]
-      .join("\n"),
-    newText: [...contextBefore, ...splitLines(hunk.newText), ...contextAfter]
-      .join("\n"),
+    oldText: [
+      ...contextBefore,
+      ...splitLines(hunk.oldText),
+      ...contextAfter,
+    ].join("\n"),
+    newText: [
+      ...contextBefore,
+      ...splitLines(hunk.newText),
+      ...contextAfter,
+    ].join("\n"),
     oldStartLine: Math.max(1, hunk.oldStartLine - contextBefore.length),
     newStartLine: Math.max(1, hunk.newStartLine - contextBefore.length),
   });
@@ -186,12 +184,14 @@ const linesForHunk = (hunk: AgentToolDiffHunk) => {
 
 const visibleDiffLines = (change: AgentToolFileChange): DiffLine[] => {
   if (change.hunks?.length) {
-    return change.hunks.flatMap((hunk, index) => [
-      ...(index > 0
-        ? [{ kind: "ellipsis", text: "…" } satisfies DiffLine]
-        : []),
-      ...linesForHunk(hunk),
-    ]).slice(0, 240);
+    return change.hunks
+      .flatMap((hunk, index) => [
+        ...(index > 0
+          ? [{ kind: "ellipsis", text: "…" } satisfies DiffLine]
+          : []),
+        ...linesForHunk(hunk),
+      ])
+      .slice(0, 240);
   }
   const numbered = numberedDiffLines({
     oldText: change.oldText,
@@ -273,9 +273,9 @@ const groupTitle = (tools: ToolTimelineEntry[]) => {
     const operation = active.activity?.operation ?? "other";
     return `${activityLabel(operation, true)}${operation === "execute" ? "命令" : "文件"}`;
   }
-  const operations = [...new Set(
-    tools.map((tool) => tool.activity?.operation ?? "other"),
-  )];
+  const operations = [
+    ...new Set(tools.map((tool) => tool.activity?.operation ?? "other")),
+  ];
   const labels: Record<AgentToolOperation, string> = {
     read: "读取了文件",
     search: "搜索了文件",
@@ -288,7 +288,10 @@ const groupTitle = (tools: ToolTimelineEntry[]) => {
   return operations.map((operation) => labels[operation]).join("、");
 };
 
-const DiffCard = ({ change, label }: {
+const DiffCard = ({
+  change,
+  label,
+}: {
   change: AgentToolFileChange;
   label: string;
 }) => {
@@ -296,8 +299,9 @@ const DiffCard = ({ change, label }: {
   const copyDiff = () => {
     const text = lines
       .filter((line) => line.kind !== "ellipsis")
-      .map((line) =>
-        `${line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}${line.text}`,
+      .map(
+        (line) =>
+          `${line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}${line.text}`,
       )
       .join("\n");
     void navigator.clipboard.writeText(text);
@@ -372,9 +376,11 @@ const FileChangeRow = ({
   const path = displayPath(change.path, projectRoot, cwd);
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
-      <div className="flex min-h-7 min-w-0 items-center gap-2">
+      <div className="harness-tool-row flex min-h-7 min-w-0 items-center gap-2">
         <PencilIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className={cn("shrink-0", !running && "font-medium text-foreground")}>
+        <span
+          className={cn("shrink-0", !running && "font-medium text-foreground")}
+        >
           {activityLabel(change.operation, running)}
         </span>
         <span
@@ -424,16 +430,17 @@ const ToolRow = ({
   const operation = activity?.operation ?? "other";
   const Icon = operationIcon(operation);
   const running = isRunning(tool);
-  const path = (pathOverride ?? activity?.path)
-    ? displayPath(pathOverride ?? activity?.path ?? "", projectRoot, cwd)
-    : undefined;
+  const path =
+    (pathOverride ?? activity?.path)
+      ? displayPath(pathOverride ?? activity?.path ?? "", projectRoot, cwd)
+      : undefined;
   const detail =
     operation === "search"
-      ? path ?? activity?.glob
-      : path ?? tool.command.trim().split(/\r?\n/u, 1)[0];
+      ? (path ?? activity?.glob)
+      : (path ?? tool.command.trim().split(/\r?\n/u, 1)[0]);
 
   return (
-    <div className="flex min-h-7 min-w-0 items-center gap-2">
+    <div className="harness-tool-row flex min-h-7 min-w-0 items-center gap-2">
       {tool.status === "failed" || tool.permission === "denied" ? (
         <CircleXIcon className="size-4 shrink-0 text-destructive" />
       ) : operation === "other" ? (
@@ -460,7 +467,8 @@ const ToolRow = ({
           <span
             className={cn(
               "min-w-0 truncate",
-              path && "underline decoration-muted-foreground/55 underline-offset-2",
+              path &&
+                "underline decoration-muted-foreground/55 underline-offset-2",
             )}
             title={detail}
           >
@@ -501,10 +509,11 @@ export function ToolTaskGroup({
   }, [turnRunning]);
 
   const headerOperation =
-    tools.find((tool) =>
-      tool.activity?.files?.length ||
-      tool.activity?.operation === "edit" ||
-      tool.activity?.operation === "create",
+    tools.find(
+      (tool) =>
+        tool.activity?.files?.length ||
+        tool.activity?.operation === "edit" ||
+        tool.activity?.operation === "create",
     )?.activity?.operation ??
     tools[0]?.activity?.operation ??
     "other";
@@ -512,13 +521,13 @@ export function ToolTaskGroup({
 
   return (
     <Task
-      className="w-full"
+      className="harness-tool-group w-full"
       onOpenChange={setOpen}
       open={open}
     >
       <TaskTrigger title={groupTitle(tools)}>
         <button
-          className="group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
+          className="harness-tool-trigger group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
           type="button"
         >
           <HeaderIcon className="size-4 shrink-0" />
@@ -531,7 +540,7 @@ export function ToolTaskGroup({
           <ChevronDownIcon className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </TaskTrigger>
-      <TaskContent className="[&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-0 [&>div]:text-[13px] [&>div]:leading-5">
+      <TaskContent className="harness-tool-content [&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-5 [&>div]:text-[13px] [&>div]:leading-5">
         {tools.flatMap((tool) => {
           const changes = tool.activity?.files ?? [];
           const changePaths = new Set(changes.map((change) => change.path));
@@ -583,7 +592,7 @@ export function ToolTaskGroup({
                 <ConfirmationTitle>
                   Melody 需要你的授权才能继续执行此步骤。
                 </ConfirmationTitle>
-                <ConfirmationActions>
+                <ConfirmationActions className="max-w-full flex-wrap justify-start">
                   {tool.permissionOptions?.map((option) => (
                     <ConfirmationAction
                       key={option.optionId}

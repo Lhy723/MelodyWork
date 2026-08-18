@@ -48,10 +48,7 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useResearchStore } from "@/features/research/research-store";
 import { buildResearchSkillContext } from "@/features/research/research-capability-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import {
-  checkAppUpdate,
-  type AppUpdateStatus,
-} from "@/lib/melody-bridge";
+import { checkAppUpdate, type AppUpdateStatus } from "@/lib/melody-bridge";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +56,8 @@ import { AgentComposer } from "./agent-composer";
 import { AgentTimeline } from "./agent-timeline";
 import { NewTaskWorkspace } from "./new-task-workspace";
 import { SubagentTray } from "./subagent-tray";
+import { SessionStatsLine } from "./session-stats-line";
+import { TrajectoryView } from "./trajectory-view";
 
 const statusLabel = {
   stopped: "预览",
@@ -76,8 +75,7 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = "melodywork.sidebar.collapsed";
 const DEFAULT_WORKSPACE_PANEL_WIDTH = 560;
 const MIN_WORKSPACE_PANEL_WIDTH = 360;
 const MAX_WORKSPACE_PANEL_WIDTH = 960;
-const WORKSPACE_PANEL_WIDTH_STORAGE_KEY =
-  "melodywork.workspace-panel.width";
+const WORKSPACE_PANEL_WIDTH_STORAGE_KEY = "melodywork.workspace-panel.width";
 const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
 
 const isMacOS =
@@ -88,14 +86,9 @@ const storedSidebarWidth = () => {
   if (typeof window === "undefined") {
     return DEFAULT_SIDEBAR_WIDTH;
   }
-  const stored = Number(
-    window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY),
-  );
+  const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
   return Number.isFinite(stored)
-    ? Math.min(
-        MAX_SIDEBAR_WIDTH,
-        Math.max(MIN_SIDEBAR_WIDTH, stored),
-      )
+    ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
     : DEFAULT_SIDEBAR_WIDTH;
 };
 
@@ -162,8 +155,7 @@ const subagentsForSession = (
   }
   return descendants.sort(
     (left, right) =>
-      Number(left.status !== "running") -
-        Number(right.status !== "running") ||
+      Number(left.status !== "running") - Number(right.status !== "running") ||
       right.updatedAt - left.updatedAt,
   );
 };
@@ -242,25 +234,21 @@ export function AgentWorkspace() {
   const permissionMode = useAgentStore((state) => state.permissionMode);
   const runningSessions = useAgentStore((state) => state.runningSessions);
   const subagents = useAgentStore((state) => state.subagents);
+  const cancelPrompt = useAgentStore((state) => state.cancelPrompt);
   const submitPrompt = useAgentStore((state) => state.submitPrompt);
   const selectModel = useAgentStore((state) => state.selectModel);
   const selectReasoningEffort = useAgentStore(
     (state) => state.selectReasoningEffort,
   );
-  const selectSessionMode = useAgentStore(
-    (state) => state.selectSessionMode,
-  );
+  const selectSessionMode = useAgentStore((state) => state.selectSessionMode);
   const selectPermissionMode = useAgentStore(
     (state) => state.selectPermissionMode,
   );
-  const resolvePermission = useAgentStore(
-    (state) => state.resolvePermission,
-  );
+  const resolvePermission = useAgentStore((state) => state.resolvePermission);
   const resolvePlan = useAgentStore((state) => state.resolvePlan);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([]);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] =
-    useState<string>();
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<string>();
   const [workspacePanelWidth, setWorkspacePanelWidth] = useState(
     storedWorkspacePanelWidth,
   );
@@ -275,12 +263,14 @@ export function AgentWorkspace() {
     useState<WorkspaceMode>(storedWorkspaceMode);
   const [researchSection, setResearchSection] =
     useState<ResearchSection>("overview");
-  const [researchDetail, setResearchDetail] =
-    useState<ResearchMainDetail>();
+  const [researchDetail, setResearchDetail] = useState<ResearchMainDetail>();
   const [researchMainOpen, setResearchMainOpen] = useState(
     () => storedWorkspaceMode() === "research",
   );
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [conversationView, setConversationView] = useState<
+    "chat" | "trajectory"
+  >("chat");
   const [newTaskProjectId, setNewTaskProjectId] = useState<string>();
   const pendingNewTaskPrompt = useRef<
     | {
@@ -355,10 +345,7 @@ export function AgentWorkspace() {
         return current;
       }
       return {
-        entries: [
-          ...current.entries.slice(0, current.index + 1),
-          sessionId,
-        ],
+        entries: [...current.entries.slice(0, current.index + 1), sessionId],
         index: current.index + 1,
       };
     });
@@ -370,8 +357,7 @@ export function AgentWorkspace() {
     }
 
     const previousCursor = document.documentElement.style.cursor;
-    const previousUserSelect =
-      document.documentElement.style.userSelect;
+    const previousUserSelect = document.documentElement.style.userSelect;
     document.documentElement.style.cursor = "col-resize";
     document.documentElement.style.userSelect = "none";
 
@@ -380,9 +366,7 @@ export function AgentWorkspace() {
         MAX_SIDEBAR_WIDTH,
         Math.max(
           MIN_SIDEBAR_WIDTH,
-          sidebarResize.startWidth +
-            event.clientX -
-            sidebarResize.startX,
+          sidebarResize.startWidth + event.clientX - sidebarResize.startX,
         ),
       );
       sidebarWidthRef.current = nextWidth;
@@ -417,8 +401,7 @@ export function AgentWorkspace() {
     }
 
     const previousCursor = document.documentElement.style.cursor;
-    const previousUserSelect =
-      document.documentElement.style.userSelect;
+    const previousUserSelect = document.documentElement.style.userSelect;
     document.documentElement.style.cursor = "col-resize";
     document.documentElement.style.userSelect = "none";
 
@@ -479,9 +462,7 @@ export function AgentWorkspace() {
     setSettingsOpen(false);
     setWorkspacePanelOpen(true);
     setWorkspaceTabs((current) =>
-      current.some((item) => item.id === tab.id)
-        ? current
-        : [...current, tab],
+      current.some((item) => item.id === tab.id) ? current : [...current, tab],
     );
     setActiveWorkspaceTabId(tab.id);
   }, []);
@@ -529,9 +510,7 @@ export function AgentWorkspace() {
     [openWorkspaceTab],
   );
 
-  const newWorkspaceToolTab = (
-    kind: "files" | "terminal" | "review",
-  ) => {
+  const newWorkspaceToolTab = (kind: "files" | "terminal" | "review") => {
     const baseLabel = {
       files: "文件",
       terminal: "终端",
@@ -556,7 +535,10 @@ export function AgentWorkspace() {
   const openResearchSection = (section: ResearchSection) => {
     setResearchDetail(undefined);
     setResearchSection(section);
-    if (section !== "skills" && window.matchMedia("(max-width: 720px)").matches) {
+    if (
+      section !== "skills" &&
+      window.matchMedia("(max-width: 720px)").matches
+    ) {
       setSidebarVisibility(true);
     }
     if (section !== "skills") {
@@ -706,9 +688,7 @@ export function AgentWorkspace() {
     );
   };
 
-  const beginSidebarResize: PointerEventHandler<HTMLDivElement> = (
-    event,
-  ) => {
+  const beginSidebarResize: PointerEventHandler<HTMLDivElement> = (event) => {
     if (event.button !== 0) {
       return;
     }
@@ -823,12 +803,7 @@ export function AgentWorkspace() {
     }
     pendingNewTaskPrompt.current = undefined;
     void submitPrompt(pending.content, pending.attachments);
-  }, [
-    activeSession?.id,
-    agentLocalSessionId,
-    chatStatus,
-    submitPrompt,
-  ]);
+  }, [activeSession?.id, agentLocalSessionId, chatStatus, submitPrompt]);
 
   useEffect(() => {
     const pending = pendingResearchPrompt.current;
@@ -842,12 +817,7 @@ export function AgentWorkspace() {
     }
     pendingResearchPrompt.current = undefined;
     void submitPrompt(pending.content);
-  }, [
-    activeSession?.id,
-    agentLocalSessionId,
-    chatStatus,
-    submitPrompt,
-  ]);
+  }, [activeSession?.id, agentLocalSessionId, chatStatus, submitPrompt]);
 
   const renderComposer = (
     onSubmit: (
@@ -861,10 +831,9 @@ export function AgentWorkspace() {
       models={availableModels}
       onModelChange={(modelId) => void selectModel(modelId)}
       onPermissionModeChange={(mode) => void selectPermissionMode(mode)}
-      onReasoningEffortChange={(effort) =>
-        void selectReasoningEffort(effort)
-      }
+      onReasoningEffortChange={(effort) => void selectReasoningEffort(effort)}
       onSessionModeChange={(modeId) => void selectSessionMode(modeId)}
+      onStop={() => void cancelPrompt()}
       onSubmit={onSubmit}
       permissionMode={permissionMode}
       reasoningEffortChanging={Boolean(pendingReasoningEffort)}
@@ -879,7 +848,9 @@ export function AgentWorkspace() {
 
   const primaryViewKey = newTaskOpen
     ? "new-task"
-    : workspaceMode === "research" && researchMainOpen && researchSection !== "skills"
+    : workspaceMode === "research" &&
+        researchMainOpen &&
+        researchSection !== "skills"
       ? "research"
       : "conversation";
 
@@ -894,9 +865,7 @@ export function AgentWorkspace() {
           macSafeArea={isMacOS}
           onGoBack={() => goThroughSessionHistory(-1)}
           onGoForward={() => goThroughSessionHistory(1)}
-          onToggleSidebar={() =>
-            setSidebarVisibility(!sidebarCollapsed)
-          }
+          onToggleSidebar={() => setSidebarVisibility(!sidebarCollapsed)}
         />
       ) : null}
       <div
@@ -926,9 +895,7 @@ export function AgentWorkspace() {
           onOpenExtensions={() => openSettings("skills")}
           onOpenGit={openGit}
           onOpenSettings={() => openSettings()}
-          onResetWidth={() =>
-            updateSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
-          }
+          onResetWidth={() => updateSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
           onResizeBy={(delta) =>
             updateSidebarWidth(sidebarWidthRef.current + delta)
           }
@@ -993,8 +960,8 @@ export function AgentWorkspace() {
                     {renderComposer(createTaskFromPrompt)}
                   </NewTaskWorkspace>
                 ) : workspaceMode === "research" &&
-                researchMainOpen &&
-                researchSection !== "skills" ? (
+                  researchMainOpen &&
+                  researchSection !== "skills" ? (
                   <ResearchMainWorkspace
                     cwd={cwd}
                     detail={researchDetail}
@@ -1019,7 +986,7 @@ export function AgentWorkspace() {
                     <div className="relative flex min-w-0 flex-1 flex-col">
                       <header
                         className={cn(
-                          "sidebar-aware-header flex h-8 shrink-0 items-center gap-3 border-b pr-6",
+                          "harness-session-header sidebar-aware-header flex shrink-0 flex-col items-stretch border-b pr-6",
                           sidebarCollapsed
                             ? isMacOS
                               ? "pl-52"
@@ -1029,84 +996,121 @@ export function AgentWorkspace() {
                         data-tauri-drag-region
                       >
                         <div
-                          className="flex min-w-0 flex-1 items-center gap-2"
+                          className="harness-session-title-row"
                           data-tauri-drag-region
                         >
-                          <h1
-                            className="min-w-0 truncate font-semibold text-base"
-                            data-tauri-drag-region
-                          >
-                            {activeSession
-                              ? localizedSessionTitle(activeSession.title)
-                              : "正在打开工作区…"}
-                          </h1>
                           <div
-                            className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                            className="flex min-w-0 items-center gap-2"
                             data-tauri-drag-region
                           >
-                            <span
-                              aria-hidden="true"
-                              className="motion-status-dot size-1.5 rounded-full bg-current"
+                            <h1
+                              className="min-w-0 truncate font-semibold text-[15px]"
                               data-tauri-drag-region
-                            />
-                            {sessionStatusLabel(status.phase, acpPhase)}
+                            >
+                              {activeSession
+                                ? localizedSessionTitle(activeSession.title)
+                                : "正在打开工作区…"}
+                            </h1>
+                            <div
+                              className="harness-session-status"
+                              data-tauri-drag-region
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="motion-status-dot size-1.5 rounded-full bg-current"
+                                data-tauri-drag-region
+                              />
+                              {sessionStatusLabel(status.phase, acpPhase)}
+                            </div>
+                          </div>
+                          <div className="harness-session-actions">
+                            <Button
+                              aria-label={
+                                git.loading
+                                  ? "正在检查更改"
+                                  : `${git.changes.length} 项更改`
+                              }
+                              className="gap-1 px-2"
+                              onClick={openGit}
+                              size="sm"
+                              title={
+                                git.loading
+                                  ? "正在检查更改"
+                                  : `${git.changes.length} 项更改`
+                              }
+                              variant="outline"
+                            >
+                              <GitCompareArrowsIcon data-icon="inline-start" />
+                              <span className="min-w-2 text-center tabular-nums">
+                                {git.loading ? "…" : git.changes.length}
+                              </span>
+                            </Button>
+                            {appUpdate?.available ? (
+                              <Button
+                                className="motion-view-enter"
+                                disabled={installingUpdate}
+                                onClick={() => void installAppUpdate()}
+                                variant="outline"
+                              >
+                                <DownloadIcon />
+                                {installingUpdate
+                                  ? "正在安装更新"
+                                  : `更新到 ${appUpdate.version}`}
+                              </Button>
+                            ) : null}
+                            <Button
+                              aria-label={
+                                workspacePanelOpen
+                                  ? "收起右侧边栏"
+                                  : "展开右侧边栏"
+                              }
+                              aria-pressed={workspacePanelOpen}
+                              onClick={() =>
+                                setWorkspacePanelOpen((open) => !open)
+                              }
+                              size="icon"
+                              title={
+                                workspacePanelOpen
+                                  ? "收起右侧边栏"
+                                  : "展开右侧边栏"
+                              }
+                              variant={
+                                workspacePanelOpen ? "secondary" : "ghost"
+                              }
+                            >
+                              <PanelRightIcon />
+                            </Button>
                           </div>
                         </div>
-                        <Button
-                          aria-label={
-                            git.loading
-                              ? "正在检查更改"
-                              : `${git.changes.length} 项更改`
-                          }
-                          className="gap-1 px-2"
-                          onClick={openGit}
-                          size="sm"
-                          title={
-                            git.loading
-                              ? "正在检查更改"
-                              : `${git.changes.length} 项更改`
-                          }
-                          variant="outline"
+                        <nav
+                          className="harness-session-tabs"
+                          aria-label="会话视图"
                         >
-                          <GitCompareArrowsIcon data-icon="inline-start" />
-                          <span className="min-w-2 text-center tabular-nums">
-                            {git.loading ? "…" : git.changes.length}
-                          </span>
-                        </Button>
-                        {appUpdate?.available ? (
-                          <Button
-                            className="motion-view-enter"
-                            disabled={installingUpdate}
-                            onClick={() => void installAppUpdate()}
-                            variant="outline"
-                          >
-                            <DownloadIcon />
-                            {installingUpdate
-                              ? "正在安装更新"
-                              : `更新到 ${appUpdate.version}`}
-                          </Button>
-                        ) : null}
-                        <Button
-                          aria-label={
-                            workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
-                          }
-                          aria-pressed={workspacePanelOpen}
-                          onClick={() => setWorkspacePanelOpen((open) => !open)}
-                          size="icon"
-                          title={
-                            workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
-                          }
-                          variant={workspacePanelOpen ? "secondary" : "ghost"}
-                        >
-                          <span
+                          <button
+                            aria-selected={conversationView === "chat"}
                             className={cn(
-                              "transition-transform duration-200 ease-out [&>svg]:size-4",
-                              workspacePanelOpen && "-translate-x-0.5",
+                              "harness-session-tab",
+                              conversationView === "chat" && "is-active",
                             )}
+                            onClick={() => setConversationView("chat")}
+                            role="tab"
+                            type="button"
                           >
-                            <PanelRightIcon />
-                          </span>
-                        </Button>
+                            对话
+                          </button>
+                          <button
+                            aria-selected={conversationView === "trajectory"}
+                            className={cn(
+                              "harness-session-tab",
+                              conversationView === "trajectory" && "is-active",
+                            )}
+                            onClick={() => setConversationView("trajectory")}
+                            role="tab"
+                            type="button"
+                          >
+                            轨迹
+                          </button>
+                        </nav>
                       </header>
                       <Presence present={Boolean(visibleError)}>
                         {(motionState) => (
@@ -1121,21 +1125,40 @@ export function AgentWorkspace() {
                         )}
                       </Presence>
 
-                      <AgentTimeline
-                        cwd={cwd}
-                        entries={timeline}
-                        onPermission={resolvePermission}
-                        onPlanDecision={resolvePlan}
-                        onOpenProjectReference={openProjectReference}
-                        projectRoot={activeProject?.path ?? cwd}
-                        turnRunning={
-                          chatStatus === "submitted" ||
-                          chatStatus === "streaming"
-                        }
-                      />
+                      {conversationView === "chat" ? (
+                        <AgentTimeline
+                          cwd={cwd}
+                          entries={timeline}
+                          onPermission={resolvePermission}
+                          onPlanDecision={resolvePlan}
+                          onOpenProjectReference={openProjectReference}
+                          projectRoot={activeProject?.path ?? cwd}
+                          turnRunning={
+                            chatStatus === "submitted" ||
+                            chatStatus === "streaming"
+                          }
+                        />
+                      ) : (
+                        <TrajectoryView
+                          entries={timeline}
+                          running={
+                            chatStatus === "submitted" ||
+                            chatStatus === "streaming"
+                          }
+                        />
+                      )}
                       <SubagentTray
                         onOpenSubagent={openSubagent}
                         subagents={visibleSubagents}
+                      />
+                      <SessionStatsLine
+                        contextUsage={contextUsage}
+                        entries={timeline}
+                        modelName={
+                          availableModels.find(
+                            (model) => model.id === selectedModelId,
+                          )?.name
+                        }
                       />
                       {renderComposer(submitPrompt)}
                     </div>
@@ -1165,7 +1188,9 @@ export function AgentWorkspace() {
                         onOpenProjectReference={openProjectReference}
                         onRefreshGit={() => void git.refresh()}
                         onResetWidth={() =>
-                          updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
+                          updateWorkspacePanelWidth(
+                            DEFAULT_WORKSPACE_PANEL_WIDTH,
+                          )
                         }
                         onResizeBy={(delta) =>
                           updateWorkspacePanelWidth(

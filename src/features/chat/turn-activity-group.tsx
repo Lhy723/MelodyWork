@@ -3,20 +3,12 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import {
-  Task,
-  TaskContent,
-  TaskTrigger,
-} from "@/components/ai-elements/task";
+import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
 import type { TurnActivityItem } from "@/domain/timeline-groups";
 import { ToolTaskGroup } from "@/features/chat/tool-task-group";
 import { cn } from "@/lib/utils";
-import {
-  BrainIcon,
-  ChevronDownIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { BrainIcon, ChevronDownIcon, LoaderCircleIcon } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
 
 interface TurnActivityGroupProps {
   cwd: string;
@@ -44,7 +36,7 @@ const formatDuration = (durationMs: number | undefined) => {
   return seconds === 0 ? `${minutes} 分钟` : `${minutes} 分 ${seconds} 秒`;
 };
 
-export function TurnActivityGroup({
+export const TurnActivityGroup = memo(function TurnActivityGroup({
   cwd,
   endedAt,
   items,
@@ -88,10 +80,14 @@ export function TurnActivityGroup({
     : `已完成${durationLabel ? ` · 总用时 ${durationLabel}` : ""}`;
 
   return (
-    <Task className="w-full" onOpenChange={setOpen} open={open}>
+    <Task
+      className="harness-activity-group w-full"
+      onOpenChange={setOpen}
+      open={open}
+    >
       <TaskTrigger title={title}>
         <button
-          className="group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
+          className="harness-activity-trigger group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
           type="button"
         >
           {running ? (
@@ -103,7 +99,7 @@ export function TurnActivityGroup({
           <ChevronDownIcon className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </TaskTrigger>
-      <TaskContent className="[&>div]:mt-1.5 [&>div]:space-y-2 [&>div]:border-l-0 [&>div]:pl-0">
+      <TaskContent className="harness-activity-content [&>div]:mt-1.5 [&>div]:space-y-2 [&>div]:border-l-0 [&>div]:pl-4">
         {items.map((item) =>
           item.kind === "thought" ? (
             <Reasoning
@@ -139,4 +135,4 @@ export function TurnActivityGroup({
       </TaskContent>
     </Task>
   );
-}
+});

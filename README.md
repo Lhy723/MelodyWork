@@ -144,4 +144,4 @@ For bugs, include the operating system, reproduction steps, expected behavior, a
 
 ## License
 
-MelodyWork does not currently declare a license. Until a `LICENSE` file is added, the source is not granted for redistribution or modification.
+MelodyWork is released under the [MIT License](./LICENSE).

@@ -144,4 +144,4 @@ pnpm tauri dev
 
 ## License
 
-MelodyWork 当前尚未声明许可证。在添加 `LICENSE` 文件之前，仓库内容不授予再分发或修改权限。
+MelodyWork 以 [MIT 许可证](./LICENSE) 发布。

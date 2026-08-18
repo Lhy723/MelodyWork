@@ -7,6 +7,8 @@ import {
   XIcon,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
+loader.config({ monaco });
 
 interface FileWorkspaceProps {
   embedded?: boolean;

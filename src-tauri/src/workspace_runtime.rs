@@ -1,16 +1,24 @@
 use std::{
     collections::HashMap,
-    fs,
+    fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Duration,
 };
 
+use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 use serde::Serialize;
+use std::io::Write;
 use tauri::{AppHandle, Emitter, State, ipc::Response};
+use tauri_plugin_dialog::DialogExt;
+use tokio::sync::oneshot;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::{ChildStdin, Command},
+    process::{Child, ChildStdin, Command},
     sync::Mutex,
 };
 use uuid::Uuid;
@@ -19,10 +27,16 @@ const MAX_TREE_ENTRIES: usize = 2_000;
 const MAX_TREE_DEPTH: usize = 8;
 const MAX_TEXT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PREVIEW_FILE_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_TERMINAL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+
+struct TerminalSession {
+    child: Arc<Mutex<Child>>,
+    stdin: Mutex<Option<ChildStdin>>,
+}
 
 #[derive(Clone, Default)]
 pub struct TerminalRuntime {
-    inputs: Arc<Mutex<HashMap<String, ChildStdin>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -54,8 +68,13 @@ fn canonical_root(root: &str) -> Result<PathBuf, String> {
     if !root.is_dir() {
         return Err(format!("Workspace does not exist: {}", root.display()));
     }
-    root.canonicalize()
-        .map_err(|error| format!("Failed to resolve workspace: {error}"))
+    let canonical = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve workspace: {error}"))?;
+    if canonical.parent().is_none() {
+        return Err("The filesystem root cannot be used as a workspace".to_string());
+    }
+    Ok(canonical)
 }
 
 fn safe_existing_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
@@ -71,6 +90,11 @@ fn safe_existing_path(root: &Path, relative_path: &str) -> Result<PathBuf, Strin
 
 fn safe_write_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
     let candidate = root.join(relative_path);
+    if let Ok(metadata) = fs::symlink_metadata(&candidate) {
+        if metadata.file_type().is_symlink() {
+            return Err("Refusing to write through a symbolic link".to_string());
+        }
+    }
     let parent = candidate
         .parent()
         .ok_or_else(|| "File has no parent directory".to_string())?;
@@ -83,7 +107,13 @@ fn safe_write_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> 
     let name = candidate
         .file_name()
         .ok_or_else(|| "File name is missing".to_string())?;
-    Ok(canonical_parent.join(name))
+    let safe_path = canonical_parent.join(name);
+    if let Ok(metadata) = fs::symlink_metadata(&safe_path) {
+        if metadata.file_type().is_symlink() {
+            return Err("Refusing to write through a symbolic link".to_string());
+        }
+    }
+    Ok(safe_path)
 }
 
 fn is_ignored_directory(name: &str) -> bool {
@@ -106,7 +136,12 @@ fn collect_tree(
         .map_err(|error| format!("Failed to read {}: {error}", directory.display()))?
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
-    children.sort_by_key(|entry| (!entry.path().is_dir(), entry.file_name()));
+    children.sort_by_key(|entry| {
+        (
+            !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false),
+            entry.file_name(),
+        )
+    });
 
     for child in children {
         if entries.len() >= MAX_TREE_ENTRIES {
@@ -114,7 +149,13 @@ fn collect_tree(
         }
         let path = child.path();
         let name = child.file_name().to_string_lossy().into_owned();
-        let is_directory = path.is_dir();
+        let file_type = child
+            .file_type()
+            .map_err(|error| format!("Failed to inspect {}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let is_directory = file_type.is_dir();
         if is_directory && is_ignored_directory(&name) {
             continue;
         }
@@ -137,16 +178,49 @@ fn collect_tree(
 }
 
 #[tauri::command]
-pub fn workspace_tree(root: String) -> Result<Vec<WorkspaceEntry>, String> {
-    let root = canonical_root(&root)?;
+pub async fn pick_workspace_directory(
+    app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
+) -> Result<Option<String>, String> {
+    let registry = registry.inner().clone();
+    let (sender, receiver) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("打开工作区")
+        .pick_folder(move |selected| {
+            let path = selected.and_then(|value| value.into_path().ok());
+            let _ = sender.send(path);
+        });
+    let selected = receiver
+        .await
+        .map_err(|_| "Workspace picker was closed unexpectedly".to_string())?;
+    selected
+        .map(|path| {
+            registry
+                .register(&path)
+                .map(|canonical| canonical.to_string_lossy().into_owned())
+        })
+        .transpose()
+}
+
+#[tauri::command]
+pub fn workspace_tree(
+    registry: State<'_, WorkspaceRegistry>,
+    root: String,
+) -> Result<Vec<WorkspaceEntry>, String> {
+    let root = registry.authorize(&root)?;
     let mut entries = Vec::new();
     collect_tree(&root, &root, 0, &mut entries)?;
     Ok(entries)
 }
 
 #[tauri::command]
-pub fn read_workspace_file(root: String, path: String) -> Result<String, String> {
-    let root = canonical_root(&root)?;
+pub fn read_workspace_file(
+    registry: State<'_, WorkspaceRegistry>,
+    root: String,
+    path: String,
+) -> Result<String, String> {
+    let root = registry.authorize(&root)?;
     let path = safe_existing_path(&root, &path)?;
     let metadata = path
         .metadata()
@@ -158,8 +232,13 @@ pub fn read_workspace_file(root: String, path: String) -> Result<String, String>
 }
 
 #[tauri::command]
-pub fn read_workspace_binary_file(root: String, path: String) -> Result<Response, String> {
-    read_workspace_binary_bytes(&root, &path).map(Response::new)
+pub fn read_workspace_binary_file(
+    registry: State<'_, WorkspaceRegistry>,
+    root: String,
+    path: String,
+) -> Result<Response, String> {
+    let root = registry.authorize(&root)?;
+    read_workspace_binary_bytes(&root.to_string_lossy(), &path).map(Response::new)
 }
 
 fn read_workspace_binary_bytes(root: &str, relative_path: &str) -> Result<Vec<u8>, String> {
@@ -178,13 +257,73 @@ fn read_workspace_binary_bytes(root: &str, relative_path: &str) -> Result<Vec<u8
 }
 
 #[tauri::command]
-pub fn write_workspace_file(root: String, path: String, content: String) -> Result<(), String> {
+pub async fn write_workspace_file(
+    app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
+    root: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
     if content.len() as u64 > MAX_TEXT_FILE_BYTES {
         return Err("File is larger than the 2 MB editor limit".to_string());
     }
-    let root = canonical_root(&root)?;
+    let root = registry.authorize(&root)?;
     let path = safe_write_path(&root, &path)?;
-    fs::write(path, content).map_err(|error| format!("Failed to write file: {error}"))
+    confirm_action(
+        &app,
+        "确认写入工作区文件",
+        format!("允许 MelodyWork 写入以下文件吗？\n{}", path.display()),
+    )
+    .await?;
+    write_file_no_follow(&path, &content)
+}
+
+fn write_file_no_follow(path: &Path, content: &str) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("Failed to open file for writing: {error}"))?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("Failed to write file: {error}"))
+}
+
+struct OutputBudget {
+    emitted: AtomicUsize,
+    truncation_sent: AtomicBool,
+}
+
+impl Default for OutputBudget {
+    fn default() -> Self {
+        Self {
+            emitted: AtomicUsize::new(0),
+            truncation_sent: AtomicBool::new(false),
+        }
+    }
+}
+
+impl OutputBudget {
+    fn reserve(&self, requested: usize) -> usize {
+        let mut current = self.emitted.load(Ordering::Relaxed);
+        loop {
+            let available = MAX_TERMINAL_OUTPUT_BYTES.saturating_sub(current);
+            let allowed = requested.min(available);
+            match self.emitted.compare_exchange(
+                current,
+                current.saturating_add(allowed),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return allowed,
+                Err(next) => current = next,
+            }
+        }
+    }
 }
 
 async fn forward_terminal_stream<R>(
@@ -192,6 +331,7 @@ async fn forward_terminal_stream<R>(
     terminal_id: String,
     stream: &'static str,
     mut reader: R,
+    budget: Arc<OutputBudget>,
 ) where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -200,15 +340,28 @@ async fn forward_terminal_stream<R>(
         match reader.read(&mut buffer).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
-                let data = String::from_utf8_lossy(&buffer[..count]).into_owned();
-                let _ = app.emit(
-                    "melody://terminal-output",
-                    TerminalOutput {
-                        terminal_id: terminal_id.clone(),
-                        stream: stream.to_string(),
-                        data,
-                    },
-                );
+                let allowed = budget.reserve(count);
+                if allowed > 0 {
+                    let data = String::from_utf8_lossy(&buffer[..allowed]).into_owned();
+                    let _ = app.emit(
+                        "melody://terminal-output",
+                        TerminalOutput {
+                            terminal_id: terminal_id.clone(),
+                            stream: stream.to_string(),
+                            data,
+                        },
+                    );
+                }
+                if allowed < count && !budget.truncation_sent.swap(true, Ordering::AcqRel) {
+                    let _ = app.emit(
+                        "melody://terminal-output",
+                        TerminalOutput {
+                            terminal_id: terminal_id.clone(),
+                            stream: stream.to_string(),
+                            data: "\n[终端输出已截断：超过 8 MiB 上限]\n".to_string(),
+                        },
+                    );
+                }
             }
         }
     }
@@ -229,13 +382,37 @@ fn persistent_shell(cwd: &Path) -> Command {
     process
 }
 
+async fn wait_for_terminal_exit(
+    child: Arc<Mutex<Child>>,
+) -> Result<std::process::ExitStatus, std::io::Error> {
+    loop {
+        let status = {
+            let mut child = child.lock().await;
+            child.try_wait()?
+        };
+        if let Some(status) = status {
+            return Ok(status);
+        }
+        // Do not hold the child mutex while waiting. close_terminal_session
+        // must be able to acquire it and kill an interactive shell.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tauri::command]
 pub async fn create_terminal_session(
     app: AppHandle,
+    registry: State<'_, WorkspaceRegistry>,
     runtime: State<'_, TerminalRuntime>,
     cwd: String,
 ) -> Result<String, String> {
-    let cwd = canonical_root(&cwd)?;
+    let cwd = registry.authorize(&cwd)?;
+    confirm_action(
+        &app,
+        "确认打开终端",
+        format!("允许在以下工作区启动交互式终端吗？\n{}", cwd.display()),
+    )
+    .await?;
     let terminal_id = Uuid::new_v4().to_string();
     let mut child = persistent_shell(&cwd)
         .spawn()
@@ -252,23 +429,31 @@ pub async fn create_terminal_session(
         .stderr
         .take()
         .ok_or_else(|| "Terminal stderr was not piped".to_string())?;
+    let session = Arc::new(TerminalSession {
+        child: Arc::new(Mutex::new(child)),
+        stdin: Mutex::new(Some(stdin)),
+    });
     runtime
-        .inputs
+        .sessions
         .lock()
         .await
-        .insert(terminal_id.clone(), stdin);
+        .insert(terminal_id.clone(), session.clone());
 
     let stdout_app = app.clone();
     let stdout_id = terminal_id.clone();
     let stderr_app = app.clone();
     let stderr_id = terminal_id.clone();
     let exit_id = terminal_id.clone();
-    let inputs = runtime.inputs.clone();
+    let sessions = runtime.sessions.clone();
+    let budget = Arc::new(OutputBudget::default());
+    let stdout_session = session.clone();
     tauri::async_runtime::spawn(async move {
-        let stdout_task = forward_terminal_stream(stdout_app, stdout_id, "stdout", stdout);
-        let stderr_task = forward_terminal_stream(stderr_app, stderr_id, "stderr", stderr);
-        let (status, _, _) = tokio::join!(child.wait(), stdout_task, stderr_task);
-        inputs.lock().await.remove(&exit_id);
+        let stdout_task =
+            forward_terminal_stream(stdout_app, stdout_id, "stdout", stdout, budget.clone());
+        let stderr_task = forward_terminal_stream(stderr_app, stderr_id, "stderr", stderr, budget);
+        let wait_task = wait_for_terminal_exit(stdout_session.child.clone());
+        let (status, _, _) = tokio::join!(wait_task, stdout_task, stderr_task);
+        sessions.lock().await.remove(&exit_id);
         let _ = app.emit(
             "melody://terminal-exit",
             TerminalExit {
@@ -287,9 +472,16 @@ pub async fn write_terminal_input(
     terminal_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut inputs = runtime.inputs.lock().await;
-    let input = inputs
-        .get_mut(&terminal_id)
+    let session = runtime
+        .sessions
+        .lock()
+        .await
+        .get(&terminal_id)
+        .cloned()
+        .ok_or_else(|| "Terminal session is no longer running".to_string())?;
+    let mut input = session.stdin.lock().await;
+    let input = input
+        .as_mut()
         .ok_or_else(|| "Terminal session is no longer running".to_string())?;
     input
         .write_all(data.as_bytes())
@@ -306,66 +498,24 @@ pub async fn close_terminal_session(
     runtime: State<'_, TerminalRuntime>,
     terminal_id: String,
 ) -> Result<(), String> {
-    runtime.inputs.lock().await.remove(&terminal_id);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn run_terminal_command(
-    app: AppHandle,
-    cwd: String,
-    command: String,
-) -> Result<String, String> {
-    let cwd = canonical_root(&cwd)?;
-    if command.trim().is_empty() {
-        return Err("Command cannot be empty".to_string());
-    }
-    let terminal_id = Uuid::new_v4().to_string();
-    let mut process = if cfg!(windows) {
-        let mut process = Command::new("cmd");
-        process.args(["/C", &command]);
-        process
-    } else {
-        let mut process = Command::new("sh");
-        process.args(["-lc", &command]);
-        process
+    let session = runtime.sessions.lock().await.remove(&terminal_id);
+    let Some(session) = session else {
+        return Ok(());
     };
-    let mut child = process
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| format!("Failed to start terminal command: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Terminal stdout was not piped".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Terminal stderr was not piped".to_string())?;
-
-    let stdout_app = app.clone();
-    let stdout_id = terminal_id.clone();
-    let stderr_app = app.clone();
-    let stderr_id = terminal_id.clone();
-    let exit_id = terminal_id.clone();
-    tauri::async_runtime::spawn(async move {
-        let stdout_task = forward_terminal_stream(stdout_app, stdout_id, "stdout", stdout);
-        let stderr_task = forward_terminal_stream(stderr_app, stderr_id, "stderr", stderr);
-        let (status, _, _) = tokio::join!(child.wait(), stdout_task, stderr_task);
-        let _ = app.emit(
-            "melody://terminal-exit",
-            TerminalExit {
-                terminal_id: exit_id,
-                code: status.ok().and_then(|status| status.code()),
-            },
-        );
-    });
-
-    Ok(terminal_id)
+    session.stdin.lock().await.take();
+    let mut child = session.child.lock().await;
+    if child
+        .try_wait()
+        .map_err(|error| format!("Failed to inspect terminal process: {error}"))?
+        .is_none()
+    {
+        child
+            .kill()
+            .await
+            .map_err(|error| format!("Failed to stop terminal process: {error}"))?;
+        let _ = child.wait().await;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -422,6 +572,62 @@ mod tests {
         fs::remove_file(outside).expect("outside fixture should be removed");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_writes_through_final_component_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("melody-write-{}", Uuid::new_v4()));
+        let outside = root
+            .parent()
+            .expect("temporary workspace should have a parent")
+            .join(format!(
+                "{}-outside.txt",
+                root.file_name().unwrap().to_string_lossy()
+            ));
+        fs::create_dir_all(&root).expect("temporary workspace should be created");
+        fs::write(&outside, "outside").expect("outside fixture should be written");
+        symlink(&outside, root.join("link.txt")).expect("symlink should be created");
+
+        let error = safe_write_path(&root.canonicalize().unwrap(), "link.txt")
+            .expect_err("final symlinks must not be writable");
+        assert!(error.contains("symbolic link"));
+
+        fs::remove_dir_all(root).expect("temporary workspace should be removed");
+        fs::remove_file(outside).expect("outside fixture should be removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_follow_directory_symlinks_when_collecting_tree() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("melody-tree-{}", Uuid::new_v4()));
+        let outside = root
+            .parent()
+            .expect("temporary workspace should have a parent")
+            .join(format!(
+                "{}-outside",
+                root.file_name().unwrap().to_string_lossy()
+            ));
+        fs::create_dir_all(&root).expect("temporary workspace should be created");
+        fs::create_dir_all(outside.join("secret")).expect("outside fixture should be created");
+        symlink(&outside, root.join("linked")).expect("directory symlink should be created");
+
+        let root = root.canonicalize().unwrap();
+        let mut entries = Vec::new();
+        collect_tree(&root, &root, 0, &mut entries).expect("tree collection should succeed");
+
+        assert!(
+            entries
+                .iter()
+                .all(|entry| !entry.path.starts_with("linked/"))
+        );
+
+        fs::remove_dir_all(root).expect("temporary workspace should be removed");
+        fs::remove_dir_all(outside).expect("outside fixture should be removed");
+    }
+
     #[tokio::test]
     async fn persistent_shell_accepts_input_and_returns_output() {
         let cwd = std::env::current_dir().expect("current directory should be available");
@@ -452,5 +658,24 @@ mod tests {
 
         assert!(status.success());
         assert!(output.contains("melody-terminal-ok"));
+    }
+
+    #[tokio::test]
+    async fn terminal_wait_does_not_block_shutdown() {
+        let cwd = std::env::current_dir().expect("current directory should be available");
+        let child = Arc::new(Mutex::new(
+            persistent_shell(&cwd)
+                .spawn()
+                .expect("persistent shell should start"),
+        ));
+        let waiter = tokio::spawn(wait_for_terminal_exit(child.clone()));
+
+        let mut child_guard = tokio::time::timeout(Duration::from_secs(1), child.lock())
+            .await
+            .expect("waiter must not hold the child lock");
+        child_guard.kill().await.expect("shell should be killable");
+        drop(child_guard);
+
+        assert!(waiter.await.expect("waiter task should finish").is_ok());
     }
 }

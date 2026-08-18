@@ -148,7 +148,7 @@ export function WorkspaceSidePanel({
       >
         <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-ring group-focus-visible:bg-ring" />
       </div>
-      <header className="flex h-8 shrink-0 items-center border-b">
+      <header className="harness-window-titlebar flex shrink-0 items-center border-b">
         <div
           aria-label="工作区标签页"
           className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1"

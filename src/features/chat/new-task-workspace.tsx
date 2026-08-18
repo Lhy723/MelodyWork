@@ -42,7 +42,7 @@ export function NewTaskWorkspace({
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-background">
-      <header className="flex h-10 shrink-0 items-center border-b px-5">
+      <header className="harness-window-titlebar flex shrink-0 items-center border-b px-5">
         <SquarePenIcon className="size-3.5 text-muted-foreground" />
         <span
           className={cn(

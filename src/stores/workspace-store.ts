@@ -46,7 +46,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       let projects = await listProjects();
       if (projects.length === 0) {
-        projects = [await upsertProject(".")];
+        const path = await pickWorkspaceDirectory();
+        if (!path) {
+          throw new Error("请选择一个工作区后再继续。");
+        }
+        projects = [await upsertProject(path)];
       }
       const sessionEntries = await Promise.all(
         projects.map(async (project) => [

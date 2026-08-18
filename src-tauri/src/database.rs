@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Mutex,
 };
 
@@ -9,6 +9,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
+
+use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
 #[derive(Debug)]
 pub struct AppDatabase {
@@ -568,6 +570,36 @@ impl AppDatabase {
         })
     }
 
+    /// Enforce a stored allow rule in Rust, keyed by the ACP session's
+    /// project and the exact normalized tool title/command pair.
+    pub fn has_allow_permission_for_acp_session(
+        &self,
+        acp_session_id: &str,
+        title: &str,
+        command: &str,
+    ) -> Result<bool, String> {
+        let tool_key = format!("{}\n{}", title.trim(), command.trim());
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+        let allowed = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM permission_rules AS rules
+                    JOIN sessions ON sessions.project_id = rules.project_id
+                    WHERE sessions.acp_session_id = ?1
+                      AND rules.tool_key = ?2
+                      AND rules.decision = 'allow'
+                )",
+                params![acp_session_id, tool_key],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(allowed != 0)
+    }
+
     #[cfg(test)]
     fn in_memory() -> Self {
         let connection = Connection::open_in_memory().expect("in-memory database");
@@ -614,20 +646,11 @@ impl AppDatabase {
     }
 }
 
-fn canonical_directory(path: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(path);
-    if !path.is_dir() {
-        return Err(format!(
-            "Workspace directory does not exist: {}",
-            path.display()
-        ));
-    }
-    path.canonicalize()
-        .map_err(|error| format!("Failed to resolve workspace directory: {error}"))
-}
-
 #[tauri::command]
-pub fn list_projects(database: State<'_, AppDatabase>) -> Result<Vec<ProjectRecord>, String> {
+pub fn list_projects(
+    database: State<'_, AppDatabase>,
+    registry: State<'_, WorkspaceRegistry>,
+) -> Result<Vec<ProjectRecord>, String> {
     let connection = database
         .connection
         .lock()
@@ -639,19 +662,27 @@ pub fn list_projects(database: State<'_, AppDatabase>) -> Result<Vec<ProjectReco
              ORDER BY last_opened_at DESC",
         )
         .map_err(|error| error.to_string())?;
-    statement
+    let projects = statement
         .query_map([], project_from_row)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // A project saved by an older build may point at a deleted directory or
+    // at the filesystem root. Do not let one stale record prevent the user
+    // from opening the native picker and recovering the workspace list.
+    Ok(projects
+        .into_iter()
+        .filter(|project| registry.register(Path::new(&project.path)).is_ok())
+        .collect())
 }
 
 #[tauri::command]
 pub fn upsert_project(
     database: State<'_, AppDatabase>,
+    registry: State<'_, WorkspaceRegistry>,
     path: String,
 ) -> Result<ProjectRecord, String> {
-    let path = canonical_directory(&path)?;
+    let path = registry.authorize(&path)?;
     let path_string = path.to_string_lossy().into_owned();
     let name = project_name(&path);
     let connection = database
@@ -690,12 +721,21 @@ pub fn upsert_project(
 #[tauri::command]
 pub fn list_sessions(
     database: State<'_, AppDatabase>,
+    registry: State<'_, WorkspaceRegistry>,
     project_id: String,
 ) -> Result<Vec<SessionRecord>, String> {
     let connection = database
         .connection
         .lock()
         .map_err(|_| "Database lock poisoned".to_string())?;
+    let project_path: String = connection
+        .query_row(
+            "SELECT path FROM projects WHERE id = ?1",
+            [&project_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    registry.register(Path::new(&project_path))?;
     let mut statement = connection
         .prepare(
             "SELECT id, project_id, title, cwd, acp_session_id, timeline_json,
@@ -716,14 +756,28 @@ pub fn list_sessions(
 #[tauri::command]
 pub fn create_session(
     database: State<'_, AppDatabase>,
+    registry: State<'_, WorkspaceRegistry>,
     project_id: String,
     cwd: String,
 ) -> Result<SessionRecord, String> {
-    let cwd = canonical_directory(&cwd)?.to_string_lossy().into_owned();
+    let project_path: String;
     let connection = database
         .connection
         .lock()
         .map_err(|_| "Database lock poisoned".to_string())?;
+    project_path = connection
+        .query_row(
+            "SELECT path FROM projects WHERE id = ?1",
+            [&project_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let project_root = registry.authorize(&project_path)?;
+    let cwd = registry.authorize(&cwd)?;
+    if !cwd.starts_with(&project_root) {
+        return Err("Session directory must be inside the selected project".to_string());
+    }
+    let cwd = cwd.to_string_lossy().into_owned();
     let now = current_timestamp(&connection)?;
     let id = Uuid::new_v4().to_string();
     connection
@@ -852,7 +906,8 @@ pub fn find_permission_rule(
 }
 
 #[tauri::command]
-pub fn upsert_permission_rule(
+pub async fn upsert_permission_rule(
+    app: AppHandle,
     database: State<'_, AppDatabase>,
     project_id: String,
     tool_key: String,
@@ -865,6 +920,18 @@ pub fn upsert_permission_rule(
     }
     if tool_key.trim().is_empty() {
         return Err("Permission rule key cannot be empty".to_string());
+    }
+    if decision == "allow" {
+        confirm_action(
+            &app,
+            "确认保存永久权限",
+            format!(
+                "允许 MelodyWork 在此项目中永久放行以下工具吗？\n{}\n{}",
+                title.trim(),
+                command.trim()
+            ),
+        )
+        .await?;
     }
     let connection = database
         .connection
