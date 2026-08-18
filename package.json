@@ -16,6 +16,7 @@
     "format": "prettier --write eslint.config.js package.json index.html src/lib/preview-fixtures.ts src/domain/agent-session-reducer.ts src/domain/agent-session-reducer.test.mjs src/domain/prompt-timeout.ts src/domain/prompt-timeout.test.mjs src/domain/session-projection.ts src/domain/session-projection.test.mjs src/hooks/use-session-persistence.ts src/components/ai-elements/NOTICE.md",
     "format:check": "prettier --check eslint.config.js package.json index.html src/lib/preview-fixtures.ts src/domain/agent-session-reducer.ts src/domain/agent-session-reducer.test.mjs src/domain/prompt-timeout.ts src/domain/prompt-timeout.test.mjs src/domain/session-projection.ts src/domain/session-projection.test.mjs src/hooks/use-session-persistence.ts src/components/ai-elements/NOTICE.md",
     "check:updater-key": "node scripts/validate-updater-key.mjs",
+    "tauri:clean": "node scripts/clean-tauri-build.mjs",
     "test:unit": "node --experimental-strip-types --test src/domain/*.test.mjs src/features/files/*.test.mjs src/features/research/*.test.mjs",
     "test:projection": "node --experimental-strip-types --test src/domain/session-projection.test.mjs",
     "preview": "vite preview",

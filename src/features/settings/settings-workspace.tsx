@@ -2,12 +2,10 @@ import {
   ArrowLeftIcon,
   ChartNoAxesCombinedIcon,
   ChevronRightIcon,
-  CodeXmlIcon,
   InfoIcon,
   PuzzleIcon,
   RefreshCwIcon,
   SearchIcon,
-  SettingsIcon,
   ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
@@ -185,6 +183,15 @@ const skillSourceGroupId = (skill: MelodyExtension): SkillSourceGroupId => {
   }
   return "other";
 };
+
+const settingsSidebarGroupClass =
+  "mt-5 px-2 pb-1.5 font-semibold text-[11px] tracking-[0.06em] text-muted-foreground/65";
+const settingsSidebarItemClass =
+  "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors";
+const settingsSidebarItemState = (selected: boolean) =>
+  selected
+    ? "bg-muted font-medium text-foreground"
+    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground";
 
 export function SettingsWorkspace({
   cwd,
@@ -562,7 +569,6 @@ export function SettingsWorkspace({
         >
           <ArrowLeftIcon />
         </Button>
-        <SettingsIcon className="size-4 text-muted-foreground" />
         <div className="min-w-0 flex-1" data-tauri-drag-region>
           <h2 className="font-semibold text-base">设置</h2>
         </div>
@@ -580,10 +586,9 @@ export function SettingsWorkspace({
             <button
               aria-current={page === "statistics" ? "page" : undefined}
               className={cn(
-                "mb-4 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                page === "statistics"
-                  ? "bg-[#eff0f0] text-foreground dark:bg-muted"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "mb-4",
+                settingsSidebarItemClass,
+                settingsSidebarItemState(page === "statistics"),
               )}
               onClick={() => {
                 setPage("statistics");
@@ -594,10 +599,7 @@ export function SettingsWorkspace({
               <ChartNoAxesCombinedIcon className="size-3.5" />
               统计
             </button>
-            <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground">
-              <CodeXmlIcon className="size-3.5" />
-              <p className="font-medium text-xs">配置</p>
-            </div>
+            <p className={settingsSidebarGroupClass}>配置</p>
             <div className="flex flex-col gap-0.5">
               {primaryConfigNavigation.map((item) => {
                 const Icon = item.icon;
@@ -608,10 +610,8 @@ export function SettingsWorkspace({
                   <button
                     aria-current={selected ? "page" : undefined}
                     className={cn(
-                      "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                      selected
-                        ? "bg-[#eff0f0] text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      settingsSidebarItemClass,
+                      settingsSidebarItemState(selected),
                     )}
                     key={item.id}
                     onClick={() => {
@@ -628,9 +628,7 @@ export function SettingsWorkspace({
               })}
             </div>
 
-            <p className="mt-5 px-2 pb-1.5 font-medium text-muted-foreground text-xs">
-              扩展
-            </p>
+            <p className={settingsSidebarGroupClass}>扩展</p>
             <div className="flex flex-col gap-0.5">
               {extensionConfigNavigation.map((item) => {
                 const Icon = item.icon;
@@ -641,10 +639,8 @@ export function SettingsWorkspace({
                   <button
                     aria-current={selected ? "page" : undefined}
                     className={cn(
-                      "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                      selected
-                        ? "bg-[#eff0f0] text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      settingsSidebarItemClass,
+                      settingsSidebarItemState(selected),
                     )}
                     key={item.id}
                     onClick={() => {
@@ -666,10 +662,8 @@ export function SettingsWorkspace({
                   <button
                     aria-current={selected ? "page" : undefined}
                     className={cn(
-                      "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                      selected
-                        ? "bg-[#eff0f0] text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      settingsSidebarItemClass,
+                      settingsSidebarItemState(selected),
                     )}
                     key={kind}
                     onClick={() => {
@@ -685,16 +679,12 @@ export function SettingsWorkspace({
               })}
             </div>
 
-            <p className="mt-5 px-2 pb-1.5 font-medium text-muted-foreground text-xs">
-              安全
-            </p>
+            <p className={settingsSidebarGroupClass}>安全</p>
             <button
               aria-current={page === "permissions" ? "page" : undefined}
               className={cn(
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                page === "permissions"
-                  ? "bg-[#eff0f0] text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                settingsSidebarItemClass,
+                settingsSidebarItemState(page === "permissions"),
               )}
               onClick={() => {
                 setPage("permissions");
@@ -706,16 +696,12 @@ export function SettingsWorkspace({
               权限
             </button>
 
-            <p className="mt-5 px-2 pb-1.5 font-medium text-muted-foreground text-xs">
-              关于
-            </p>
+            <p className={settingsSidebarGroupClass}>关于</p>
             <button
               aria-current={page === "about" ? "page" : undefined}
               className={cn(
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
-                page === "about"
-                  ? "bg-[#eff0f0] text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                settingsSidebarItemClass,
+                settingsSidebarItemState(page === "about"),
               )}
               onClick={() => {
                 setPage("about");

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { cleanTauriBuildTargets } from "./clean-tauri-build.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -20,16 +21,6 @@ function run(command, commandArgs) {
   return result.status ?? 1;
 }
 
-if (args[0] === "dev") {
-  const prepareStatus = run(process.execPath, [
-    "scripts/prepare-sidecar.mjs",
-    "--dev",
-  ]);
-  if (prepareStatus !== 0) {
-    process.exit(prepareStatus);
-  }
-}
-
 const tauriCommand = resolve(
   projectRoot,
   "node_modules",
@@ -37,4 +28,33 @@ const tauriCommand = resolve(
   process.platform === "win32" ? "tauri.cmd" : "tauri",
 );
 
-process.exit(run(tauriCommand, args));
+const isDevCommand = args[0] === "dev";
+const keepTauriTarget = process.env.MELODY_KEEP_TAURI_TARGET === "1";
+let exitStatus = 1;
+
+try {
+  if (isDevCommand) {
+    const prepareStatus = run(process.execPath, [
+      "scripts/prepare-sidecar.mjs",
+      "--dev",
+    ]);
+
+    if (prepareStatus !== 0) {
+      exitStatus = prepareStatus;
+    } else {
+      exitStatus = run(tauriCommand, args);
+    }
+  } else {
+    exitStatus = run(tauriCommand, args);
+  }
+} finally {
+  if (isDevCommand && !keepTauriTarget) {
+    console.log("Development session ended; cleaning Tauri build targets…");
+    const cleanupStatus = cleanTauriBuildTargets();
+    if (exitStatus === 0 && cleanupStatus !== 0) {
+      exitStatus = cleanupStatus;
+    }
+  }
+}
+
+process.exit(exitStatus);
