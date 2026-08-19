@@ -485,7 +485,7 @@ export function AppSidebar({
                 </div>
 
                 <CollapsibleContent className="motion-collapsible-content">
-                  <div className="flex flex-col gap-0 pl-6">
+                  <div className="flex flex-col gap-0.5 pl-6 pt-0.5">
                     {sessions.map((session) => {
                       const selected = session.id === activeSessionId;
                       const running = runningSessions[session.id] === true;
