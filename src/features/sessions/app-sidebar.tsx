@@ -320,7 +320,7 @@ export function AppSidebar({
             variant="ghost"
           >
             <GitPullRequestIcon data-icon="inline-start" />
-            Git 工作区
+            审阅
           </Button>
         )}
         <Button
