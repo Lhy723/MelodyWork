@@ -68,7 +68,10 @@ export function AgentTimeline({
 
   return (
     <Conversation className="harness-chat-scroll min-h-0">
-      <ConversationContent className="harness-chat-content mx-auto w-full max-w-3xl gap-5 px-4 py-8 sm:px-6">
+      <ConversationContent
+        className="harness-chat-content mx-auto w-full max-w-3xl gap-5 px-4 py-8 sm:px-6"
+        scrollClassName="harness-chat-scroll-viewport"
+      >
         {renderEntries.map((entry, index) => {
           const motionStyle = {
             animationDelay: `${Math.min(index, 6) * 24}ms`,
@@ -146,7 +149,7 @@ export function AgentTimeline({
           );
         })}
       </ConversationContent>
-      <ConversationScrollButton />
+      <ConversationScrollButton className="harness-chat-scroll-button" />
     </Conversation>
   );
 }

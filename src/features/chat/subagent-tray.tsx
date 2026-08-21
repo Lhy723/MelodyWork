@@ -15,6 +15,7 @@ import type { AgentSubagent } from "@/domain/acp";
 import { cn } from "@/lib/utils";
 
 interface SubagentTrayProps {
+  className?: string;
   onOpenSubagent: (subagent: AgentSubagent) => void;
   subagents: AgentSubagent[];
 }
@@ -56,6 +57,7 @@ const StatusIcon = ({ status }: Pick<AgentSubagent, "status">) => {
 };
 
 export function SubagentTray({
+  className,
   onOpenSubagent,
   subagents,
 }: SubagentTrayProps) {
@@ -65,7 +67,12 @@ export function SubagentTray({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl justify-end px-4 pb-2 sm:px-6">
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-5xl justify-end px-4 pb-2 sm:px-6",
+        className,
+      )}
+    >
       <Popover>
         <PopoverTrigger asChild>
           <Button

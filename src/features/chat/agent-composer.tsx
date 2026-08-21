@@ -213,6 +213,7 @@ export function AgentComposer({
   onSubmit,
 }: AgentComposerProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [composerText, setComposerText] = useState("");
   const sendShortcut = useAppSettingsStore((state) => state.sendShortcut);
   const showContextUsage = useAppSettingsStore(
     (state) => state.showContextUsage,
@@ -243,6 +244,7 @@ export function AgentComposer({
   const SessionModeIcon = selectedSessionModeCopy?.icon ?? BotIcon;
 
   const handleSubmit = (message: PromptInputMessage) => {
+    setComposerText("");
     return onSubmit(message.text, message.files);
   };
 
@@ -261,6 +263,7 @@ export function AgentComposer({
         </PromptInputHeader>
         <PromptInputBody>
           <PromptInputTextarea
+            onChange={(event) => setComposerText(event.currentTarget.value)}
             placeholder="让 Melody 构建、审查或解释…"
             submitShortcut={sendShortcut}
           />
@@ -495,7 +498,11 @@ export function AgentComposer({
               </Context>
             ) : null}
           </PromptInputTools>
-          <PromptInputSubmit onStop={onStop} status={status} />
+          <PromptInputSubmit
+            hasContent={composerText.trim().length > 0}
+            onStop={onStop}
+            status={status}
+          />
         </PromptInputFooter>
       </PromptInput>
     </div>
