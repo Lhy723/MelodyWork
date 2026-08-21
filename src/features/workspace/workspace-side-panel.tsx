@@ -148,18 +148,21 @@ export function WorkspaceSidePanel({
       >
         <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-ring group-focus-visible:bg-ring" />
       </div>
-      <header className="harness-window-titlebar flex shrink-0 items-center border-b">
+      <header
+        className="harness-window-titlebar flex shrink-0 items-center border-b"
+        data-tauri-drag-region
+      >
         <div
           aria-label="工作区标签页"
           className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1"
+          data-tauri-drag-region
           role="tablist"
         >
           {tabs.map((tab) => (
             <div
               className={cn(
-                "group relative flex h-6 min-w-0 max-w-52 shrink-0 items-center rounded-md border border-transparent text-muted-foreground transition-colors",
-                activeTabId === tab.id &&
-                  "text-foreground",
+                "group relative flex h-8 min-w-0 max-w-52 shrink-0 items-center rounded-md border border-transparent text-muted-foreground transition-colors",
+                activeTabId === tab.id && "text-foreground",
               )}
               key={tab.id}
             >
@@ -175,7 +178,7 @@ export function WorkspaceSidePanel({
               ) : null}
               <button
                 aria-selected={activeTabId === tab.id}
-                className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-1 pl-2.5 text-xs outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="relative z-10 flex h-full min-w-0 flex-1 items-center gap-1.5 pr-1 pl-2.5 text-xs outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 onClick={() => onActivateTab(tab.id)}
                 role="tab"
                 title={tab.kind === "file" ? tab.path : tab.label}
@@ -186,9 +189,9 @@ export function WorkspaceSidePanel({
               </button>
               <Button
                 aria-label={`关闭 ${tab.label}`}
-                className="mr-1 size-6 shrink-0 opacity-55 hover:opacity-100"
+                className="mr-1 size-7 shrink-0 opacity-55 hover:opacity-100"
                 onClick={() => onCloseTab(tab.id)}
-                size="icon-xs"
+                size="icon-sm"
                 variant="ghost"
               >
                 <XIcon />
@@ -280,16 +283,11 @@ export function WorkspaceSidePanel({
             }}
             transition={{
               duration: activeTabId === tab.id ? 0.28 : 0.16,
-              ease:
-                activeTabId === tab.id ? MOTION_EASE : MOTION_LEAVE_EASE,
+              ease: activeTabId === tab.id ? MOTION_EASE : MOTION_LEAVE_EASE,
             }}
           >
             {tab.kind === "files" ? (
-              <FileWorkspace
-                embedded
-                onOpenFile={onOpenFile}
-                root={root}
-              />
+              <FileWorkspace embedded onOpenFile={onOpenFile} root={root} />
             ) : tab.kind === "terminal" ? (
               <TerminalPanel cwd={cwd} embedded />
             ) : tab.kind === "review" ? (

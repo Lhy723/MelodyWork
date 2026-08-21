@@ -1,6 +1,7 @@
 import {
   DownloadIcon,
   GitCompareArrowsIcon,
+  ListFilterIcon,
   PanelRightIcon,
 } from "lucide-react";
 import { AnimatePresence } from "motion/react";
@@ -77,6 +78,8 @@ const MIN_WORKSPACE_PANEL_WIDTH = 360;
 const MAX_WORKSPACE_PANEL_WIDTH = 960;
 const WORKSPACE_PANEL_WIDTH_STORAGE_KEY = "melodywork.workspace-panel.width";
 const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
+const DEFAULT_CHAT_DOCK_SPACE = 220;
+const SESSION_INFO_MOTION_MS = 220;
 
 const isMacOS =
   typeof navigator !== "undefined" &&
@@ -248,6 +251,11 @@ export function AgentWorkspace() {
   const resolvePlan = useAgentStore((state) => state.resolvePlan);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([]);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(true);
+  const [sessionInfoLayoutOpen, setSessionInfoLayoutOpen] = useState(true);
+  const [sessionInfoSurfaceOpen, setSessionInfoSurfaceOpen] = useState(true);
+  const sessionInfoCloseTimerRef = useRef<number | undefined>(undefined);
+  const sessionInfoOpenFrameRef = useRef<number | undefined>(undefined);
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState<string>();
   const [workspacePanelWidth, setWorkspacePanelWidth] = useState(
     storedWorkspacePanelWidth,
@@ -258,6 +266,8 @@ export function AgentWorkspace() {
     startWidth: number;
     startX: number;
   }>();
+  const [chatDockSpace, setChatDockSpace] = useState(DEFAULT_CHAT_DOCK_SPACE);
+  const chatDockRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceMode, setWorkspaceMode] =
     useState<WorkspaceMode>(storedWorkspaceMode);
@@ -319,6 +329,61 @@ export function AgentWorkspace() {
     [subagents, acpSessionId],
   );
 
+  const toggleSessionInfo = useCallback(() => {
+    if (sessionInfoCloseTimerRef.current !== undefined) {
+      window.clearTimeout(sessionInfoCloseTimerRef.current);
+      sessionInfoCloseTimerRef.current = undefined;
+    }
+    if (sessionInfoOpenFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(sessionInfoOpenFrameRef.current);
+      sessionInfoOpenFrameRef.current = undefined;
+    }
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    if (sessionInfoOpen) {
+      setSessionInfoOpen(false);
+      setSessionInfoSurfaceOpen(false);
+      if (reduceMotion) {
+        setSessionInfoLayoutOpen(false);
+      } else {
+        sessionInfoCloseTimerRef.current = window.setTimeout(() => {
+          setSessionInfoLayoutOpen(false);
+          sessionInfoCloseTimerRef.current = undefined;
+        }, SESSION_INFO_MOTION_MS);
+      }
+      return;
+    }
+
+    setSessionInfoLayoutOpen(true);
+    setSessionInfoOpen(true);
+    setSessionInfoSurfaceOpen(false);
+    if (reduceMotion) {
+      setSessionInfoSurfaceOpen(true);
+      return;
+    }
+
+    sessionInfoOpenFrameRef.current = window.requestAnimationFrame(() => {
+      sessionInfoOpenFrameRef.current = window.requestAnimationFrame(() => {
+        setSessionInfoSurfaceOpen(true);
+        sessionInfoOpenFrameRef.current = undefined;
+      });
+    });
+  }, [sessionInfoOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (sessionInfoCloseTimerRef.current !== undefined) {
+        window.clearTimeout(sessionInfoCloseTimerRef.current);
+      }
+      if (sessionInfoOpenFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(sessionInfoOpenFrameRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     void checkAppUpdate()
       .then(setAppUpdate)
@@ -328,6 +393,21 @@ export function AgentWorkspace() {
   useEffect(() => {
     setResearchActiveProject(activeProject?.id);
   }, [activeProject?.id, setResearchActiveProject]);
+
+  useEffect(() => {
+    const dock = chatDockRef.current;
+    if (!dock || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const updateDockSpace = () => {
+      setChatDockSpace(Math.ceil(dock.getBoundingClientRect().height) + 16);
+    };
+    const observer = new ResizeObserver(updateDockSpace);
+    observer.observe(dock);
+    updateDockSpace();
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const sessionId = activeSession?.id;
@@ -1060,6 +1140,24 @@ export function AgentWorkspace() {
                             ) : null}
                             <Button
                               aria-label={
+                                sessionInfoOpen
+                                  ? "收起会话信息"
+                                  : "展开会话信息"
+                              }
+                              aria-pressed={sessionInfoOpen}
+                              onClick={toggleSessionInfo}
+                              size="icon"
+                              title={
+                                sessionInfoOpen
+                                  ? "收起会话信息"
+                                  : "展开会话信息"
+                              }
+                              variant={sessionInfoOpen ? "secondary" : "ghost"}
+                            >
+                              <ListFilterIcon />
+                            </Button>
+                            <Button
+                              aria-label={
                                 workspacePanelOpen
                                   ? "收起右侧边栏"
                                   : "展开右侧边栏"
@@ -1125,42 +1223,88 @@ export function AgentWorkspace() {
                         )}
                       </Presence>
 
-                      {conversationView === "chat" ? (
-                        <AgentTimeline
-                          cwd={cwd}
-                          entries={timeline}
-                          onPermission={resolvePermission}
-                          onPlanDecision={resolvePlan}
-                          onOpenProjectReference={openProjectReference}
-                          projectRoot={activeProject?.path ?? cwd}
-                          turnRunning={
-                            chatStatus === "submitted" ||
-                            chatStatus === "streaming"
+                      <div className="harness-chat-layout">
+                        <div
+                          className="relative flex min-w-0 flex-1 flex-col"
+                          style={
+                            {
+                              "--harness-chat-dock-space": `${chatDockSpace}px`,
+                            } as CSSProperties
                           }
-                        />
-                      ) : (
-                        <TrajectoryView
-                          entries={timeline}
-                          running={
-                            chatStatus === "submitted" ||
-                            chatStatus === "streaming"
-                          }
-                        />
-                      )}
-                      <SubagentTray
-                        onOpenSubagent={openSubagent}
-                        subagents={visibleSubagents}
-                      />
-                      <SessionStatsLine
-                        contextUsage={contextUsage}
-                        entries={timeline}
-                        modelName={
-                          availableModels.find(
-                            (model) => model.id === selectedModelId,
-                          )?.name
-                        }
-                      />
-                      {renderComposer(submitPrompt)}
+                        >
+                          {conversationView === "chat" ? (
+                            <AgentTimeline
+                              cwd={cwd}
+                              entries={timeline}
+                              onPermission={resolvePermission}
+                              onPlanDecision={resolvePlan}
+                              onOpenProjectReference={openProjectReference}
+                              projectRoot={activeProject?.path ?? cwd}
+                              turnRunning={
+                                chatStatus === "submitted" ||
+                                chatStatus === "streaming"
+                              }
+                            />
+                          ) : (
+                            <TrajectoryView
+                              entries={timeline}
+                              running={
+                                chatStatus === "submitted" ||
+                                chatStatus === "streaming"
+                              }
+                            />
+                          )}
+                          <div
+                            className="harness-chat-bottom-dock"
+                            ref={chatDockRef}
+                          >
+                            {renderComposer(submitPrompt)}
+                          </div>
+                        </div>
+                        <aside
+                          aria-hidden={!sessionInfoOpen}
+                          aria-label="会话信息"
+                          className="harness-session-info-panel"
+                          data-layout-open={sessionInfoLayoutOpen}
+                          inert={!sessionInfoOpen}
+                        >
+                          <div
+                            className="harness-session-info-surface"
+                            data-open={sessionInfoSurfaceOpen}
+                          >
+                            <div className="harness-session-info-header">
+                              <span>会话信息</span>
+                            </div>
+                            <div className="harness-session-info-body">
+                              <section className="harness-session-info-section">
+                                <div className="harness-session-info-section-title">
+                                  <span>Subagents</span>
+                                  <span>{visibleSubagents.length}</span>
+                                </div>
+                                <SubagentTray
+                                  className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
+                                  onOpenSubagent={openSubagent}
+                                  subagents={visibleSubagents}
+                                />
+                              </section>
+                              <section className="harness-session-info-section">
+                                <div className="harness-session-info-section-title">
+                                  <span>运行统计</span>
+                                </div>
+                                <SessionStatsLine
+                                  contextUsage={contextUsage}
+                                  entries={timeline}
+                                  modelName={
+                                    availableModels.find(
+                                      (model) => model.id === selectedModelId,
+                                    )?.name
+                                  }
+                                />
+                              </section>
+                            </div>
+                          </div>
+                        </aside>
+                      </div>
                     </div>
                     <div
                       aria-hidden={!workspacePanelOpen}

@@ -714,6 +714,7 @@ body {
    disclosures, stateful tool colors, and a separate trajectory view. */
 :root {
   --harness-window-titlebar-height: 46px;
+  --harness-chat-dock-space: 220px;
   --harness-bg-base: #ffffff;
   --harness-bg-layer-1: #ffffff;
   --harness-bg-layer-2: #fafafa;
@@ -852,7 +853,169 @@ body {
 
   .harness-chat-content {
     padding-top: 26px;
-    padding-bottom: 180px;
+    padding-bottom: 0 !important;
+  }
+
+  .harness-chat-scroll-viewport {
+    /* This is the actual overflow:auto node created by StickToBottom.Content.
+       Keeping the safe area here makes it part of scrollHeight and avoids
+       relying on the inner content ResizeObserver to measure padding. */
+    padding-bottom: var(--harness-chat-dock-space) !important;
+  }
+
+  .harness-chat-bottom-dock {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .harness-chat-bottom-dock > * {
+    pointer-events: auto;
+  }
+
+  .harness-chat-layout {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+    background: var(--harness-bg-base);
+  }
+
+  .harness-session-info-panel {
+    display: flex;
+    height: fit-content;
+    width: min(21rem, 30%);
+    max-height: calc(100% - 24px);
+    min-width: 260px;
+    flex: 0 1 min(21rem, 30%);
+    flex-direction: column;
+    align-self: flex-start;
+    margin: 12px 16px 0 0;
+    overflow: visible;
+    contain: layout;
+  }
+
+  .harness-session-info-panel[data-layout-open="false"] {
+    width: 0;
+    min-width: 0;
+    flex-basis: 0;
+    margin-right: 0;
+    pointer-events: none;
+  }
+
+  .harness-session-info-surface {
+    display: flex;
+    width: 100%;
+    max-height: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--harness-border-2);
+    border-radius: 16px;
+    background: var(--harness-bg-base);
+    box-shadow: 0 18px 42px -26px rgb(0 0 0 / 55%);
+    -webkit-backdrop-filter: blur(24px) saturate(1.15);
+    backdrop-filter: blur(24px) saturate(1.15);
+    contain: paint;
+    opacity: 1;
+    transform: translateX(0);
+    transition:
+      opacity 160ms ease-out,
+      transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .harness-session-info-surface[data-open="false"] {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(18px);
+  }
+
+  .harness-session-info-header {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--harness-border-2);
+    padding: 0 10px 0 16px;
+    color: var(--harness-text-strong);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .harness-session-info-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .harness-session-info-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  .harness-session-info-section {
+    overflow: hidden;
+    border: 1px solid var(--harness-border-2);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--harness-bg-layer-1) 74%, transparent);
+    padding: 10px;
+  }
+
+  .harness-session-info-section + .harness-session-info-section {
+    margin-top: 10px;
+  }
+
+  .harness-session-info-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--harness-text-strong);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .harness-session-info-section-title > :last-child {
+    color: var(--harness-text-muted);
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  .harness-session-info-panel .harness-stats-line {
+    min-height: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 5px;
+    overflow: visible;
+    padding: 0;
+    white-space: normal;
+    flex-wrap: wrap;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 720px) {
+    .harness-session-info-panel {
+      width: min(19rem, 42%);
+      min-width: 220px;
+      flex-basis: min(19rem, 42%);
+      margin-right: 12px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .harness-session-info-surface {
+      transition: none;
+    }
+  }
+
+  .harness-chat-scroll-button {
+    bottom: var(--harness-chat-dock-space) !important;
   }
 
   .harness-chat-message {
@@ -922,15 +1085,27 @@ body {
     background: linear-gradient(
       to bottom,
       transparent,
-      var(--harness-bg-base) 26px,
-      var(--harness-bg-base) 100%
+      color-mix(in srgb, var(--harness-bg-base) 45%, transparent) 26px,
+      transparent 100%
     );
   }
 
   .harness-composer {
+    background: transparent !important;
+  }
+
+  .harness-composer [data-slot="input-group"] {
     border-color: var(--harness-border-2) !important;
-    background: var(--harness-bg-layer-1) !important;
-    box-shadow: var(--harness-shadow);
+    background: color-mix(
+      in srgb,
+      var(--harness-bg-base) 76%,
+      transparent
+    ) !important;
+    box-shadow:
+      var(--harness-shadow),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.15);
+    backdrop-filter: blur(20px) saturate(1.15);
   }
 
   .harness-composer [data-slot="prompt-input-footer"] {
@@ -1153,7 +1328,7 @@ body {
     min-height: 0;
     flex: 1;
     overflow: auto;
-    padding-bottom: 160px;
+    padding-bottom: var(--harness-chat-dock-space);
   }
 
   .harness-trajectory-turn {

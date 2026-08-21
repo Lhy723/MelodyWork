@@ -29,7 +29,11 @@ const tauriCommand = resolve(
 );
 
 const isDevCommand = args[0] === "dev";
-const keepTauriTarget = process.env.MELODY_KEEP_TAURI_TARGET === "1";
+// Keep Cargo's incremental cache during normal development. Cleaning is an
+// explicit maintenance action (`pnpm tauri:clean`) or an opt-in override.
+const cleanTauriTarget =
+  process.env.MELODY_CLEAN_TAURI_TARGET === "1" &&
+  process.env.MELODY_KEEP_TAURI_TARGET !== "1";
 let exitStatus = 1;
 
 try {
@@ -48,7 +52,7 @@ try {
     exitStatus = run(tauriCommand, args);
   }
 } finally {
-  if (isDevCommand && !keepTauriTarget) {
+  if (isDevCommand && cleanTauriTarget) {
     console.log("Development session ended; cleaning Tauri build targets…");
     const cleanupStatus = cleanTauriBuildTargets();
     if (exitStatus === 0 && cleanupStatus !== 0) {

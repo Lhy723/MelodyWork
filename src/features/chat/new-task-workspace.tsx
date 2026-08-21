@@ -42,7 +42,10 @@ export function NewTaskWorkspace({
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-background">
-      <header className="harness-window-titlebar flex shrink-0 items-center border-b px-5">
+      <header
+        className="harness-window-titlebar flex shrink-0 items-center border-b px-5"
+        data-tauri-drag-region
+      >
         <SquarePenIcon className="size-3.5 text-muted-foreground" />
         <span
           className={cn(
@@ -52,6 +55,11 @@ export function NewTaskWorkspace({
         >
           {researchMode ? "新建研究任务" : "新建任务"}
         </span>
+        <div
+          aria-hidden="true"
+          className="min-w-3 flex-1"
+          data-tauri-drag-region
+        />
         <Button className="ml-auto" onClick={onCancel} size="sm" variant="ghost">
           取消
         </Button>
