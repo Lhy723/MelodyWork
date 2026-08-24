@@ -78,7 +78,7 @@ const MIN_WORKSPACE_PANEL_WIDTH = 360;
 const MAX_WORKSPACE_PANEL_WIDTH = 960;
 const WORKSPACE_PANEL_WIDTH_STORAGE_KEY = "melodywork.workspace-panel.width";
 const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
-const DEFAULT_CHAT_DOCK_SPACE = 220;
+const DEFAULT_CHAT_DOCK_SPACE = 168;
 const SESSION_INFO_MOTION_MS = 220;
 
 const isMacOS =
