@@ -100,12 +100,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           MELODYWORK_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           MELODYWORK_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          MELODYWORK_BETA_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/download/update-beta/latest.json
         with:
           tagName: v__VERSION__
           releaseName: "MelodyWork v__VERSION__"
-          releaseBody: "Download the installer for your platform. This is a beta release."
+          releaseBody: "Download the installer for your platform."
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: "${{ matrix.tauri_args }} --config src-tauri/tauri.release.conf.json"
 
   publish-release:
@@ -115,4 +116,21 @@ jobs:
       - name: Publish signed updater release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+
+      - name: Update beta channel manifest
+        if: contains(github.ref_name, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          manifest_path="$RUNNER_TEMP/latest.json"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP"
+          if ! gh release view update-beta --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create update-beta --repo "$GITHUB_REPOSITORY" --title "MelodyWork 测试版更新通道" --notes "供客户端测试版渠道使用的签名更新清单。" --prerelease
+          fi
+          gh release upload update-beta "$manifest_path" --repo "$GITHUB_REPOSITORY" --clobber

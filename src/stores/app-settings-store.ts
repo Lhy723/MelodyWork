@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type UpdateChannel = "stable" | "beta";
+
 export interface AppSettings {
   theme: "system" | "light" | "dark";
   lightAccent: string;
@@ -20,6 +22,7 @@ export interface AppSettings {
   fontSmoothing: boolean;
   defaultPermissionMode: "ask" | "auto" | "always-approve";
   autoCheckForUpdates: boolean;
+  updateChannel: UpdateChannel;
   defaultFileOpener: "system" | "vscode" | "cursor";
   language: "auto" | "zh-CN" | "en";
   showInMenuBar: boolean;
@@ -65,6 +68,7 @@ const defaultSettings: AppSettings = {
   fontSmoothing: true,
   defaultPermissionMode: "ask",
   autoCheckForUpdates: true,
+  updateChannel: "stable",
   defaultFileOpener: "vscode",
   language: "auto",
   showInMenuBar: true,
@@ -122,6 +126,11 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
               : legacyFullAccess === true
                 ? "always-approve"
                 : currentState.defaultPermissionMode,
+          updateChannel:
+            persistedSettings.updateChannel === "stable" ||
+            persistedSettings.updateChannel === "beta"
+              ? persistedSettings.updateChannel
+              : currentState.updateChannel,
         } as AppSettingsStore;
       },
       partialize: (settings) => {

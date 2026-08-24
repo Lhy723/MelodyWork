@@ -18,6 +18,10 @@ import {
   openExternalUrl,
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
+import {
+  useAppSettingsStore,
+  type UpdateChannel,
+} from "@/stores/app-settings-store";
 
 type UpdateCheckState =
   | { status: "idle" }
@@ -25,15 +29,20 @@ type UpdateCheckState =
   | { status: "up-to-date" }
   | {
       status: "available";
+      channel: UpdateChannel;
       version: string;
       notes?: string;
     }
-  | { status: "installing" }
+  | { status: "installing"; channel: UpdateChannel }
   | { status: "installed" }
   | { status: "error"; message: string }
   | { status: "not-configured" };
 
 const GITHUB_REPO_URL = "https://github.com/Lhy723/MelodyWork";
+const updateChannelLabel: Record<UpdateChannel, string> = {
+  stable: "正式版",
+  beta: "测试版",
+};
 
 function GithubMark({ className }: { className?: string }) {
   return (
@@ -54,6 +63,7 @@ function GithubMark({ className }: { className?: string }) {
 
 export function AboutPage() {
   const [currentVersion, setCurrentVersion] = useState(appPackage.version);
+  const updateChannel = useAppSettingsStore((state) => state.updateChannel);
   const [updateState, setUpdateState] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -63,14 +73,19 @@ export function AboutPage() {
     updateState.status === "checking" || updateState.status === "installing";
 
   const checkForUpdate = async () => {
+    const channel = updateChannel;
     setUpdateState({ status: "checking" });
     try {
-      const result = await checkAppUpdate(false);
+      const result = await checkAppUpdate(channel);
+      if (channel !== useAppSettingsStore.getState().updateChannel) {
+        return;
+      }
       if (!result.configured) {
         setUpdateState({ status: "not-configured" });
       } else if (result.available && result.version) {
         setUpdateState({
           status: "available",
+          channel: result.channel,
           version: result.version,
           notes: result.notes,
         });
@@ -86,9 +101,13 @@ export function AboutPage() {
   };
 
   const installUpdate = async () => {
-    setUpdateState({ status: "installing" });
+    if (updateState.status !== "available") {
+      return;
+    }
+    const channel = updateState.channel;
+    setUpdateState({ status: "installing", channel });
     try {
-      await checkAppUpdate(true);
+      await checkAppUpdate(channel, true);
       setUpdateState({ status: "installed" });
       await relaunch();
     } catch (reason) {
@@ -127,6 +146,10 @@ export function AboutPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setUpdateState({ status: "idle" });
+  }, [updateChannel]);
+
   return (
     <div className="mx-auto max-w-2xl p-8">
       <div className="flex flex-col items-center text-center">
@@ -147,6 +170,12 @@ export function AboutPage() {
         </div>
 
         <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
+          <p className="text-muted-foreground text-xs">
+            更新渠道：
+            <span className="font-medium text-foreground">
+              {updateChannelLabel[updateChannel]}
+            </span>
+          </p>
           <Button
             className="w-full"
             disabled={isBusy}
@@ -156,7 +185,9 @@ export function AboutPage() {
             <RefreshCwIcon
               className={cn("mr-2 size-4", isBusy && "animate-spin")}
             />
-            {updateState.status === "checking" ? "正在检查更新…" : "检查更新"}
+            {updateState.status === "checking"
+              ? "正在检查更新…"
+              : `检查${updateChannelLabel[updateChannel]}更新`}
           </Button>
 
           <Button
@@ -174,7 +205,7 @@ export function AboutPage() {
           {updateState.status === "up-to-date" ? (
             <div className="flex items-center justify-center gap-2 rounded-lg border bg-green-50 px-4 py-3 text-green-700 text-sm dark:bg-green-950/30 dark:text-green-400">
               <CheckCircleIcon className="size-4" />
-              当前已是最新版本
+              当前已是{updateChannelLabel[updateChannel]}的最新版本
             </div>
           ) : null}
 
@@ -184,7 +215,7 @@ export function AboutPage() {
               <div className="flex items-center gap-2">
                 <InfoIcon className="size-4 text-blue-500" />
                 <p className="font-medium text-sm">
-                  发现新版本 v
+                  发现{updateChannelLabel[updateState.channel]}新版本 v
                   {updateState.status === "available"
                     ? updateState.version
                     : ""}

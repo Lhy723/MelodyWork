@@ -1249,6 +1249,19 @@ function ApplicationGeneralSettings() {
           />
         </PreferenceRow>
         <PreferenceRow
+          description="正式版经过完整验证后发布；测试版会更早提供新功能，可能包含未解决的问题。"
+          label="检测更新渠道"
+        >
+          <PreferenceSelect
+            label="检测更新渠道"
+            options={[
+              { label: "正式版", value: "stable" },
+              { label: "测试版", value: "beta" },
+            ]}
+            settingKey="updateChannel"
+          />
+        </PreferenceRow>
+        <PreferenceRow
           description="从消息或工具活动中打开文件时使用的应用。"
           label="默认文件打开目标"
         >
