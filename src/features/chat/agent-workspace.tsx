@@ -223,6 +223,7 @@ export function AgentWorkspace() {
   const autoCheckForUpdates = useAppSettingsStore(
     (state) => state.autoCheckForUpdates,
   );
+  const updateChannel = useAppSettingsStore((state) => state.updateChannel);
   const selectedModelId = useAgentStore((state) => state.selectedModelId);
   const pendingModelId = useAgentStore((state) => state.pendingModelId);
   const selectedReasoningEffort = useAgentStore(
@@ -388,8 +389,9 @@ export function AgentWorkspace() {
       setAppUpdate(undefined);
       return;
     }
+    setAppUpdate(undefined);
     let active = true;
-    void checkAppUpdate()
+    void checkAppUpdate(updateChannel)
       .then((update) => {
         if (active) {
           setAppUpdate(update);
@@ -399,7 +401,7 @@ export function AgentWorkspace() {
     return () => {
       active = false;
     };
-  }, [autoCheckForUpdates]);
+  }, [autoCheckForUpdates, updateChannel]);
 
   useEffect(() => {
     setResearchActiveProject(activeProject?.id);
@@ -533,9 +535,13 @@ export function AgentWorkspace() {
   }, [workspacePanelResize]);
 
   const installAppUpdate = async () => {
+    const channel = appUpdate?.channel;
+    if (!channel) {
+      return;
+    }
     setInstallingUpdate(true);
     try {
-      setAppUpdate(await checkAppUpdate(true));
+      setAppUpdate(await checkAppUpdate(channel, true));
     } finally {
       setInstallingUpdate(false);
     }

@@ -17,6 +17,7 @@ import type {
 import type { GitBranch, GitChange, GitDiff, GitWorktree } from "@/domain/git";
 import type { PermissionDecision, PermissionRule } from "@/domain/permission";
 import type { UsageStatistics } from "@/domain/statistics";
+import type { UpdateChannel } from "@/stores/app-settings-store";
 import type {
   ProjectRecord,
   SessionRecord,
@@ -39,6 +40,7 @@ declare global {
 }
 
 export interface AppUpdateStatus {
+  channel: UpdateChannel;
   configured: boolean;
   available: boolean;
   version?: string;
@@ -1124,11 +1126,13 @@ export const deletePermissionRule = async (
 };
 
 export const checkAppUpdate = async (
+  channel: UpdateChannel = "stable",
   install = false,
 ): Promise<AppUpdateStatus> =>
   isTauriRuntime()
-    ? invoke<AppUpdateStatus>("check_app_update", { install })
+    ? invoke<AppUpdateStatus>("check_app_update", { channel, install })
     : {
+        channel,
         configured: false,
         available: false,
         installed: false,

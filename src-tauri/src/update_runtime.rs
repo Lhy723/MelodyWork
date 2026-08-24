@@ -1,10 +1,18 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    Stable,
+    Beta,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateStatus {
+    channel: UpdateChannel,
     configured: bool,
     available: bool,
     version: Option<String>,
@@ -13,11 +21,16 @@ pub struct AppUpdateStatus {
 }
 
 #[tauri::command]
-pub async fn check_app_update(app: AppHandle, install: bool) -> Result<AppUpdateStatus, String> {
+pub async fn check_app_update(
+    app: AppHandle,
+    channel: UpdateChannel,
+    install: bool,
+) -> Result<AppUpdateStatus, String> {
     let Some(public_key) =
         option_env!("MELODYWORK_UPDATER_PUBKEY").filter(|value| !value.trim().is_empty())
     else {
         return Ok(AppUpdateStatus {
+            channel,
             configured: false,
             available: false,
             version: None,
@@ -25,10 +38,13 @@ pub async fn check_app_update(app: AppHandle, install: bool) -> Result<AppUpdate
             installed: false,
         });
     };
-    let Some(endpoint) =
-        option_env!("MELODYWORK_UPDATER_ENDPOINT").filter(|value| !value.trim().is_empty())
-    else {
+    let endpoint = match channel {
+        UpdateChannel::Stable => option_env!("MELODYWORK_UPDATER_ENDPOINT"),
+        UpdateChannel::Beta => option_env!("MELODYWORK_BETA_UPDATER_ENDPOINT"),
+    };
+    let Some(endpoint) = endpoint.filter(|value| !value.trim().is_empty()) else {
         return Ok(AppUpdateStatus {
+            channel,
             configured: false,
             available: false,
             version: None,
@@ -48,6 +64,7 @@ pub async fn check_app_update(app: AppHandle, install: bool) -> Result<AppUpdate
         .map_err(|error| error.to_string())?;
     let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
         return Ok(AppUpdateStatus {
+            channel,
             configured: true,
             available: false,
             version: None,
@@ -64,6 +81,7 @@ pub async fn check_app_update(app: AppHandle, install: bool) -> Result<AppUpdate
             .map_err(|error| error.to_string())?;
     }
     Ok(AppUpdateStatus {
+        channel,
         configured: true,
         available: true,
         version,
@@ -74,6 +92,8 @@ pub async fn check_app_update(app: AppHandle, install: bool) -> Result<AppUpdate
 
 #[cfg(test)]
 mod tests {
+    use super::UpdateChannel;
+
     #[test]
     fn base_updater_configuration_deserializes() {
         let config: serde_json::Value =
@@ -85,5 +105,13 @@ mod tests {
             .expect("plugins.updater config");
         let _: tauri_plugin_updater::Config =
             serde_json::from_value(updater).expect("valid updater config");
+    }
+
+    #[test]
+    fn update_channel_deserializes_from_the_frontend_value() {
+        let stable: UpdateChannel = serde_json::from_str("\"stable\"").expect("stable channel");
+        let beta: UpdateChannel = serde_json::from_str("\"beta\"").expect("beta channel");
+        assert!(matches!(stable, UpdateChannel::Stable));
+        assert!(matches!(beta, UpdateChannel::Beta));
     }
 }
