@@ -64,9 +64,7 @@ export function ReasoningEffortSlider({
   }, [selectedProgress]);
 
   const draftIndex =
-    lastIndex === 0
-      ? 0
-      : Math.round((draftProgress / 100) * lastIndex);
+    lastIndex === 0 ? 0 : Math.round((draftProgress / 100) * lastIndex);
   const selectedOption = options[draftIndex] ?? options[0];
   const committedOption = options[selectedIndex] ?? options[0];
   const isMaximum = options.length > 1 && draftProgress >= 100;
@@ -157,7 +155,7 @@ export function ReasoningEffortSlider({
             <TooltipTrigger asChild>
               <button
                 aria-label="查看思考强度说明"
-                className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 type="button"
               >
                 <CircleHelpIcon className="size-3.5" />

@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type PointerEventHandler,
 } from "react";
 
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
 import type { AgentPromptAttachment, AgentSubagent } from "@/domain/acp";
 import type { ResearchPaper } from "@/domain/research";
+import { TaskLauncher } from "@/domain/task-launch";
 import {
   AppSidebar,
   type ResearchSection,
@@ -48,6 +50,7 @@ import { useWorkspace } from "@/hooks/use-workspace";
 import { useAgentStore } from "@/stores/agent-store";
 import { useResearchStore } from "@/features/research/research-store";
 import { buildResearchSkillContext } from "@/features/research/research-capability-store";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { checkAppUpdate, type AppUpdateStatus } from "@/lib/melody-bridge";
 import { localizedSessionTitle } from "@/lib/localize";
@@ -78,7 +81,7 @@ const MIN_WORKSPACE_PANEL_WIDTH = 360;
 const MAX_WORKSPACE_PANEL_WIDTH = 960;
 const WORKSPACE_PANEL_WIDTH_STORAGE_KEY = "melodywork.workspace-panel.width";
 const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
-const DEFAULT_CHAT_DOCK_SPACE = 220;
+const DEFAULT_CHAT_DOCK_SPACE = 168;
 const SESSION_INFO_MOTION_MS = 220;
 
 const isMacOS =
@@ -217,6 +220,9 @@ export function AgentWorkspace() {
   const agentLocalSessionId = useAgentStore((state) => state.localSessionId);
   const contextUsage = useAgentStore((state) => state.contextUsage);
   const availableModels = useAgentStore((state) => state.availableModels);
+  const autoCheckForUpdates = useAppSettingsStore(
+    (state) => state.autoCheckForUpdates,
+  );
   const selectedModelId = useAgentStore((state) => state.selectedModelId);
   const pendingModelId = useAgentStore((state) => state.pendingModelId);
   const selectedReasoningEffort = useAgentStore(
@@ -282,21 +288,7 @@ export function AgentWorkspace() {
     "chat" | "trajectory"
   >("chat");
   const [newTaskProjectId, setNewTaskProjectId] = useState<string>();
-  const pendingNewTaskPrompt = useRef<
-    | {
-        attachments: AgentPromptAttachment[];
-        content: string;
-        sessionId: string;
-      }
-    | undefined
-  >(undefined);
-  const pendingResearchPrompt = useRef<
-    | {
-        content: string;
-        sessionId: string;
-      }
-    | undefined
-  >(undefined);
+  const taskLauncherRef = useRef(new TaskLauncher());
   const [settingsPage, setSettingsPage] =
     useState<SettingsPage>("configuration");
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>();
@@ -328,6 +320,13 @@ export function AgentWorkspace() {
     () => subagentsForSession(subagents, acpSessionId),
     [subagents, acpSessionId],
   );
+  const sessionIsActive =
+    status.phase === "starting" ||
+    status.phase === "running" ||
+    acpPhase === "initializing" ||
+    acpPhase === "authenticating" ||
+    acpPhase === "creating" ||
+    acpPhase === "prompting";
 
   const toggleSessionInfo = useCallback(() => {
     if (sessionInfoCloseTimerRef.current !== undefined) {
@@ -385,10 +384,22 @@ export function AgentWorkspace() {
   }, []);
 
   useEffect(() => {
+    if (!autoCheckForUpdates) {
+      setAppUpdate(undefined);
+      return;
+    }
+    let active = true;
     void checkAppUpdate()
-      .then(setAppUpdate)
+      .then((update) => {
+        if (active) {
+          setAppUpdate(update);
+        }
+      })
       .catch(() => undefined);
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [autoCheckForUpdates]);
 
   useEffect(() => {
     setResearchActiveProject(activeProject?.id);
@@ -681,18 +692,19 @@ export function AgentWorkspace() {
       setSettingsOpen(false);
       setNewTaskOpen(false);
       setWorkspacePanelOpen(false);
-      if (chatStatus === "ready" && activeSession) {
-        void submitPrompt(content);
-        return;
-      }
       if (activeSession) {
-        pendingResearchPrompt.current = {
-          content,
-          sessionId: activeSession.id,
-        };
+        taskLauncherRef.current.queue(activeSession.id, { content });
+        void taskLauncherRef.current.deliverIfReady(
+          {
+            activeSessionId: activeSession.id,
+            agentSessionId: agentLocalSessionId,
+            ready: chatStatus === "ready",
+          },
+          submitPrompt,
+        );
       }
     },
-    [activeSession, chatStatus, submitPrompt],
+    [activeSession, agentLocalSessionId, chatStatus, submitPrompt],
   );
 
   const closeWorkspaceTab = (tabId: string) => {
@@ -792,6 +804,10 @@ export function AgentWorkspace() {
     const collapseForSmallViewport = () => {
       if (mediaQuery.matches) {
         setSidebarVisibility(true);
+        setSessionInfoOpen(false);
+        setSessionInfoLayoutOpen(false);
+        setSessionInfoSurfaceOpen(false);
+        setWorkspacePanelOpen(false);
       }
     };
     collapseForSmallViewport();
@@ -799,6 +815,27 @@ export function AgentWorkspace() {
     return () =>
       mediaQuery.removeEventListener("change", collapseForSmallViewport);
   }, []);
+
+  const handleSessionTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const tabs = ["chat", "trajectory"] as const;
+    const currentIndex = tabs.indexOf(conversationView);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const nextTab = tabs[nextIndex];
+    setConversationView(nextTab);
+    document.getElementById(`session-view-tab-${nextTab}`)?.focus();
+  };
 
   const findSessionById = (sessionId: string) => {
     for (const sessions of Object.values(sessionsByProject)) {
@@ -858,45 +895,26 @@ export function AgentWorkspace() {
     if (!newTaskProject) {
       return;
     }
-    await createSession(newTaskProject);
-    const session = useWorkspaceStore.getState().activeSession;
+    const session = await taskLauncherRef.current.createAndQueue(
+      newTaskProject,
+      { attachments, content },
+      createSession,
+    );
     if (!session) {
       return;
     }
-    pendingNewTaskPrompt.current = {
-      attachments,
-      content,
-      sessionId: session.id,
-    };
     setNewTaskOpen(false);
   };
 
   useEffect(() => {
-    const pending = pendingNewTaskPrompt.current;
-    if (
-      !pending ||
-      pending.sessionId !== activeSession?.id ||
-      pending.sessionId !== agentLocalSessionId ||
-      chatStatus !== "ready"
-    ) {
-      return;
-    }
-    pendingNewTaskPrompt.current = undefined;
-    void submitPrompt(pending.content, pending.attachments);
-  }, [activeSession?.id, agentLocalSessionId, chatStatus, submitPrompt]);
-
-  useEffect(() => {
-    const pending = pendingResearchPrompt.current;
-    if (
-      !pending ||
-      pending.sessionId !== activeSession?.id ||
-      pending.sessionId !== agentLocalSessionId ||
-      chatStatus !== "ready"
-    ) {
-      return;
-    }
-    pendingResearchPrompt.current = undefined;
-    void submitPrompt(pending.content);
+    void taskLauncherRef.current.deliverIfReady(
+      {
+        activeSessionId: activeSession?.id,
+        agentSessionId: agentLocalSessionId,
+        ready: chatStatus === "ready",
+      },
+      submitPrompt,
+    );
   }, [activeSession?.id, agentLocalSessionId, chatStatus, submitPrompt]);
 
   const renderComposer = (
@@ -1012,6 +1030,7 @@ export function AgentWorkspace() {
                 macSafeArea={isMacOS}
                 onClose={returnToConversation}
                 projectId={activeProject?.id ?? "preview-project"}
+                projectName={activeProject?.name}
               />
             </MotionPage>
           ) : (
@@ -1084,7 +1103,7 @@ export function AgentWorkspace() {
                             data-tauri-drag-region
                           >
                             <h1
-                              className="min-w-0 truncate font-semibold text-[15px]"
+                              className="min-w-0 truncate font-semibold text-base"
                               data-tauri-drag-region
                             >
                               {activeSession
@@ -1098,6 +1117,9 @@ export function AgentWorkspace() {
                               <span
                                 aria-hidden="true"
                                 className="motion-status-dot size-1.5 rounded-full bg-current"
+                                data-active={
+                                  sessionIsActive ? "true" : undefined
+                                }
                                 data-tauri-drag-region
                               />
                               {sessionStatusLabel(status.phase, acpPhase)}
@@ -1181,29 +1203,41 @@ export function AgentWorkspace() {
                           </div>
                         </div>
                         <nav
-                          className="harness-session-tabs"
                           aria-label="会话视图"
+                          aria-orientation="horizontal"
+                          className="harness-session-tabs"
+                          role="tablist"
                         >
                           <button
+                            aria-controls="session-view-panel"
                             aria-selected={conversationView === "chat"}
                             className={cn(
                               "harness-session-tab",
                               conversationView === "chat" && "is-active",
                             )}
+                            id="session-view-tab-chat"
                             onClick={() => setConversationView("chat")}
+                            onKeyDown={handleSessionTabKeyDown}
                             role="tab"
+                            tabIndex={conversationView === "chat" ? 0 : -1}
                             type="button"
                           >
                             对话
                           </button>
                           <button
+                            aria-controls="session-view-panel"
                             aria-selected={conversationView === "trajectory"}
                             className={cn(
                               "harness-session-tab",
                               conversationView === "trajectory" && "is-active",
                             )}
+                            id="session-view-tab-trajectory"
                             onClick={() => setConversationView("trajectory")}
+                            onKeyDown={handleSessionTabKeyDown}
                             role="tab"
+                            tabIndex={
+                              conversationView === "trajectory" ? 0 : -1
+                            }
                             type="button"
                           >
                             轨迹
@@ -1225,7 +1259,10 @@ export function AgentWorkspace() {
 
                       <div className="harness-chat-layout">
                         <div
+                          aria-labelledby={`session-view-tab-${conversationView}`}
                           className="relative flex min-w-0 flex-1 flex-col"
+                          id="session-view-panel"
+                          role="tabpanel"
                           style={
                             {
                               "--harness-chat-dock-space": `${chatDockSpace}px`,
@@ -1275,7 +1312,7 @@ export function AgentWorkspace() {
                             <div className="harness-session-info-header">
                               <span>会话信息</span>
                             </div>
-                            <div className="harness-session-info-body">
+                            <div className="harness-session-info-body harness-session-info-body--ledger">
                               <section className="harness-session-info-section">
                                 <div className="harness-session-info-section-title">
                                   <span>Subagents</span>
@@ -1342,6 +1379,9 @@ export function AgentWorkspace() {
                           )
                         }
                         onResizeStart={beginWorkspacePanelResize}
+                        panelWidth={workspacePanelWidth}
+                        maxPanelWidth={MAX_WORKSPACE_PANEL_WIDTH}
+                        minPanelWidth={MIN_WORKSPACE_PANEL_WIDTH}
                         root={activeProject?.path ?? cwd}
                         subagents={subagents}
                         tabs={workspaceTabs}

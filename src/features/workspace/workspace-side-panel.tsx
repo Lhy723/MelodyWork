@@ -9,7 +9,14 @@ import {
   XIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { type PointerEventHandler } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type KeyboardEvent,
+  type PointerEventHandler,
+} from "react";
 
 import {
   MOTION_EASE,
@@ -25,16 +32,39 @@ import {
 import type { AgentSubagent } from "@/domain/acp";
 import type { GitChange } from "@/domain/git";
 import type { ProjectReference } from "@/domain/message-citations";
-import { FilePreview } from "@/features/files/file-preview";
-import { FileWorkspace } from "@/features/files/file-workspace";
-import { ChangeReview } from "@/features/git/change-review";
-import {
-  ResearchPanel,
-  type ResearchPanelKind,
-} from "@/features/research/research-panel";
-import { TerminalPanel } from "@/features/terminal/terminal-panel";
-import { SubagentConversation } from "@/features/workspace/subagent-conversation";
+import type { ResearchPanelKind } from "@/features/research/research-panel";
 import { cn } from "@/lib/utils";
+
+const FilePreview = lazy(() =>
+  import("@/features/files/file-preview").then(({ FilePreview }) => ({
+    default: FilePreview,
+  })),
+);
+const FileWorkspace = lazy(() =>
+  import("@/features/files/file-workspace").then(({ FileWorkspace }) => ({
+    default: FileWorkspace,
+  })),
+);
+const ChangeReview = lazy(() =>
+  import("@/features/git/change-review").then(({ ChangeReview }) => ({
+    default: ChangeReview,
+  })),
+);
+const ResearchPanel = lazy(() =>
+  import("@/features/research/research-panel").then(({ ResearchPanel }) => ({
+    default: ResearchPanel,
+  })),
+);
+const TerminalPanel = lazy(() =>
+  import("@/features/terminal/terminal-panel").then(({ TerminalPanel }) => ({
+    default: TerminalPanel,
+  })),
+);
+const SubagentConversation = lazy(() =>
+  import("@/features/workspace/subagent-conversation").then(
+    ({ SubagentConversation }) => ({ default: SubagentConversation }),
+  ),
+);
 
 export type WorkspaceTab =
   | { id: string; kind: "files"; label: string }
@@ -75,6 +105,9 @@ interface WorkspaceSidePanelProps {
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
   onRefreshGit: () => void;
+  panelWidth: number;
+  minPanelWidth: number;
+  maxPanelWidth: number;
   root: string;
   subagents: Record<string, AgentSubagent>;
   tabs: WorkspaceTab[];
@@ -99,6 +132,9 @@ const tabIcon = (tab: WorkspaceTab) => {
   return <FileCode2Icon />;
 };
 
+const workspaceTabDomId = (tabId: string) =>
+  `workspace-tab-${tabId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
 export function WorkspaceSidePanel({
   activeTabId,
   changes,
@@ -114,19 +150,64 @@ export function WorkspaceSidePanel({
   onResizeStart,
   onResetWidth,
   onRefreshGit,
+  panelWidth,
+  minPanelWidth,
+  maxPanelWidth,
   root,
   subagents,
   tabs,
 }: WorkspaceSidePanelProps) {
+  const [visitedTabIds, setVisitedTabIds] = useState<Set<string>>(
+    () => new Set(activeTabId ? [activeTabId] : []),
+  );
+
+  useEffect(() => {
+    if (!activeTabId) return;
+    setVisitedTabIds((current) => {
+      if (current.has(activeTabId)) return current;
+      return new Set(current).add(activeTabId);
+    });
+  }, [activeTabId]);
+
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    tabId: string,
+  ) => {
+    const index = tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0 || tabs.length < 2) return;
+    let nextIndex = index;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (index + 1) % tabs.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (index - 1 + tabs.length) % tabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const nextTab = tabs[nextIndex];
+    onActivateTab(nextTab.id);
+    requestAnimationFrame(() =>
+      document.getElementById(workspaceTabDomId(nextTab.id))?.focus(),
+    );
+  };
+
   return (
     <aside
       aria-label="右侧工作区"
-      className="motion-workspace-panel relative flex size-full min-h-0 shrink-0 flex-col border-l bg-background shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.35)]"
+      className="motion-workspace-panel relative flex size-full min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width: "var(--workspace-panel-width, 35rem)" }}
     >
       <div
         aria-label="调整右侧工作区宽度"
         aria-orientation="vertical"
+        aria-valuemax={maxPanelWidth}
+        aria-valuemin={minPanelWidth}
+        aria-valuenow={Math.round(panelWidth)}
+        aria-valuetext={`${Math.round(panelWidth)} 像素`}
         className="group absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onDoubleClick={onResetWidth}
         onKeyDown={(event) => {
@@ -154,6 +235,7 @@ export function WorkspaceSidePanel({
       >
         <div
           aria-label="工作区标签页"
+          aria-orientation="horizontal"
           className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1"
           data-tauri-drag-region
           role="tablist"
@@ -168,7 +250,7 @@ export function WorkspaceSidePanel({
             >
               {activeTabId === tab.id ? (
                 <motion.span
-                  className="absolute inset-0 rounded-md border border-border/80 bg-muted/70 shadow-sm"
+                  className="pointer-events-none absolute inset-0 rounded-md border border-border/80 bg-muted/70 shadow-sm"
                   layoutId="workspace-tab-active"
                   transition={{
                     duration: 0.2,
@@ -177,10 +259,14 @@ export function WorkspaceSidePanel({
                 />
               ) : null}
               <button
+                aria-controls={`workspace-panel-${workspaceTabDomId(tab.id)}`}
                 aria-selected={activeTabId === tab.id}
                 className="relative z-10 flex h-full min-w-0 flex-1 items-center gap-1.5 pr-1 pl-2.5 text-xs outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                id={workspaceTabDomId(tab.id)}
                 onClick={() => onActivateTab(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
                 role="tab"
+                tabIndex={activeTabId === tab.id ? 0 : -1}
                 title={tab.kind === "file" ? tab.path : tab.label}
                 type="button"
               >
@@ -189,7 +275,7 @@ export function WorkspaceSidePanel({
               </button>
               <Button
                 aria-label={`关闭 ${tab.label}`}
-                className="mr-1 size-7 shrink-0 opacity-55 hover:opacity-100"
+                className="relative z-10 mr-1 size-7 shrink-0 opacity-55 hover:opacity-100"
                 onClick={() => onCloseTab(tab.id)}
                 size="icon-sm"
                 variant="ghost"
@@ -266,6 +352,7 @@ export function WorkspaceSidePanel({
         ) : null}
         {tabs.map((tab) => (
           <motion.div
+            aria-labelledby={workspaceTabDomId(tab.id)}
             aria-hidden={activeTabId !== tab.id}
             animate={{
               opacity: activeTabId === tab.id ? 1 : 0,
@@ -275,6 +362,7 @@ export function WorkspaceSidePanel({
             className="absolute inset-0"
             inert={activeTabId !== tab.id}
             key={tab.id}
+            id={`workspace-panel-${workspaceTabDomId(tab.id)}`}
             role="tabpanel"
             initial={false}
             style={{
@@ -286,42 +374,52 @@ export function WorkspaceSidePanel({
               ease: activeTabId === tab.id ? MOTION_EASE : MOTION_LEAVE_EASE,
             }}
           >
-            {tab.kind === "files" ? (
-              <FileWorkspace embedded onOpenFile={onOpenFile} root={root} />
-            ) : tab.kind === "terminal" ? (
-              <TerminalPanel cwd={cwd} embedded />
-            ) : tab.kind === "review" ? (
-              <ChangeReview
-                changes={changes}
-                cwd={cwd}
-                embedded
-                error={gitError}
-                loading={gitLoading}
-                onRefresh={onRefreshGit}
-              />
-            ) : tab.kind === "file" ? (
-              <FilePreview path={tab.path} root={root} />
-            ) : tab.kind === "research" ? (
-              <ResearchPanel kind={tab.panel} />
-            ) : subagents[tab.subagentId] ? (
-              <SubagentConversation
-                active={activeTabId === tab.id}
-                cwd={cwd}
-                onOpenProjectReference={onOpenProjectReference}
-                projectRoot={root}
-                subagent={subagents[tab.subagentId]}
-              />
-            ) : (
-              <div className="grid size-full place-items-center p-6 text-center">
-                <div>
-                  <BotIcon className="mx-auto mb-3 size-5 text-muted-foreground" />
-                  <p className="font-medium text-sm">Subagent 不可用</p>
-                  <p className="mt-1 text-muted-foreground text-xs">
-                    该子会话可能属于另一个对话。
-                  </p>
-                </div>
-              </div>
-            )}
+            {visitedTabIds.has(tab.id) ? (
+              <Suspense
+                fallback={
+                  <div className="grid size-full place-items-center text-muted-foreground text-xs">
+                    正在加载工作区…
+                  </div>
+                }
+              >
+                {tab.kind === "files" ? (
+                  <FileWorkspace embedded onOpenFile={onOpenFile} root={root} />
+                ) : tab.kind === "terminal" ? (
+                  <TerminalPanel cwd={cwd} embedded />
+                ) : tab.kind === "review" ? (
+                  <ChangeReview
+                    changes={changes}
+                    cwd={cwd}
+                    embedded
+                    error={gitError}
+                    loading={gitLoading}
+                    onRefresh={onRefreshGit}
+                  />
+                ) : tab.kind === "file" ? (
+                  <FilePreview path={tab.path} root={root} />
+                ) : tab.kind === "research" ? (
+                  <ResearchPanel kind={tab.panel} />
+                ) : subagents[tab.subagentId] ? (
+                  <SubagentConversation
+                    active={activeTabId === tab.id}
+                    cwd={cwd}
+                    onOpenProjectReference={onOpenProjectReference}
+                    projectRoot={root}
+                    subagent={subagents[tab.subagentId]}
+                  />
+                ) : (
+                  <div className="grid size-full place-items-center p-6 text-center">
+                    <div>
+                      <BotIcon className="mx-auto mb-3 size-5 text-muted-foreground" />
+                      <p className="font-medium text-sm">Subagent 不可用</p>
+                      <p className="mt-1 text-muted-foreground text-xs">
+                        该子会话可能属于另一个对话。
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </Suspense>
+            ) : null}
           </motion.div>
         ))}
       </div>

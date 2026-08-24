@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applySessionUpdate,
   isSessionUpdateMethod,
+  parseTimelineProjection,
+  readTimelineProjection,
+  projectPermissionRequest,
   SessionEventDeduplicator,
   TIMELINE_PROJECTION_VERSION,
   notificationMetadata,
@@ -44,6 +48,30 @@ test("only restores a projection with the current version and a cursor", () => {
     }),
     [],
   );
+});
+
+test("isolates malformed timeline rows from cursor-based restoration", () => {
+  const malformed = JSON.stringify([
+    timeline[0],
+    { id: "broken", kind: "message", role: "assistant" },
+  ]);
+  assert.deepEqual(parseTimelineProjection(malformed), timeline);
+  assert.deepEqual(readTimelineProjection(malformed), {
+    timeline,
+    status: "corrupt",
+  });
+  assert.deepEqual(
+    usableTimelineProjection({
+      timelineJson: malformed,
+      cursor: "session-7",
+      version: TIMELINE_PROJECTION_VERSION,
+    }),
+    [],
+  );
+  assert.deepEqual(readTimelineProjection("not-json"), {
+    timeline: [],
+    status: "corrupt",
+  });
 });
 
 test("recognizes live and durable Melody session update rails", () => {
@@ -146,4 +174,166 @@ test("bounds the number of sessions retained by the deduplicator", () => {
   assert.equal(events.accept("s2", "event-2"), true);
   assert.equal(events.accept("s3", "event-3"), true);
   assert.equal(events.accept("s1", "event-1"), true);
+});
+
+test("projects and coalesces assistant chunks through the real interface", () => {
+  const first = applySessionUpdate([], {
+    sessionUpdate: "agent_message_chunk",
+    content: { text: "hello" },
+  });
+  const second = applySessionUpdate(first.timeline, {
+    sessionUpdate: "agent_message_chunk",
+    content: { text: " world" },
+  });
+
+  assert.equal(first.streaming, true);
+  assert.equal(second.streaming, true);
+  assert.equal(second.timeline.length, 1);
+  assert.deepEqual(
+    {
+      kind: second.timeline[0].kind,
+      role: second.timeline[0].role,
+      content: second.timeline[0].content,
+      streaming: second.timeline[0].streaming,
+    },
+    {
+      kind: "message",
+      role: "assistant",
+      content: "hello world",
+      streaming: true,
+    },
+  );
+});
+
+test("settles an assistant stream when thought projection starts", () => {
+  const assistant = applySessionUpdate([], {
+    sessionUpdate: "agent_message_chunk",
+    content: { text: "answer" },
+  });
+  const thought = applySessionUpdate(assistant.timeline, {
+    sessionUpdate: "agent_thought_chunk",
+    content: { text: "checking" },
+  });
+
+  assert.equal(thought.timeline[0].streaming, false);
+  assert.equal(typeof thought.timeline[0].completedAt, "number");
+  assert.deepEqual(
+    {
+      kind: thought.timeline[1].kind,
+      content: thought.timeline[1].content,
+      streaming: thought.timeline[1].streaming,
+    },
+    { kind: "thought", content: "checking", streaming: true },
+  );
+});
+
+test("normalizes user chunks and honors projection metadata", () => {
+  const visible = applySessionUpdate(
+    [],
+    {
+      sessionUpdate: "user_message_chunk",
+      content: { text: "wire", _meta: { displayText: "visible" } },
+      _meta: { promptIndex: 2 },
+    },
+    "event-7",
+  );
+  const hidden = applySessionUpdate(visible.timeline, {
+    sessionUpdate: "user_message_chunk",
+    content: { text: "internal" },
+    _meta: { hideFromScrollback: true },
+  });
+
+  assert.deepEqual(
+    {
+      id: visible.timeline[0].id,
+      content: visible.timeline[0].content,
+      sourcePromptIndex: visible.timeline[0].sourcePromptIndex,
+    },
+    { id: "user-event-7", content: "visible", sourcePromptIndex: 2 },
+  );
+  assert.strictEqual(hidden.timeline, visible.timeline);
+});
+
+test("normalizes and updates tool activity without losing prior fields", () => {
+  const started = applySessionUpdate([], {
+    sessionUpdate: "tool_call",
+    toolCallId: "tool-1",
+    title: "Run check",
+    rawInput: { command: "pnpm check" },
+    status: "running",
+  });
+  const completed = applySessionUpdate(started.timeline, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "tool-1",
+    rawOutput: "ok",
+    status: "completed",
+  });
+  const tool = completed.timeline[0];
+
+  assert.equal(tool.kind, "tool");
+  assert.equal(tool.title, "Run check");
+  assert.equal(tool.command, "pnpm check");
+  assert.equal(tool.output, "ok");
+  assert.equal(tool.status, "completed");
+  assert.equal(typeof tool.completedAt, "number");
+});
+
+test("settles a completed turn and stamps normalized billing usage", () => {
+  const timeline = [
+    { id: "user-1", kind: "message", role: "user", content: "go" },
+    {
+      id: "assistant-1",
+      kind: "message",
+      role: "assistant",
+      content: "done",
+      streaming: true,
+    },
+  ];
+  const result = applySessionUpdate(timeline, {
+    sessionUpdate: "turn_completed",
+    stopReason: "end_turn",
+    usage: { inputTokens: 12, outputTokens: 5, modelCalls: 1 },
+  });
+  const assistant = result.timeline[1];
+
+  assert.equal(result.completed, true);
+  assert.equal(assistant.streaming, false);
+  assert.deepEqual(assistant.billingUsage, {
+    inputTokens: 12,
+    outputTokens: 5,
+    cachedReadTokens: 0,
+    reasoningTokens: 0,
+    modelCalls: 1,
+    apiDurationMs: 0,
+    usageIsIncomplete: false,
+    costIsPartial: false,
+  });
+});
+
+test("projects failures and permission requests as observable timeline state", () => {
+  const failure = applySessionUpdate([], {
+    sessionUpdate: "retry_state",
+    type: "failed",
+    message: "network error",
+  });
+  const permission = projectPermissionRequest(
+    [],
+    {
+      title: "Edit file",
+      rawInput: { path: "src/app.ts" },
+    },
+    41,
+    [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+  );
+
+  assert.equal(failure.error, "network error");
+  assert.equal(
+    failure.timeline[0].content,
+    "Melody 无法完成请求：network error",
+  );
+  assert.equal(permission.toolCallId, "permission-41");
+  assert.equal(permission.title, "Edit file");
+  assert.equal(permission.command, "src/app.ts");
+  assert.equal(permission.timeline[0].permission, "pending");
+  assert.equal(permission.timeline[0].permissionRequestId, 41);
 });

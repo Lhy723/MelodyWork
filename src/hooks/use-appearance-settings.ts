@@ -2,15 +2,24 @@ import { useEffect } from "react";
 
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 
+const CJK_SANS_FALLBACK =
+  '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC"';
+
+const withCjkFallback = (font: string) => {
+  if (font.includes("PingFang SC")) {
+    return font;
+  }
+  const withoutGeneric = font.replace(/,\s*sans-serif\s*$/u, "");
+  return `${withoutGeneric}, ${CJK_SANS_FALLBACK}, sans-serif`;
+};
+
 export function useAppearanceSettings() {
   const settings = useAppSettingsStore();
 
   useEffect(() => {
     const root = document.documentElement;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const motionMedia = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    );
+    const motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     const apply = () => {
       const dark =
@@ -20,8 +29,7 @@ export function useAppearanceSettings() {
       root.classList.toggle(
         "app-reduce-motion",
         settings.reducedMotion === "on" ||
-          (settings.reducedMotion === "system" &&
-            motionMedia.matches),
+          (settings.reducedMotion === "system" && motionMedia.matches),
       );
       root.classList.toggle("app-pointer-cursor", settings.pointerCursor);
       root.classList.toggle(
@@ -56,8 +64,9 @@ export function useAppearanceSettings() {
       );
       root.style.setProperty("--ring", accent);
       root.style.setProperty("--sidebar-primary", accent);
-      root.style.setProperty("--font-sans", settings.uiFont);
+      root.style.setProperty("--font-sans", withCjkFallback(settings.uiFont));
       root.style.setProperty("--app-code-font", settings.codeFont);
+      root.style.setProperty("--font-mono", settings.codeFont);
       root.style.fontSize = `${settings.uiFontSize}px`;
       root.style.setProperty(
         "--app-code-font-size",

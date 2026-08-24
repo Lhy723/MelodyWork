@@ -6,22 +6,20 @@ import {
   SaveIcon,
   XIcon,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { loader } from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toUserMessage } from "@/domain/app-error";
 import type { WorkspaceEntry } from "@/domain/workspace";
 import {
   getWorkspaceTree,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/melody-bridge";
+import { MonacoEditor } from "@/features/files/monaco-editor";
 import { cn } from "@/lib/utils";
-
-const MonacoEditor = lazy(() => import("@monaco-editor/react"));
-loader.config({ monaco });
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 interface FileWorkspaceProps {
   embedded?: boolean;
@@ -58,6 +56,8 @@ export function FileWorkspace({
   root,
   onClose,
 }: FileWorkspaceProps) {
+  const codeFont = useAppSettingsStore((state) => state.codeFont);
+  const codeFontSize = useAppSettingsStore((state) => state.codeFontSize);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [filter, setFilter] = useState("");
   const [selectedPath, setSelectedPath] = useState<string>();
@@ -72,21 +72,21 @@ export function FileWorkspace({
       ? "vs-dark"
       : "vs";
 
-  const loadTree = async () => {
+  const loadTree = useCallback(async () => {
     setLoading(true);
     setError(undefined);
     try {
       setEntries(await getWorkspaceTree(root));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setLoading(false);
     }
-  };
+  }, [root]);
 
   useEffect(() => {
     void loadTree();
-  }, [root]);
+  }, [loadTree]);
 
   const filteredEntries = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -111,7 +111,7 @@ export function FileWorkspace({
       setContent(nextContent);
       setSavedContent(nextContent);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -128,7 +128,7 @@ export function FileWorkspace({
       setSavedContent(content);
       await loadTree();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setSaving(false);
     }
@@ -183,7 +183,11 @@ export function FileWorkspace({
       </header>
 
       {error ? (
-        <p className="motion-view-enter border-b bg-destructive/5 px-4 py-2 text-destructive text-sm">
+        <p
+          aria-live="assertive"
+          className="motion-view-enter border-b bg-destructive/5 px-4 py-2 text-destructive text-sm"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -241,51 +245,50 @@ export function FileWorkspace({
         </aside>
 
         {!onOpenFile ? (
-        <section className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs">
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {selectedPath ?? "选择文件"}
-            </span>
-            {content !== savedContent ? (
-              <span className="motion-view-enter ml-3 text-amber-700">
-                未保存
+          <section className="flex min-w-0 flex-1 flex-col">
+            <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs">
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {selectedPath ?? "选择文件"}
               </span>
-            ) : null}
-          </div>
-          <div className="min-h-0 flex-1">
-            {selectedPath ? (
-              <Suspense
-                fallback={
-                  <p className="motion-view-enter p-6 text-muted-foreground text-sm">
-                    正在加载编辑器…
-                  </p>
-                }
-              >
-                <MonacoEditor
-                  language={languageFor(selectedPath)}
-                  loading="正在加载编辑器…"
-                  onChange={(value) => setContent(value ?? "")}
-                  options={{
-                    fontFamily:
-                      '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    padding: { top: 14 },
-                    scrollBeyondLastLine: false,
-                    smoothScrolling: true,
-                    wordWrap: "on",
-                  }}
-                  theme={editorTheme}
-                  value={content}
-                />
-              </Suspense>
-            ) : (
-              <div className="grid h-full place-items-center text-muted-foreground text-sm">
-                选择文本文件以查看或编辑。
-              </div>
-            )}
-          </div>
-        </section>
+              {content !== savedContent ? (
+                <span className="motion-view-enter ml-3 text-amber-700">
+                  未保存
+                </span>
+              ) : null}
+            </div>
+            <div className="min-h-0 flex-1">
+              {selectedPath ? (
+                <Suspense
+                  fallback={
+                    <p className="motion-view-enter p-6 text-muted-foreground text-sm">
+                      正在加载编辑器…
+                    </p>
+                  }
+                >
+                  <MonacoEditor
+                    language={languageFor(selectedPath)}
+                    loading="正在加载编辑器…"
+                    onChange={(value) => setContent(value ?? "")}
+                    options={{
+                      fontFamily: codeFont,
+                      fontSize: codeFontSize,
+                      minimap: { enabled: false },
+                      padding: { top: 14 },
+                      scrollBeyondLastLine: false,
+                      smoothScrolling: true,
+                      wordWrap: "on",
+                    }}
+                    theme={editorTheme}
+                    value={content}
+                  />
+                </Suspense>
+              ) : (
+                <div className="grid h-full place-items-center text-muted-foreground text-sm">
+                  选择文本文件以查看或编辑。
+                </div>
+              )}
+            </div>
+          </section>
         ) : null}
       </div>
     </section>

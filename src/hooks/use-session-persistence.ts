@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 
+import { prepareTimelineSnapshot } from "@/domain/session-snapshot";
 import { timelineProjectionVersion } from "@/domain/session-projection";
 import { updateStoredSession } from "@/lib/melody-bridge";
+import type { TimelineArchiveEntry } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -48,6 +50,7 @@ export const useSessionPersistence = () => {
   const pending = useRef(new Map<string, PendingSnapshot>());
   const latest = useRef(new Map<string, PendingSnapshot>());
   const savedSignatures = useRef(new Map<string, string>());
+  const savedArchiveSignatures = useRef(new Map<string, Map<number, string>>());
   const nextRevision = useRef(0);
   const timer = useRef<number | undefined>(undefined);
   const draining = useRef(false);
@@ -69,10 +72,34 @@ export const useSessionPersistence = () => {
         pending.current.delete(id);
 
         // Serialization happens at the write boundary, once per coalesced
-        // snapshot, instead of once for every streamed agent chunk.
-        const timelineJson = JSON.stringify(snapshot.timeline);
-        const signature = `${snapshot.id}:${snapshot.title ?? ""}:${snapshot.acpCursor ?? ""}:${timelineJson}`;
-        if (savedSignatures.current.get(id) === signature) {
+        // snapshot, instead of once for every streamed agent chunk. A
+        // compacted projection is not independently restorable. Its ACP
+        // cursor remains alongside the complete archive, while version 0
+        // tells the loader to use that archive before resuming.
+        const prepared = prepareTimelineSnapshot(snapshot.timeline);
+        const timelineJson = JSON.stringify(prepared.timeline);
+        const acpCursor = snapshot.acpCursor ?? null;
+        const timelineVersion = prepared.truncated
+          ? 0
+          : timelineProjectionVersion(
+              prepared.timeline,
+              snapshot.activelyStreaming,
+            );
+        const archiveSignatures =
+          savedArchiveSignatures.current.get(id) ?? new Map<number, string>();
+        const timelineEntries = snapshot.timeline.flatMap(
+          (entry, ordinal): TimelineArchiveEntry[] => {
+            const entryJson = JSON.stringify(entry);
+            return archiveSignatures.get(ordinal) === entryJson
+              ? []
+              : [{ ordinal, entryJson }];
+          },
+        );
+        const signature = `${snapshot.id}:${snapshot.title ?? ""}:${acpCursor ?? ""}:${timelineVersion}:${timelineJson}`;
+        if (
+          savedSignatures.current.get(id) === signature &&
+          timelineEntries.length === 0
+        ) {
           continue;
         }
         try {
@@ -80,13 +107,17 @@ export const useSessionPersistence = () => {
             id: snapshot.id,
             title: snapshot.title,
             timelineJson,
-            acpCursor: snapshot.acpCursor ?? null,
-            timelineVersion: timelineProjectionVersion(
-              snapshot.timeline,
-              snapshot.activelyStreaming,
-            ),
+            acpCursor,
+            timelineVersion,
+            ...(timelineEntries.length > 0 ? { timelineEntries } : {}),
           });
           savedSignatures.current.set(id, signature);
+          if (timelineEntries.length > 0) {
+            for (const entry of timelineEntries) {
+              archiveSignatures.set(entry.ordinal, entry.entryJson);
+            }
+            savedArchiveSignatures.current.set(id, archiveSignatures);
+          }
           if (latest.current.get(id)?.revision === snapshot.revision) {
             replaceSession(session);
           }

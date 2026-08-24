@@ -19,6 +19,7 @@ export interface AppSettings {
   diffMarker: "color" | "sign";
   fontSmoothing: boolean;
   defaultPermissionMode: "ask" | "auto" | "always-approve";
+  autoCheckForUpdates: boolean;
   defaultFileOpener: "system" | "vscode" | "cursor";
   language: "auto" | "zh-CN" | "en";
   showInMenuBar: boolean;
@@ -51,16 +52,19 @@ const defaultSettings: AppSettings = {
   darkAccent: "#339cff",
   darkBackground: "#181818",
   darkForeground: "#ffffff",
-  uiFont: '"Geist Variable", sans-serif',
-  codeFont: '"SFMono-Regular", Consolas, monospace',
+  uiFont:
+    '"Geist Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+  codeFont:
+    'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   translucentSidebar: true,
   pointerCursor: false,
   reducedMotion: "system",
-  uiFontSize: 14,
+  uiFontSize: 16,
   codeFontSize: 12,
   diffMarker: "color",
   fontSmoothing: true,
   defaultPermissionMode: "ask",
+  autoCheckForUpdates: true,
   defaultFileOpener: "vscode",
   language: "auto",
   showInMenuBar: true,
@@ -87,16 +91,26 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
     {
       name: "melodywork.app-settings",
       merge: (persistedState, currentState) => {
-        const {
-          dockIcon: _dockIcon,
-          defaultPermission: _defaultPermission,
-          autoReview: _autoReview,
-          fullAccess: legacyFullAccess,
-          lightContrast: _lightContrast,
-          darkContrast: _darkContrast,
-          ...persistedSettings
-        } =
-          (persistedState ?? {}) as Record<string, unknown>;
+        const persistedSettings = {
+          ...((persistedState ?? {}) as Record<string, unknown>),
+        };
+        for (const key of [
+          "dockIcon",
+          "defaultPermission",
+          "autoReview",
+          "lightContrast",
+          "darkContrast",
+        ]) {
+          Reflect.deleteProperty(persistedSettings, key);
+        }
+        const legacyFullAccess = persistedSettings.fullAccess;
+        Reflect.deleteProperty(persistedSettings, "fullAccess");
+        if (typeof persistedSettings.uiFontSize === "number") {
+          persistedSettings.uiFontSize = Math.min(
+            18,
+            Math.max(14, persistedSettings.uiFontSize),
+          );
+        }
         return {
           ...currentState,
           ...persistedSettings,
@@ -110,7 +124,11 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
                 : currentState.defaultPermissionMode,
         } as AppSettingsStore;
       },
-      partialize: ({ setSetting: _setSetting, ...settings }) => settings,
+      partialize: (settings) => {
+        const partial = { ...settings };
+        Reflect.deleteProperty(partial, "setSetting");
+        return partial;
+      },
     },
   ),
 );

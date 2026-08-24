@@ -296,7 +296,17 @@ const DiffCard = ({
   label: string;
 }) => {
   const lines = useMemo(() => visibleDiffLines(change), [change]);
-  const copyDiff = () => {
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<number>(0);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(copyTimeoutRef.current);
+    },
+    [],
+  );
+
+  const copyDiff = async () => {
     const text = lines
       .filter((line) => line.kind !== "ellipsis")
       .map(
@@ -304,7 +314,17 @@ const DiffCard = ({
           `${line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}${line.text}`,
       )
       .join("\n");
-    void navigator.clipboard.writeText(text);
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
   };
 
   return (
@@ -316,12 +336,21 @@ const DiffCard = ({
         <span className="text-emerald-600">+{change.additions}</span>
         <span className="text-red-600">-{change.deletions}</span>
         <button
-          aria-label={`复制 ${label} 的差异`}
+          aria-label={
+            copied ? `已复制 ${label} 的差异` : `复制 ${label} 的差异`
+          }
           className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onClick={copyDiff}
+          data-copy-button="true"
+          data-copied={copied ? "true" : undefined}
+          onClick={() => void copyDiff()}
+          title={copied ? "已复制差异" : `复制 ${label} 的差异`}
           type="button"
         >
-          <CopyIcon className="size-4" />
+          {copied ? (
+            <CheckIcon aria-hidden="true" className="size-4" />
+          ) : (
+            <CopyIcon aria-hidden="true" className="size-4" />
+          )}
         </button>
       </div>
       <div className="max-h-[420px] overflow-auto font-mono text-xs leading-5">
@@ -527,7 +556,7 @@ export function ToolTaskGroup({
     >
       <TaskTrigger title={groupTitle(tools)}>
         <button
-          className="harness-tool-trigger group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
+          className="harness-tool-trigger group flex min-h-7 w-full items-center gap-2 text-left text-sm leading-5 text-muted-foreground transition-colors hover:text-foreground"
           type="button"
         >
           <HeaderIcon className="size-4 shrink-0" />
@@ -540,7 +569,7 @@ export function ToolTaskGroup({
           <ChevronDownIcon className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </TaskTrigger>
-      <TaskContent className="harness-tool-content [&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-5 [&>div]:text-[13px] [&>div]:leading-5">
+      <TaskContent className="harness-tool-content [&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-5 [&>div]:text-sm [&>div]:leading-5">
         {tools.flatMap((tool) => {
           const changes = tool.activity?.files ?? [];
           const changePaths = new Set(changes.map((change) => change.path));

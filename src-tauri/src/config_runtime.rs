@@ -6,10 +6,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
-use tokio::process::Command;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
-use crate::agent_runtime;
+use crate::capability_lifecycle::{CapabilityKind, capability_name, change_capability_state};
+use crate::config_io::{TextFileStore, remove_directory};
+use crate::melody_command::MelodyCommandRunner;
 use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
@@ -244,19 +245,10 @@ pub fn read_melody_config(
 
 fn read_melody_config_inner(scope: String, cwd: String) -> Result<MelodyConfigDocument, String> {
     let path = config_path(&scope, &cwd)?;
-    let exists = path.is_file();
-    let content = if exists {
-        let metadata = path
-            .metadata()
-            .map_err(|error| format!("Failed to inspect config: {error}"))?;
-        if metadata.len() > MAX_CONFIG_BYTES {
-            return Err("Melody config is larger than the 1 MB editor limit".to_string());
-        }
-        fs::read_to_string(&path)
-            .map_err(|error| format!("Melody config is not valid UTF-8 text: {error}"))?
-    } else {
-        String::new()
-    };
+    let store =
+        TextFileStore::with_limit_description(&path, MAX_CONFIG_BYTES, "the 1 MB editor limit");
+    let exists = store.exists();
+    let content = store.read_text("Melody config")?.unwrap_or_default();
     Ok(config_document(scope, path, exists, content))
 }
 
@@ -355,16 +347,9 @@ fn update_melody_config_inner(
     patches: Vec<MelodyConfigPatch>,
 ) -> Result<MelodyConfigDocument, String> {
     let path = config_path(&scope, &cwd)?;
-    let exists = path.is_file();
-    let content = if exists {
-        fs::read_to_string(&path)
-            .map_err(|error| format!("Melody config is not valid UTF-8 text: {error}"))?
-    } else {
-        String::new()
-    };
-    if content.len() as u64 > MAX_CONFIG_BYTES {
-        return Err("Melody config is larger than the 1 MB editor limit".to_string());
-    }
+    let store =
+        TextFileStore::with_limit_description(&path, MAX_CONFIG_BYTES, "the 1 MB editor limit");
+    let content = store.read_text("Melody config")?.unwrap_or_default();
     let mut document = if content.trim().is_empty() {
         DocumentMut::new()
     } else {
@@ -379,13 +364,7 @@ fn update_melody_config_inner(
     if updated_content.len() as u64 > MAX_CONFIG_BYTES {
         return Err("Melody config is larger than the 1 MB editor limit".to_string());
     }
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Melody config has no parent directory".to_string())?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("Failed to create Melody config directory: {error}"))?;
-    fs::write(&path, &updated_content)
-        .map_err(|error| format!("Failed to write Melody config: {error}"))?;
+    store.write_text(&updated_content, "Melody config")?;
     Ok(config_document(scope, path, true, updated_content))
 }
 
@@ -473,13 +452,8 @@ pub async fn set_melody_extension_enabled(
     enabled: bool,
 ) -> Result<MelodyConfigDocument, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    if !matches!(kind.as_str(), "skills" | "plugins") {
-        return Err("Only skills and plugins can be enabled or disabled".to_string());
-    }
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("Extension name cannot be empty".to_string());
-    }
+    let kind = CapabilityKind::parse(&kind)?;
+    let name = capability_name(&name)?;
     confirm_action(
         &app,
         "确认修改扩展状态",
@@ -490,30 +464,22 @@ pub async fn set_melody_extension_enabled(
         ),
     )
     .await?;
-    let mut disabled = extension_config_names(&scope, &cwd, &kind, "disabled")?;
-    let mut patches = Vec::with_capacity(if kind == "plugins" { 2 } else { 1 });
-    if enabled {
-        disabled.remove(name);
+    let config_key = kind.config_key();
+    let disabled = extension_config_names(&scope, &cwd, config_key, "disabled")?;
+    let explicitly_enabled = if kind == CapabilityKind::Plugin {
+        extension_config_names(&scope, &cwd, config_key, "enabled")?
     } else {
-        disabled.insert(name.to_string());
-    }
-    let mut disabled = disabled.into_iter().collect::<Vec<_>>();
-    disabled.sort();
+        HashSet::new()
+    };
+    let update = change_capability_state(kind, name, enabled, disabled, explicitly_enabled);
+    let mut patches = Vec::with_capacity(if kind == CapabilityKind::Plugin { 2 } else { 1 });
     patches.push(MelodyConfigPatch {
-        path: vec![kind.clone(), "disabled".to_string()],
-        value: serde_json::json!(disabled),
+        path: vec![config_key.to_string(), "disabled".to_string()],
+        value: serde_json::json!(update.disabled),
     });
-    if kind == "plugins" {
-        let mut explicitly_enabled = extension_config_names(&scope, &cwd, &kind, "enabled")?;
-        if enabled {
-            explicitly_enabled.insert(name.to_string());
-        } else {
-            explicitly_enabled.remove(name);
-        }
-        let mut explicitly_enabled = explicitly_enabled.into_iter().collect::<Vec<_>>();
-        explicitly_enabled.sort();
+    if let Some(explicitly_enabled) = update.explicitly_enabled {
         patches.push(MelodyConfigPatch {
-            path: vec![kind, "enabled".to_string()],
+            path: vec![config_key.to_string(), "enabled".to_string()],
             value: serde_json::json!(explicitly_enabled),
         });
     }
@@ -563,15 +529,8 @@ pub fn list_melody_extensions(
 }
 
 async fn run_melody_inspect(app: &AppHandle, cwd: &str) -> Result<MelodyInspectDocument, String> {
-    let binary = agent_runtime::resolve_binary(app, None).ok_or_else(|| {
-        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
-            .to_string()
-    })?;
-    let mut command = Command::new(binary);
-    command.args(["inspect", "--json"]).current_dir(cwd);
-    if let Some(home) = agent_runtime::melody_home() {
-        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
-    }
+    let mut command =
+        MelodyCommandRunner::new(app).command(&["inspect", "--json"], Some(Path::new(cwd)))?;
     let output = command
         .output()
         .await
@@ -671,15 +630,10 @@ pub async fn list_melody_skills(
 
 fn read_user_config_document() -> Result<(PathBuf, DocumentMut), String> {
     let path = melody_home()?.join("config.toml");
-    let content = if path.is_file() {
-        fs::read_to_string(&path)
-            .map_err(|error| format!("Melody config is not valid UTF-8 text: {error}"))?
-    } else {
-        String::new()
-    };
-    if content.len() as u64 > MAX_CONFIG_BYTES {
-        return Err("Melody config is larger than the 1 MB editor limit".to_string());
-    }
+    let content =
+        TextFileStore::with_limit_description(&path, MAX_CONFIG_BYTES, "the 1 MB editor limit")
+            .read_text("Melody config")?
+            .unwrap_or_default();
     let document = if content.trim().is_empty() {
         DocumentMut::new()
     } else {
@@ -747,15 +701,8 @@ fn marketplace_sources_mut(document: &mut DocumentMut) -> Result<&mut ArrayOfTab
 
 fn write_user_config(path: &Path, document: &DocumentMut) -> Result<(), String> {
     let content = document.to_string();
-    if content.len() as u64 > MAX_CONFIG_BYTES {
-        return Err("Melody config is larger than the 1 MB editor limit".to_string());
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Melody config has no parent directory".to_string())?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("Failed to create Melody config directory: {error}"))?;
-    fs::write(path, content).map_err(|error| format!("Failed to write Melody config: {error}"))
+    TextFileStore::with_limit_description(path, MAX_CONFIG_BYTES, "the 1 MB editor limit")
+        .write_text(&content, "Melody config")
 }
 
 fn validate_marketplace_source(source: &mut MarketplaceSource) -> Result<(), String> {
@@ -969,17 +916,8 @@ pub async fn install_melody_plugin(
         ),
     )
     .await?;
-    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
-        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
-            .to_string()
-    })?;
-    let mut command = Command::new(binary);
-    command
-        .args(["plugin", "install", source, "--trust"])
-        .current_dir(workspace);
-    if let Some(home) = agent_runtime::melody_home() {
-        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
-    }
+    let mut command = MelodyCommandRunner::new(&app)
+        .command(&["plugin", "install", source, "--trust"], Some(&workspace))?;
     let output = command
         .output()
         .await
@@ -1013,15 +951,7 @@ async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result
     if !workspace.is_dir() {
         return Err(format!("Workspace does not exist: {}", workspace.display()));
     }
-    let binary = agent_runtime::resolve_binary(app, None).ok_or_else(|| {
-        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
-            .to_string()
-    })?;
-    let mut command = Command::new(binary);
-    command.args(args).current_dir(workspace);
-    if let Some(home) = agent_runtime::melody_home() {
-        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
-    }
+    let mut command = MelodyCommandRunner::new(app).command(args, Some(&workspace))?;
     let output = command
         .output()
         .await
@@ -1159,15 +1089,8 @@ pub async fn list_installed_melody_plugins(
     cwd: String,
 ) -> Result<Vec<MelodyExtension>, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
-        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
-            .to_string()
-    })?;
-    let mut command = Command::new(binary);
-    command.args(["plugin", "list", "--json"]);
-    if let Some(home) = agent_runtime::melody_home() {
-        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
-    }
+    let mut command =
+        MelodyCommandRunner::new(&app).command(&["plugin", "list", "--json"], None)?;
     let output = command
         .output()
         .await
@@ -1235,19 +1158,12 @@ pub async fn uninstall_melody_plugin(
         ),
     )
     .await?;
-    let binary = agent_runtime::resolve_binary(&app, None).ok_or_else(|| {
-        "Bundled melody-pager is unavailable. Restart pnpm tauri dev so the sidecar is prepared."
-            .to_string()
-    })?;
-    let mut command = Command::new(binary);
-    command
-        .args(["plugin", "uninstall", name, "--confirm"])
-        .current_dir(workspace);
+    let mut command = MelodyCommandRunner::new(&app).command(
+        &["plugin", "uninstall", name, "--confirm"],
+        Some(&workspace),
+    )?;
     if keep_data {
         command.arg("--keep-data");
-    }
-    if let Some(home) = agent_runtime::melody_home() {
-        command.env("MELODY_HOME", &home).env("GROK_HOME", home);
     }
     let output = command
         .output()
@@ -1746,7 +1662,7 @@ pub async fn delete_melody_skill(
         format!("允许删除技能目录 {} 吗？", root.display()),
     )
     .await?;
-    fs::remove_dir_all(&root).map_err(|error| format!("Failed to delete skill: {error}"))?;
+    remove_directory(&root, "skill")?;
     Ok(format!("Skill {} was deleted", name.trim()))
 }
 

@@ -15,6 +15,7 @@ import { AnimatePresence } from "motion/react";
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { toUserMessage } from "@/domain/app-error";
 import type {
   MelodyConfigDocument,
   MelodyConfigPatch,
@@ -35,6 +37,8 @@ import type {
   MelodyExtensionKind,
 } from "@/domain/config";
 import type { PermissionRule } from "@/domain/permission";
+import { MelodyCapabilityLifecycle } from "@/domain/melody-capability-lifecycle";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
 import {
   deletePermissionRule,
   listInstalledMelodyPlugins,
@@ -58,6 +62,13 @@ import { PluginInstaller } from "./plugin-installer";
 import { PluginDetailsView } from "./plugin-details";
 import { SkillDetailsView } from "./skill-details";
 
+const capabilityLifecycle = new MelodyCapabilityLifecycle({
+  listDiscovered: listMelodyExtensions,
+  listSkills: listMelodySkills,
+  listInstalledPlugins: listInstalledMelodyPlugins,
+  setEnabled: setMelodyExtensionEnabled,
+});
+
 const StatisticsPage = lazy(() =>
   import("./statistics-page").then((module) => ({
     default: module.StatisticsPage,
@@ -67,6 +78,7 @@ const StatisticsPage = lazy(() =>
 interface SettingsWorkspaceProps {
   cwd: string;
   projectId: string;
+  projectName?: string;
   initialPage?: SettingsPage;
   macSafeArea?: boolean;
   onClose: () => void;
@@ -109,13 +121,15 @@ const skillSourceLabel = (skill: MelodyExtension) => {
   if (skill.source === "server") {
     return "服务端";
   }
-  return {
-    agents: "Agents",
-    claude: "Claude",
-    cursor: "Cursor",
-    melody: "Melody",
-    plugin: "插件",
-  }[skill.provider] ?? skill.provider;
+  return (
+    {
+      agents: "Agents",
+      claude: "Claude",
+      cursor: "Cursor",
+      melody: "Melody",
+      plugin: "插件",
+    }[skill.provider] ?? skill.provider
+  );
 };
 
 const skillSourceGroups = [
@@ -185,9 +199,9 @@ const skillSourceGroupId = (skill: MelodyExtension): SkillSourceGroupId => {
 };
 
 const settingsSidebarGroupClass =
-  "mt-5 px-2 pb-1.5 font-semibold text-[11px] tracking-[0.06em] text-muted-foreground/65";
+  "mt-5 px-2 pb-1.5 font-semibold text-muted-foreground text-xs tracking-[0.04em]";
 const settingsSidebarItemClass =
-  "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors";
+  "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors";
 const settingsSidebarItemState = (selected: boolean) =>
   selected
     ? "bg-muted font-medium text-foreground"
@@ -196,6 +210,7 @@ const settingsSidebarItemState = (selected: boolean) =>
 export function SettingsWorkspace({
   cwd,
   projectId,
+  projectName: selectedProjectName,
   initialPage = "configuration",
   macSafeArea = false,
   onClose,
@@ -221,12 +236,18 @@ export function SettingsWorkspace({
     () => new Set(),
   );
   const [rules, setRules] = useState<PermissionRule[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const { state: configLoadState, run: runConfigLoad } = useAsyncOperation();
+  const { state: extensionLoadState, run: runExtensionLoad } =
+    useAsyncOperation();
+  const { state: rulesLoadState, run: runRulesLoad } = useAsyncOperation();
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const queuedSaveCountRef = useRef(0);
   const pendingConfigPatchesRef = useRef(configPatches);
+  const scopeTabRefs = useRef<
+    Record<MelodyConfigScope, HTMLButtonElement | null>
+  >({ user: null, project: null });
   const scopeRef = useRef(scope);
   const cwdRef = useRef(cwd);
   pendingConfigPatchesRef.current = configPatches;
@@ -247,89 +268,76 @@ export function SettingsWorkspace({
       saveQueueRef.current = saveQueueRef.current
         .catch(() => undefined)
         .then(async () => {
-          await updateMelodyConfig(
-            scopeRef.current,
-            cwdRef.current,
-            pending,
-          );
+          await updateMelodyConfig(scopeRef.current, cwdRef.current, pending);
         })
         .catch(() => undefined);
     },
     [],
   );
 
-  const loadConfig = async (nextScope = scope) => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const nextDocument = await readMelodyConfig(nextScope, cwd);
-      setDocument(nextDocument);
-      setConfigValues(nextDocument.values);
-      setConfigPatches({});
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadConfig = useCallback(
+    (nextScope = scope) => {
+      setError(undefined);
+      void runConfigLoad(
+        () => readMelodyConfig(nextScope, cwd),
+        (nextDocument) => {
+          setDocument(nextDocument);
+          setConfigValues(nextDocument.values);
+          setConfigPatches({});
+        },
+      ).catch(() => undefined);
+    },
+    [cwd, runConfigLoad, scope],
+  );
 
-  const loadExtensions = async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const [discovered, installed] = await Promise.all([
-        page === "skills"
-          ? listMelodySkills(cwd)
-          : listMelodyExtensions(cwd),
-        page === "plugins" ? listInstalledMelodyPlugins(cwd) : [],
-      ]);
-      const merged = [...installed, ...discovered].filter(
-        (extension, index, all) =>
-          all.findIndex(
-            (candidate) =>
-              candidate.kind === extension.kind &&
-              candidate.path === extension.path,
-          ) === index,
-      );
-      setExtensions(merged);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
+  const loadExtensions = useCallback(() => {
+    if (page !== "skills" && page !== "plugins" && page !== "hooks") {
+      return;
     }
-  };
+    const capabilityPage = page;
+    setError(undefined);
+    void runExtensionLoad(
+      () => capabilityLifecycle.load(cwd, capabilityPage),
+      setExtensions,
+    ).catch(() => undefined);
+  }, [cwd, page, runExtensionLoad]);
 
-  const loadRules = async () => {
-    setLoading(true);
+  const loadRules = useCallback(() => {
     setError(undefined);
-    try {
-      setRules(await listPermissionRules(projectId));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+    void runRulesLoad(() => listPermissionRules(projectId), setRules).catch(
+      () => undefined,
+    );
+  }, [projectId, runRulesLoad]);
+
+  const loading =
+    page === "configuration"
+      ? configLoadState.phase === "pending"
+      : page === "permissions"
+        ? rulesLoadState.phase === "pending"
+        : page === "skills" || page === "plugins" || page === "hooks"
+          ? extensionLoadState.phase === "pending"
+          : false;
+  const pageLoadError =
+    page === "configuration"
+      ? configLoadState.error
+      : page === "permissions"
+        ? rulesLoadState.error
+        : page === "skills" || page === "plugins" || page === "hooks"
+          ? extensionLoadState.error
+          : undefined;
+  const visibleError = pageLoadError ?? error;
 
   useEffect(() => {
     void loadConfig(scope);
-  }, [cwd, scope]);
+  }, [loadConfig, scope]);
 
   useEffect(() => {
-    if (
-      page === "skills" ||
-      page === "plugins" ||
-      page === "hooks"
-    ) {
-      void loadExtensions();
-    }
-  }, [cwd, page]);
+    void loadExtensions();
+  }, [loadExtensions]);
 
   useEffect(() => {
-    if (page === "permissions") {
-      void loadRules();
-    }
-  }, [page, projectId]);
+    if (page === "permissions") void loadRules();
+  }, [loadRules, page]);
 
   const removeRule = async (id: string) => {
     setError(undefined);
@@ -337,7 +345,7 @@ export function SettingsWorkspace({
       await deletePermissionRule(projectId, id);
       setRules((current) => current.filter((rule) => rule.id !== id));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     }
   };
 
@@ -358,9 +366,13 @@ export function SettingsWorkspace({
       ),
     );
     try {
-      await setMelodyExtensionEnabled(cwd, extension, enabled);
-      if (extension.kind === "skills") {
-        await loadExtensions();
+      const refreshed = await capabilityLifecycle.changeEnabled(
+        cwd,
+        extension,
+        enabled,
+      );
+      if (refreshed) {
+        setExtensions(refreshed);
       }
     } catch (reason) {
       setExtensions((current) =>
@@ -372,7 +384,7 @@ export function SettingsWorkspace({
             : item,
         ),
       );
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setTogglingExtensions((current) => {
         const next = new Set(current);
@@ -392,7 +404,11 @@ export function SettingsWorkspace({
       let table = next;
       for (const key of path.slice(0, -1)) {
         const existing = table[key];
-        if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+        if (
+          !existing ||
+          typeof existing !== "object" ||
+          Array.isArray(existing)
+        ) {
           table[key] = {};
         }
         table = table[key] as Record<string, MelodyConfigValue>;
@@ -452,7 +468,7 @@ export function SettingsWorkspace({
               return next;
             });
           } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
+            setError(toUserMessage(reason));
           }
         })
         .finally(() => {
@@ -486,16 +502,40 @@ export function SettingsWorkspace({
     configNavigation.find((item) => item.id === configSection)?.id ??
     configNavigation[0]?.id ??
     "general";
-  const isApplicationSettings =
-    activeConfigSection === "general" ||
-    activeConfigSection === "appearance";
+  const projectName = useMemo(() => {
+    if (selectedProjectName) {
+      return selectedProjectName;
+    }
+    const normalizedCwd = cwd.replaceAll("\\", "/").replace(/\/+$/, "");
+    return normalizedCwd.split("/").at(-1) || "当前项目";
+  }, [cwd, selectedProjectName]);
+  const scopeDescription =
+    scope === "user"
+      ? "影响此设备上的所有任务"
+      : "仅显示可写入当前项目的配置项";
+  const configPath = document?.path ?? ".melody/config.toml";
+  const saveStatus = saving
+    ? "正在保存…"
+    : Object.keys(configPatches).length > 0
+      ? "等待保存…"
+      : "已自动保存";
+  const scopeLocked = saving || Object.keys(configPatches).length > 0;
+  const changeScope = (nextScope: MelodyConfigScope) => {
+    if (!scopeLocked && nextScope !== scope) {
+      setScope(nextScope);
+    }
+  };
   const extensionKind: MelodyExtensionKind | undefined =
     page === "skills" || page === "plugins" || page === "hooks"
       ? page
       : undefined;
-  const kindExtensions = extensionKind
-    ? extensions.filter((extension) => extension.kind === extensionKind)
-    : [];
+  const kindExtensions = useMemo(
+    () =>
+      extensionKind
+        ? extensions.filter((extension) => extension.kind === extensionKind)
+        : [],
+    [extensionKind, extensions],
+  );
   const visibleExtensions = useMemo(() => {
     if (extensionKind !== "skills") {
       return kindExtensions;
@@ -543,9 +583,7 @@ export function SettingsWorkspace({
       return items ? [{ ...group, items }] : [];
     });
   }, [extensionKind, visibleExtensions]);
-  const ExtensionIcon = extensionKind
-    ? kindIcon[extensionKind]
-    : SparklesIcon;
+  const ExtensionIcon = extensionKind ? kindIcon[extensionKind] : SparklesIcon;
   const settingsViewKey = selectedPlugin
     ? `${page}:${selectedPlugin.path}`
     : page === "configuration"
@@ -574,14 +612,67 @@ export function SettingsWorkspace({
         </div>
       </header>
 
-      {error ? (
-        <p className="motion-view-enter border-b bg-destructive/5 px-5 py-2 text-destructive text-sm">
-          {error}
+      {visibleError ? (
+        <p
+          aria-live="assertive"
+          className="motion-view-enter border-b bg-destructive/5 px-5 py-2 text-destructive text-sm"
+          role="alert"
+        >
+          {visibleError}
         </p>
       ) : null}
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-56 shrink-0 overflow-y-auto border-r px-3 py-4">
+          <div className="mb-4 border-b pb-4">
+            <p className="px-1 pb-2 font-semibold text-muted-foreground text-xs tracking-[0.04em]">
+              配置范围
+            </p>
+            <div
+              aria-label="配置范围"
+              className="grid grid-cols-2 rounded-lg bg-muted p-1"
+              role="radiogroup"
+            >
+              {(["user", "project"] as const).map((item) => (
+                <Button
+                  aria-checked={scope === item}
+                  className={cn(
+                    "h-8 w-full justify-center rounded-md px-2 text-xs",
+                    scope === item
+                      ? "bg-background text-foreground shadow-sm hover:bg-background"
+                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                  )}
+                  disabled={scopeLocked}
+                  key={item}
+                  onClick={() => changeScope(item)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key !== "ArrowLeft" &&
+                      event.key !== "ArrowRight"
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    const nextScope = item === "user" ? "project" : "user";
+                    changeScope(nextScope);
+                    scopeTabRefs.current[nextScope]?.focus();
+                  }}
+                  ref={(element) => {
+                    scopeTabRefs.current[item] = element;
+                  }}
+                  role="radio"
+                  tabIndex={scope === item ? 0 : -1}
+                  type="button"
+                  variant="ghost"
+                >
+                  {item === "user" ? "应用" : "当前项目"}
+                </Button>
+              ))}
+            </div>
+            <p className="mt-2 px-1 text-muted-foreground text-xs">
+              {scopeDescription}
+            </p>
+          </div>
           <nav aria-label="设置分类">
             <button
               aria-current={page === "statistics" ? "page" : undefined}
@@ -599,13 +690,14 @@ export function SettingsWorkspace({
               <ChartNoAxesCombinedIcon className="size-3.5" />
               统计
             </button>
-            <p className={settingsSidebarGroupClass}>配置</p>
+            <p className={settingsSidebarGroupClass}>
+              {scope === "project" ? "项目配置" : "应用配置"}
+            </p>
             <div className="flex flex-col gap-0.5">
               {primaryConfigNavigation.map((item) => {
                 const Icon = item.icon;
                 const selected =
-                  page === "configuration" &&
-                  activeConfigSection === item.id;
+                  page === "configuration" && activeConfigSection === item.id;
                 return (
                   <button
                     aria-current={selected ? "page" : undefined}
@@ -633,8 +725,7 @@ export function SettingsWorkspace({
               {extensionConfigNavigation.map((item) => {
                 const Icon = item.icon;
                 const selected =
-                  page === "configuration" &&
-                  activeConfigSection === item.id;
+                  page === "configuration" && activeConfigSection === item.id;
                 return (
                   <button
                     aria-current={selected ? "page" : undefined}
@@ -732,83 +823,67 @@ export function SettingsWorkspace({
               </Suspense>
             ) : page === "configuration" ? (
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-              {(["user", "project"] as const).map((item) => (
-                <Button
-                  disabled={
-                    saving || Object.keys(configPatches).length > 0
-                  }
-                  key={item}
-                  onClick={() => setScope(item)}
-                  size="sm"
-                  variant={scope === item ? "secondary" : "ghost"}
-                >
-                  {item === "user" ? "用户" : "项目"}
-                </Button>
-              ))}
-              {isApplicationSettings ? (
-                <>
-                  <span className="min-w-0 flex-1 px-2 text-muted-foreground text-xs">
-                    MelodyWork 应用偏好
-                  </span>
-                  <Badge variant="secondary">自动保存</Badge>
-                </>
-              ) : (
-                <>
-                  <span className="min-w-0 flex-1 truncate px-2 text-muted-foreground text-xs">
-                    {document?.path}
-                  </span>
-                  {mcpServers.length > 0 ? (
+                <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+                  <div className="min-w-0 flex-1 px-2">
+                    <p className="font-medium text-sm">
+                      {scope === "user"
+                        ? "应用设置"
+                        : `当前项目：${projectName}`}
+                    </p>
+                    <p
+                      className="truncate text-muted-foreground text-xs"
+                      title={scope === "project" ? configPath : undefined}
+                    >
+                      {scope === "user" ? "影响此设备上的所有任务" : configPath}
+                    </p>
+                  </div>
+                  {scope === "project" && mcpServers.length > 0 ? (
                     <Badge variant="outline">
                       {mcpServers.length} MCP 个服务器
                     </Badge>
                   ) : null}
-                  <Button
-                    aria-label="重新加载配置"
-                    disabled={
-                      loading ||
-                      saving ||
-                      Object.keys(configPatches).length > 0
-                    }
-                    onClick={() => void loadConfig()}
-                    size="icon-sm"
-                    variant="ghost"
-                  >
-                    <RefreshCwIcon className={cn(loading && "animate-spin")} />
-                  </Button>
-                  <Badge variant="secondary">
-                    {saving
-                      ? "正在保存…"
-                      : Object.keys(configPatches).length > 0
-                        ? "等待保存…"
-                        : "已自动保存"}
-                  </Badge>
-                </>
-              )}
-            </div>
-            {document?.parseError ? (
-              <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-                <p className="font-medium text-destructive text-sm">
-                  配置文件包含无效的 TOML
-                </p>
-                <p className="mt-1 whitespace-pre-wrap text-muted-foreground text-xs">
-                  {document.parseError}
-                </p>
-                <p className="mt-2 text-muted-foreground text-xs">
-                  请先在外部编辑器中修复该文件，然后重新加载。
-                </p>
-              </div>
-            ) : loading ? (
-              <p className="p-6 text-muted-foreground text-sm">正在加载设置…</p>
-            ) : (
-              <ConfigurationForm
-                availableModels={availableModels}
-                onChange={changeConfig}
-                sectionId={activeConfigSection}
-                scope={scope}
-                values={configValues}
-              />
-            )}
+                  {scope === "project" ? (
+                    <Button
+                      aria-label="重新加载项目配置"
+                      disabled={loading || scopeLocked}
+                      onClick={() => void loadConfig()}
+                      size="sm"
+                      title="重新加载项目配置"
+                      variant="ghost"
+                    >
+                      <RefreshCwIcon
+                        className={cn(loading && "animate-spin")}
+                      />
+                      重新加载
+                    </Button>
+                  ) : null}
+                  <Badge variant="secondary">{saveStatus}</Badge>
+                </div>
+                {document?.parseError ? (
+                  <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+                    <p className="font-medium text-destructive text-sm">
+                      配置文件包含无效的 TOML
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-muted-foreground text-xs">
+                      {document.parseError}
+                    </p>
+                    <p className="mt-2 text-muted-foreground text-xs">
+                      请先在外部编辑器中修复该文件，然后重新加载。
+                    </p>
+                  </div>
+                ) : loading ? (
+                  <p className="p-6 text-muted-foreground text-sm">
+                    正在加载设置…
+                  </p>
+                ) : (
+                  <ConfigurationForm
+                    availableModels={availableModels}
+                    onChange={changeConfig}
+                    sectionId={activeConfigSection}
+                    scope={scope}
+                    values={configValues}
+                  />
+                )}
               </section>
             ) : page === "about" ? (
               <section className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -816,314 +891,327 @@ export function SettingsWorkspace({
               </section>
             ) : extensionKind ? (
               <section className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
-            <div className="mx-auto max-w-4xl">
-              {extensionKind === "plugins" && selectedPlugin ? (
-                <PluginDetailsView
-                  cwd={cwd}
-                  onBack={() => setSelectedPlugin(undefined)}
-                  onDeleted={async () => {
-                    setSelectedPlugin(undefined);
-                    await loadExtensions();
-                  }}
-                  plugin={selectedPlugin}
-                />
-              ) : extensionKind === "skills" && selectedPlugin ? (
-                <SkillDetailsView
-                  cwd={cwd}
-                  onBack={() => setSelectedPlugin(undefined)}
-                  onDeleted={async () => {
-                    setSelectedPlugin(undefined);
-                    await loadExtensions();
-                  }}
-                  skill={selectedPlugin}
-                />
-              ) : (
-                <>
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <ExtensionIcon className="size-5 text-muted-foreground" />
-                    <h3 className="font-semibold text-lg">
-                      {kindLabel[extensionKind]}
-                    </h3>
-                    <Badge variant="secondary">
-                      {extensionKind === "skills" &&
-                      visibleExtensions.length !== kindExtensions.length
-                        ? `${visibleExtensions.length} / ${kindExtensions.length}`
-                        : visibleExtensions.length}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-muted-foreground text-sm">
-                    {kindDescription[extensionKind]}
-                  </p>
-                </div>
-                {extensionKind === "plugins" ? (
-                  <PluginInstaller
-                    cwd={cwd}
-                    onInstalled={loadExtensions}
-                  />
-                ) : null}
-                <Button
-                  disabled={loading}
-                  onClick={() => void loadExtensions()}
-                  variant="outline"
-                >
-                  <RefreshCwIcon className={cn(loading && "animate-spin")} />
-                  刷新
-                </Button>
-              </div>
-
-              {extensionKind === "skills" ? (
-                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="relative min-w-0 flex-1">
-                    <SearchIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground" />
-                    <Input
-                      aria-label="搜索技能"
-                      className="pl-9"
-                      onChange={(event) => setSkillQuery(event.target.value)}
-                      placeholder="搜索技能名称、说明或来源"
-                      value={skillQuery}
+                <div className="mx-auto max-w-4xl">
+                  {extensionKind === "plugins" && selectedPlugin ? (
+                    <PluginDetailsView
+                      cwd={cwd}
+                      onBack={() => setSelectedPlugin(undefined)}
+                      onDeleted={async () => {
+                        setSelectedPlugin(undefined);
+                        await loadExtensions();
+                      }}
+                      plugin={selectedPlugin}
                     />
-                  </div>
-                  <div
-                    aria-label="技能状态筛选"
-                    className="flex items-center rounded-lg border bg-muted/30 p-0.5"
-                    role="group"
-                  >
-                    {(
-                      [
-                        ["all", "全部"],
-                        ["enabled", "已启用"],
-                        ["disabled", "不可用"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <Button
-                        aria-pressed={skillStatus === value}
-                        className="h-7 px-3"
-                        key={value}
-                        onClick={() => setSkillStatus(value)}
-                        size="sm"
-                        variant={skillStatus === value ? "secondary" : "ghost"}
-                      >
-                        {label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="mt-6 grid gap-7">
-                {visibleExtensionGroups.map((group) => (
-                  <section key={group.id}>
-                    {extensionKind === "skills" ? (
-                      <div className="mb-3">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium text-sm">{group.label}</h4>
-                          <Badge variant="secondary">{group.items.length}</Badge>
-                        </div>
-                        <p className="mt-0.5 text-muted-foreground text-xs">
-                          {group.description}
-                        </p>
-                      </div>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {group.items.map((item, index) => {
-                        const toggleKey = `${item.scope}:${item.kind}:${item.path}`;
-                        const canInspect =
-                          extensionKind === "plugins" ||
-                          extensionKind === "skills";
-                        const canToggle =
-                          extensionKind === "plugins" ||
-                          (extensionKind === "skills" &&
-                            item.compatibilityStatus !== "disabled");
-                        return (
-                          <article
-                            className={cn(
-                              "motion-list-item flex min-w-0 items-start gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-colors",
-                              !item.enabled &&
-                                "bg-muted/30 text-muted-foreground",
-                            )}
-                            key={`${item.scope}:${item.path}`}
-                            style={{
-                              animationDelay: `${Math.min(index, 6) * 24}ms`,
-                            }}
-                            title={item.path}
-                          >
-                            <button
-                              className="min-w-0 flex-1 text-left"
-                              disabled={!canInspect}
-                              onClick={() => setSelectedPlugin(item)}
-                              type="button"
-                            >
-                              <div className="flex items-center gap-2">
-                                <p className="min-w-0 flex-1 truncate font-medium text-sm">
-                                  {item.name}
-                                </p>
-                                {canInspect ? (
-                                  <ChevronRightIcon className="size-3.5 text-muted-foreground" />
-                                ) : null}
-                              </div>
-                              <div className="mt-2 flex items-center gap-2">
-                                <Badge variant="outline">
-                                  {item.scope === "user" ? "用户" : "项目"}
-                                </Badge>
-                                {extensionKind === "skills" ? (
-                                  <Badge variant="secondary">
-                                    {skillSourceLabel(item)}
-                                  </Badge>
-                                ) : null}
-                                {extensionKind === "plugins" ? (
-                                  <Badge variant="secondary">
-                                    {item.provider === "claude"
-                                      ? "Claude Code"
-                                      : "Melody"}
-                                  </Badge>
-                                ) : null}
-                                {item.compatibilityStatus === "disabled" ? (
-                                  <Badge variant="secondary">
-                                    兼容性已关闭
-                                  </Badge>
-                                ) : !item.enabled ? (
-                                  <Badge variant="secondary">已停用</Badge>
-                                ) : null}
-                              </div>
+                  ) : extensionKind === "skills" && selectedPlugin ? (
+                    <SkillDetailsView
+                      cwd={cwd}
+                      onBack={() => setSelectedPlugin(undefined)}
+                      onDeleted={async () => {
+                        setSelectedPlugin(undefined);
+                        await loadExtensions();
+                      }}
+                      skill={selectedPlugin}
+                    />
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <ExtensionIcon className="size-5 text-muted-foreground" />
+                            <h3 className="font-semibold text-lg">
+                              {kindLabel[extensionKind]}
+                            </h3>
+                            <Badge variant="secondary">
                               {extensionKind === "skills" &&
-                              item.description ? (
-                                <p className="mt-2 line-clamp-2 text-muted-foreground text-xs leading-5">
-                                  {item.description}
+                              visibleExtensions.length !== kindExtensions.length
+                                ? `${visibleExtensions.length} / ${kindExtensions.length}`
+                                : visibleExtensions.length}
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-muted-foreground text-sm">
+                            {kindDescription[extensionKind]}
+                          </p>
+                        </div>
+                        {extensionKind === "plugins" ? (
+                          <PluginInstaller
+                            cwd={cwd}
+                            onInstalled={loadExtensions}
+                          />
+                        ) : null}
+                        <Button
+                          disabled={loading}
+                          onClick={() => void loadExtensions()}
+                          variant="outline"
+                        >
+                          <RefreshCwIcon
+                            className={cn(loading && "animate-spin")}
+                          />
+                          刷新
+                        </Button>
+                      </div>
+
+                      {extensionKind === "skills" ? (
+                        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+                          <div className="relative min-w-0 flex-1">
+                            <SearchIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground" />
+                            <Input
+                              aria-label="搜索技能"
+                              className="pl-9"
+                              onChange={(event) =>
+                                setSkillQuery(event.target.value)
+                              }
+                              placeholder="搜索技能名称、说明或来源"
+                              value={skillQuery}
+                            />
+                          </div>
+                          <div
+                            aria-label="技能状态筛选"
+                            className="flex items-center rounded-lg border bg-muted/30 p-0.5"
+                            role="group"
+                          >
+                            {(
+                              [
+                                ["all", "全部"],
+                                ["enabled", "已启用"],
+                                ["disabled", "不可用"],
+                              ] as const
+                            ).map(([value, label]) => (
+                              <Button
+                                aria-pressed={skillStatus === value}
+                                className="h-7 px-3"
+                                key={value}
+                                onClick={() => setSkillStatus(value)}
+                                size="sm"
+                                variant={
+                                  skillStatus === value ? "secondary" : "ghost"
+                                }
+                              >
+                                {label}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-6 grid gap-7">
+                        {visibleExtensionGroups.map((group) => (
+                          <section key={group.id}>
+                            {extensionKind === "skills" ? (
+                              <div className="mb-3">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-medium text-sm">
+                                    {group.label}
+                                  </h4>
+                                  <Badge variant="secondary">
+                                    {group.items.length}
+                                  </Badge>
+                                </div>
+                                <p className="mt-0.5 text-muted-foreground text-xs">
+                                  {group.description}
                                 </p>
-                              ) : (
-                                <p className="mt-2 truncate text-muted-foreground text-xs">
-                                  {item.path}
-                                </p>
-                              )}
-                            </button>
-                            {canInspect ? (
-                              <Switch
-                                aria-label={`${item.enabled ? "停用" : "启用"}${kindLabel[extensionKind]} ${item.name}`}
-                                checked={item.enabled}
-                                className="mt-0.5"
-                                disabled={
-                                  !canToggle ||
-                                  togglingExtensions.has(toggleKey)
-                                }
-                                title={
-                                  canToggle
-                                    ? undefined
-                                    : "请先在兼容性设置中启用此来源"
-                                }
-                                onCheckedChange={(checked) =>
-                                  void toggleExtension(item, checked)
-                                }
-                              />
+                              </div>
                             ) : null}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))}
-              </div>
-              {!loading && visibleExtensions.length === 0 ? (
-                <div className="motion-view-enter mt-6 rounded-2xl border border-dashed py-16 text-center">
-                  <ExtensionIcon className="mx-auto size-6 text-muted-foreground" />
-                  <p className="mt-3 font-medium text-sm">
-                    {extensionKind === "skills" &&
-                    (skillQuery.trim() || skillStatus !== "all")
-                      ? "没有匹配的技能"
-                      : `暂未发现${kindLabel[extensionKind]}`}
-                  </p>
-                  <p className="mt-1 text-muted-foreground text-xs">
-                    {extensionKind === "skills" &&
-                    (skillQuery.trim() || skillStatus !== "all")
-                      ? "尝试调整关键词或状态筛选。"
-                      : extensionKind === "plugins"
-                      ? "Melody 会自动扫描 .melody/plugins 和 .claude/plugins。"
-                      : "技能清单直接来自 Melody 运行时。"}
-                  </p>
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                              {group.items.map((item, index) => {
+                                const toggleKey = `${item.scope}:${item.kind}:${item.path}`;
+                                const canInspect =
+                                  extensionKind === "plugins" ||
+                                  extensionKind === "skills";
+                                const canToggle =
+                                  extensionKind === "plugins" ||
+                                  (extensionKind === "skills" &&
+                                    item.compatibilityStatus !== "disabled");
+                                return (
+                                  <article
+                                    className={cn(
+                                      "motion-list-item flex min-w-0 items-start gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-colors",
+                                      !item.enabled &&
+                                        "bg-muted/30 text-muted-foreground",
+                                    )}
+                                    key={`${item.scope}:${item.path}`}
+                                    style={{
+                                      animationDelay: `${Math.min(index, 6) * 24}ms`,
+                                    }}
+                                    title={item.path}
+                                  >
+                                    <button
+                                      className="min-w-0 flex-1 text-left"
+                                      disabled={!canInspect}
+                                      onClick={() => setSelectedPlugin(item)}
+                                      type="button"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <p className="min-w-0 flex-1 truncate font-medium text-sm">
+                                          {item.name}
+                                        </p>
+                                        {canInspect ? (
+                                          <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+                                        ) : null}
+                                      </div>
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <Badge variant="outline">
+                                          {item.scope === "user"
+                                            ? "用户"
+                                            : "项目"}
+                                        </Badge>
+                                        {extensionKind === "skills" ? (
+                                          <Badge variant="secondary">
+                                            {skillSourceLabel(item)}
+                                          </Badge>
+                                        ) : null}
+                                        {extensionKind === "plugins" ? (
+                                          <Badge variant="secondary">
+                                            {item.provider === "claude"
+                                              ? "Claude Code"
+                                              : "Melody"}
+                                          </Badge>
+                                        ) : null}
+                                        {item.compatibilityStatus ===
+                                        "disabled" ? (
+                                          <Badge variant="secondary">
+                                            兼容性已关闭
+                                          </Badge>
+                                        ) : !item.enabled ? (
+                                          <Badge variant="secondary">
+                                            已停用
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+                                      {extensionKind === "skills" &&
+                                      item.description ? (
+                                        <p className="mt-2 line-clamp-2 text-muted-foreground text-xs leading-5">
+                                          {item.description}
+                                        </p>
+                                      ) : (
+                                        <p className="mt-2 truncate text-muted-foreground text-xs">
+                                          {item.path}
+                                        </p>
+                                      )}
+                                    </button>
+                                    {canInspect ? (
+                                      <Switch
+                                        aria-label={`${item.enabled ? "停用" : "启用"}${kindLabel[extensionKind]} ${item.name}`}
+                                        checked={item.enabled}
+                                        className="mt-0.5"
+                                        disabled={
+                                          !canToggle ||
+                                          togglingExtensions.has(toggleKey)
+                                        }
+                                        title={
+                                          canToggle
+                                            ? undefined
+                                            : "请先在兼容性设置中启用此来源"
+                                        }
+                                        onCheckedChange={(checked) =>
+                                          void toggleExtension(item, checked)
+                                        }
+                                      />
+                                    ) : null}
+                                  </article>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                      {!loading && visibleExtensions.length === 0 ? (
+                        <div className="motion-view-enter mt-6 rounded-2xl border border-dashed py-16 text-center">
+                          <ExtensionIcon className="mx-auto size-6 text-muted-foreground" />
+                          <p className="mt-3 font-medium text-sm">
+                            {extensionKind === "skills" &&
+                            (skillQuery.trim() || skillStatus !== "all")
+                              ? "没有匹配的技能"
+                              : `暂未发现${kindLabel[extensionKind]}`}
+                          </p>
+                          <p className="mt-1 text-muted-foreground text-xs">
+                            {extensionKind === "skills" &&
+                            (skillQuery.trim() || skillStatus !== "all")
+                              ? "尝试调整关键词或状态筛选。"
+                              : extensionKind === "plugins"
+                                ? "Melody 会自动扫描 .melody/plugins 和 .claude/plugins。"
+                                : "技能清单直接来自 Melody 运行时。"}
+                          </p>
+                        </div>
+                      ) : null}
+                      {extensionKind === "plugins" ? (
+                        <MarketplaceSettings
+                          cwd={cwd}
+                          onPluginsChanged={loadExtensions}
+                        />
+                      ) : null}
+                    </>
+                  )}
                 </div>
-              ) : null}
-              {extensionKind === "plugins" ? (
-                <MarketplaceSettings
-                  cwd={cwd}
-                  onPluginsChanged={loadExtensions}
-                />
-              ) : null}
-                </>
-              )}
-            </div>
               </section>
             ) : (
               <section className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
-            <div className="mx-auto max-w-4xl">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-lg">
-                    项目权限规则
-                  </h3>
-                  <p className="mt-1 text-muted-foreground text-sm">
-                    已为此项目允许或拒绝的精确工具调用会自动应用。
-                  </p>
-                </div>
-                <Button
-                  disabled={loading}
-                  onClick={() => void loadRules()}
-                  variant="outline"
-                >
-                  <RefreshCwIcon className={cn(loading && "animate-spin")} />
-                  刷新
-                </Button>
-              </div>
-
-              <div className="mt-6 flex flex-col gap-3">
-                {rules.map((rule, index) => (
-                  <article
-                    className="motion-list-item flex items-start gap-4 rounded-2xl border bg-card p-4"
-                    key={rule.id}
-                    style={{
-                      animationDelay: `${Math.min(index, 6) * 24}ms`,
-                    }}
-                  >
-                    <Badge
-                      variant={
-                        rule.decision === "allow"
-                          ? "secondary"
-                          : "destructive"
-                      }
-                    >
-                      {rule.decision === "allow" ? "允许" : "拒绝"}
-                    </Badge>
+                <div className="mx-auto max-w-4xl">
+                  <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
-                      <h4 className="font-medium text-sm">{rule.title}</h4>
-                      {rule.command ? (
-                        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 font-mono text-xs">
-                          {rule.command}
-                        </pre>
-                      ) : null}
+                      <h3 className="font-semibold text-lg">项目权限规则</h3>
+                      <p className="mt-1 text-muted-foreground text-sm">
+                        已为此项目允许或拒绝的精确工具调用会自动应用。
+                      </p>
                     </div>
                     <Button
-                      aria-label={`删除“${rule.title}”权限规则`}
-                      onClick={() => void removeRule(rule.id)}
-                      size="icon"
-                      variant="ghost"
+                      disabled={loading}
+                      onClick={() => void loadRules()}
+                      variant="outline"
                     >
-                      <Trash2Icon />
+                      <RefreshCwIcon
+                        className={cn(loading && "animate-spin")}
+                      />
+                      刷新
                     </Button>
-                  </article>
-                ))}
-                {!loading && rules.length === 0 ? (
-                  <div className="motion-view-enter rounded-2xl border border-dashed py-16 text-center">
-                    <ShieldCheckIcon className="mx-auto size-6 text-muted-foreground" />
-                    <p className="mt-3 font-medium text-sm">
-                      暂无项目规则
-                    </p>
-                    <p className="mt-1 text-muted-foreground text-xs">
-                      在权限请求中选择“对项目允许”或“对项目拒绝”即可创建规则。
-                    </p>
                   </div>
-                ) : null}
-              </div>
-            </div>
+
+                  <div className="mt-6 flex flex-col gap-3">
+                    {rules.map((rule, index) => (
+                      <article
+                        className="motion-list-item flex items-start gap-4 rounded-2xl border bg-card p-4"
+                        key={rule.id}
+                        style={{
+                          animationDelay: `${Math.min(index, 6) * 24}ms`,
+                        }}
+                      >
+                        <Badge
+                          variant={
+                            rule.decision === "allow"
+                              ? "secondary"
+                              : "destructive"
+                          }
+                        >
+                          {rule.decision === "allow" ? "允许" : "拒绝"}
+                        </Badge>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-medium text-sm">{rule.title}</h4>
+                          {rule.command ? (
+                            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 font-mono text-xs">
+                              {rule.command}
+                            </pre>
+                          ) : null}
+                        </div>
+                        <Button
+                          aria-label={`删除“${rule.title}”权限规则`}
+                          onClick={() => void removeRule(rule.id)}
+                          size="icon"
+                          variant="ghost"
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </article>
+                    ))}
+                    {!loading && rules.length === 0 ? (
+                      <div className="motion-view-enter rounded-2xl border border-dashed py-16 text-center">
+                        <ShieldCheckIcon className="mx-auto size-6 text-muted-foreground" />
+                        <p className="mt-3 font-medium text-sm">暂无项目规则</p>
+                        <p className="mt-1 text-muted-foreground text-xs">
+                          在权限请求中选择“对项目允许”或“对项目拒绝”即可创建规则。
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </section>
             )}
           </MotionPage>

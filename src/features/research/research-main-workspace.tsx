@@ -22,7 +22,16 @@ import {
   WandSparklesIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -33,13 +42,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { toUserMessage } from "@/domain/app-error";
 import type {
   ResearchPaper,
   ResearchSource,
   ResearchSourceRun,
 } from "@/domain/research";
-import { FileWorkspace } from "@/features/files/file-workspace";
-import { TerminalPanel } from "@/features/terminal/terminal-panel";
+import { RequestGate } from "@/domain/request-gate";
 import {
   openExternalUrl,
   readMelodyConfig,
@@ -86,13 +95,30 @@ export type ResearchMainDetail =
 type ResultSort = "relevance" | "year" | "citations";
 const EXAMPLE_RESEARCH_QUERY = "大语言模型在科研发现中的应用证据";
 
+const FileWorkspace = lazy(() =>
+  import("@/features/files/file-workspace").then(({ FileWorkspace }) => ({
+    default: FileWorkspace,
+  })),
+);
+const TerminalPanel = lazy(() =>
+  import("@/features/terminal/terminal-panel").then(({ TerminalPanel }) => ({
+    default: TerminalPanel,
+  })),
+);
+
 function ResearchViewLayer({
   active,
   children,
+  mounted,
 }: {
   active: boolean;
   children: ReactNode;
+  mounted: boolean;
 }) {
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <motion.div
       animate={{
@@ -179,13 +205,15 @@ const SourceToggle = ({
 }) => (
   <label
     className={cn(
-      "flex items-center gap-1.5 text-xs",
-      disabled ? "cursor-not-allowed text-muted-foreground/55" : "text-foreground",
+      "flex min-h-6 items-center gap-1.5 text-xs",
+      disabled
+        ? "cursor-not-allowed text-muted-foreground/55"
+        : "text-foreground",
     )}
   >
     <input
       checked={checked}
-      className="size-3.5 accent-primary"
+      className="size-4 accent-primary"
       disabled={disabled}
       onChange={(event) => onCheckedChange?.(event.target.checked)}
       readOnly={!onCheckedChange}
@@ -220,9 +248,7 @@ function ResultTable({
       <div className="grid min-h-64 place-items-center text-center">
         <div>
           <SearchIcon className="mx-auto size-5 text-muted-foreground" />
-          <p className="mt-3 text-muted-foreground text-xs">
-            {emptyText}
-          </p>
+          <p className="mt-3 text-muted-foreground text-xs">{emptyText}</p>
           {emptyAction ? <div className="mt-4">{emptyAction}</div> : null}
         </div>
       </div>
@@ -231,85 +257,102 @@ function ResultTable({
   return (
     <>
       <div className="hidden min-w-[700px] md:block">
-      <div className="grid grid-cols-[34px_minmax(320px,1fr)_72px_140px_82px_120px] border-b bg-muted/30 px-2 py-2 text-muted-foreground text-[11px]">
-        <span />
-        <span>论文</span>
-        <span>年份</span>
-        <span>来源</span>
-        <span>引用</span>
-        <span>核验 / 详情</span>
-      </div>
-      {papers.map((paper) => (
-        <div
-          className={cn(
-            "grid grid-cols-[34px_minmax(320px,1fr)_72px_140px_82px_120px] items-start border-b px-2 text-left text-xs hover:bg-muted/30",
-            selectedId === paper.id && "bg-muted/50",
-          )}
-          key={paper.id}
-        >
-          <label className="grid h-full min-h-16 place-items-center">
-            <input
-              checked={checked.has(paper.id)}
-              className="size-3.5 accent-primary"
-              onChange={() => onCheck(paper.id)}
-              type="checkbox"
-            />
-          </label>
-          <button
-            className="min-w-0 py-3 pr-3 text-left"
-            onClick={() => onSelect(paper)}
-            type="button"
-          >
-            <span className="research-serif line-clamp-2 font-medium text-[13px] leading-4">{paper.title}</span>
-            {paper.doi ? (
-              <span className="mt-1 block truncate text-muted-foreground text-[10px]">
-                {paper.doi}
-              </span>
-            ) : null}
-            <span className="mt-1 block truncate text-muted-foreground text-[11px]">
-              {paper.authors.join("、") || "作者未收录"}
-            </span>
-          </button>
-          <span className="py-3 tabular-nums">{paper.year ?? "—"}</span>
-          <span className="truncate py-3 pr-3" title={paper.venue}>
-            {paper.venue ?? paper.sources[0]}
-          </span>
-          <span className="py-3 tabular-nums">
-            {paper.citationCount?.toLocaleString() ?? "—"}
-          </span>
-          <span className="flex items-center gap-2 py-3">
-            {paper.verified ? (
-              <>
-                <CheckCircle2Icon className="size-3.5 text-emerald-600" />
-                <span>已核验</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">单一来源</span>
-            )}
-            <ArrowRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
-          </span>
+        <div className="grid grid-cols-[34px_minmax(320px,1fr)_72px_140px_82px_120px] border-b bg-muted/30 px-2 py-2 text-muted-foreground text-[11px]">
+          <span />
+          <span>论文</span>
+          <span>年份</span>
+          <span>来源</span>
+          <span>引用</span>
+          <span>核验 / 详情</span>
         </div>
-      ))}
-      </div>
-      <div className="divide-y md:hidden">
         {papers.map((paper) => (
-          <div className="flex items-start gap-3 px-4 py-4" key={paper.id}>
-            <label className="pt-1">
+          <div
+            className={cn(
+              "grid grid-cols-[34px_minmax(320px,1fr)_72px_140px_82px_120px] items-start border-b px-2 text-left text-xs hover:bg-muted/30",
+              selectedId === paper.id && "bg-muted/50",
+            )}
+            key={paper.id}
+          >
+            <label className="grid h-full min-h-16 min-w-6 place-items-center">
               <input
+                aria-label={`选择论文：${paper.title}`}
                 checked={checked.has(paper.id)}
-                className="size-3.5 accent-primary"
+                className="size-4 accent-primary"
                 onChange={() => onCheck(paper.id)}
                 type="checkbox"
               />
             </label>
-            <button className="min-w-0 flex-1 text-left" onClick={() => onSelect(paper)} type="button">
-              <span className="research-serif block font-medium text-sm leading-5">{paper.title}</span>
-              <span className="mt-1 block line-clamp-2 text-muted-foreground text-[11px] leading-4">{paper.authors.join("、") || "作者未收录"}</span>
+            <button
+              className="min-w-0 py-3 pr-3 text-left"
+              onClick={() => onSelect(paper)}
+              type="button"
+            >
+              <span className="research-serif line-clamp-2 font-medium text-[13px] leading-4">
+                {paper.title}
+              </span>
+              {paper.doi ? (
+                <span className="mt-1 block truncate text-muted-foreground text-[10px]">
+                  {paper.doi}
+                </span>
+              ) : null}
+              <span className="mt-1 block truncate text-muted-foreground text-[11px]">
+                {paper.authors.join("、") || "作者未收录"}
+              </span>
+            </button>
+            <span className="py-3 tabular-nums">{paper.year ?? "—"}</span>
+            <span className="truncate py-3 pr-3" title={paper.venue}>
+              {paper.venue ?? paper.sources[0]}
+            </span>
+            <span className="py-3 tabular-nums">
+              {paper.citationCount?.toLocaleString() ?? "—"}
+            </span>
+            <span className="flex items-center gap-2 py-3">
+              {paper.verified ? (
+                <>
+                  <CheckCircle2Icon className="size-3.5 text-emerald-600" />
+                  <span>已核验</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">单一来源</span>
+              )}
+              <ArrowRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="divide-y md:hidden">
+        {papers.map((paper) => (
+          <div className="flex items-start gap-3 px-4 py-4" key={paper.id}>
+            <label className="flex min-h-6 min-w-6 items-start justify-center pt-1">
+              <input
+                aria-label={`选择论文：${paper.title}`}
+                checked={checked.has(paper.id)}
+                className="size-4 accent-primary"
+                onChange={() => onCheck(paper.id)}
+                type="checkbox"
+              />
+            </label>
+            <button
+              className="min-w-0 flex-1 text-left"
+              onClick={() => onSelect(paper)}
+              type="button"
+            >
+              <span className="research-serif block font-medium text-sm leading-5">
+                {paper.title}
+              </span>
+              <span className="mt-1 block line-clamp-2 text-muted-foreground text-[11px] leading-4">
+                {paper.authors.join("、") || "作者未收录"}
+              </span>
               <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
                 <span>{paper.year ?? "年份未提供"}</span>
                 <span>·</span>
                 <span>{paper.venue ?? paper.sources[0] ?? "来源未提供"}</span>
-                {paper.verified ? <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-300"><CheckCircle2Icon className="size-3" />已核验</span> : null}
+                {paper.verified ? (
+                  <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+                    <CheckCircle2Icon className="size-3" />
+                    已核验
+                  </span>
+                ) : null}
               </span>
             </button>
             <ArrowRightIcon className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
@@ -386,20 +429,22 @@ function PaperDetailWorkspace({
           : "已返回单一来源元数据，请打开原文核对。",
       );
     } catch (reason) {
-      setVerificationMessage(
-        reason instanceof Error ? reason.message : String(reason),
-      );
+      setVerificationMessage(toUserMessage(reason, "验证失败，请稍后重试。"));
     } finally {
       setVerificationBusy(false);
     }
   };
 
-  const evidence = paper.verification?.evidence ??
+  const evidence =
+    paper.verification?.evidence ??
     paper.sources.map((source) => ({
       source,
       status: "matched" as const,
       checkedAt: paper.verification?.checkedAt ?? paper.addedAt,
-      recordId: paper.id.replace(/^(?:doi|arxiv|pubmed|semantic-scholar):/i, ""),
+      recordId: paper.id.replace(
+        /^(?:doi|arxiv|pubmed|semantic-scholar):/i,
+        "",
+      ),
       title: paper.title,
       url: paper.url,
     }));
@@ -407,14 +452,22 @@ function PaperDetailWorkspace({
   return (
     <div className="flex size-full min-h-0 flex-col overflow-y-auto bg-background">
       <header className="shrink-0 border-b px-6 py-4">
-        <Button className="-ml-2 h-7 px-2 text-xs" onClick={onBack} size="sm" variant="ghost">
-          <ArrowLeftIcon />返回上一页
+        <Button
+          className="-ml-2 h-7 px-2 text-xs"
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          <ArrowLeftIcon />
+          返回上一页
         </Button>
         <ProjectContext projectName={projectName} />
       </header>
       <main className="mx-auto w-full max-w-6xl px-6 py-8">
         <div className="max-w-5xl">
-          <h1 className="research-serif text-3xl font-semibold leading-tight tracking-tight lg:text-4xl">{paper.title}</h1>
+          <h1 className="research-serif text-3xl font-semibold leading-tight tracking-tight lg:text-4xl">
+            {paper.title}
+          </h1>
           <p className="mt-3 max-w-4xl text-sm text-muted-foreground leading-6">
             {paper.authors.join("、") || "作者信息未收录"}
           </p>
@@ -422,76 +475,145 @@ function PaperDetailWorkspace({
             {[paper.year, paper.venue, paper.doi].filter(Boolean).join(" · ")}
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-2 border-y py-3">
-            <Button onClick={() => addPapers([{ ...paper, saved: true }])} size="sm" variant={paper.saved ? "secondary" : "outline"}>
+            <Button
+              onClick={() => addPapers([{ ...paper, saved: true }])}
+              size="sm"
+              variant={paper.saved ? "secondary" : "outline"}
+            >
               <BookmarkIcon className={cn(paper.saved && "fill-current")} />
               {paper.saved ? "已收藏" : "收藏"}
             </Button>
             {paper.pdfUrl ? (
-              <Button onClick={() => setShowPdf((value) => !value)} size="sm" variant="outline">
-                <FileTextIcon />{showPdf ? "返回摘要" : "打开 PDF"}
+              <Button
+                onClick={() => setShowPdf((value) => !value)}
+                size="sm"
+                variant="outline"
+              >
+                <FileTextIcon />
+                {showPdf ? "返回摘要" : "打开 PDF"}
               </Button>
             ) : null}
             {paper.pdfUrl ? (
               <Button asChild size="sm" variant="outline">
-                <a download href={paper.pdfUrl} rel="noreferrer" target="_blank">
-                  <DownloadIcon />下载 PDF
+                <a
+                  download
+                  href={paper.pdfUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <DownloadIcon />
+                  下载 PDF
                 </a>
               </Button>
             ) : null}
-            <Button onClick={() => void openExternalUrl(paper.url)} size="sm" variant="outline">
-              <ExternalLinkIcon />打开原文
+            <Button
+              onClick={() => void openExternalUrl(paper.url)}
+              size="sm"
+              variant="outline"
+            >
+              <ExternalLinkIcon />
+              打开原文
             </Button>
             {bibtexEnabled ? (
-              <Button onClick={() => void copyBibtex()} size="sm" variant="outline">
-                <FileTextIcon />{bibtexCopied ? "BibTeX 已复制" : "复制 BibTeX"}
+              <Button
+                onClick={() => void copyBibtex()}
+                size="sm"
+                variant="outline"
+              >
+                <FileTextIcon />
+                {bibtexCopied ? "BibTeX 已复制" : "复制 BibTeX"}
               </Button>
             ) : null}
             {citationAuditEnabled && paper.doi ? (
-              <Button disabled={verificationBusy} onClick={() => void verifyCitation()} size="sm" variant="outline">
-                {verificationBusy ? <LoaderCircleIcon className="animate-spin" /> : <RefreshCwIcon />}
+              <Button
+                disabled={verificationBusy}
+                onClick={() => void verifyCitation()}
+                size="sm"
+                variant="outline"
+              >
+                {verificationBusy ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <RefreshCwIcon />
+                )}
                 {verificationBusy ? "核验中…" : "重新核验"}
               </Button>
             ) : null}
             {onAskPaper ? (
-              <Button disabled={!studyCardEnabled} onClick={() => onAskPaper(paper)} size="sm" title={studyCardEnabled ? undefined : "请先在科研能力中启用论文研究卡片"}>
+              <Button
+                disabled={!studyCardEnabled}
+                onClick={() => onAskPaper(paper)}
+                size="sm"
+                title={
+                  studyCardEnabled
+                    ? undefined
+                    : "请先在科研能力中启用论文研究卡片"
+                }
+              >
                 <MessageCircleQuestionIcon />向 Melody 提问
               </Button>
             ) : null}
           </div>
         </div>
         {verificationMessage ? (
-          <p className="mt-3 max-w-5xl rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">{verificationMessage}</p>
+          <p
+            aria-live="polite"
+            className="mt-3 max-w-5xl rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+            role="status"
+          >
+            {verificationMessage}
+          </p>
         ) : null}
         {showPdf && paper.pdfUrl ? (
           <div className="mt-8 max-w-5xl border bg-muted/10 p-2">
-            <iframe className="h-[min(72vh,760px)] w-full border bg-background" src={paper.pdfUrl} title={`${paper.title} PDF`} />
+            <iframe
+              className="h-[min(72vh,760px)] w-full border bg-background"
+              src={paper.pdfUrl}
+              title={`${paper.title} PDF`}
+            />
           </div>
         ) : (
           <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_260px]">
             <article className="max-w-3xl">
               <section className="border-b pb-7">
                 <h2 className="research-serif font-semibold text-xl">摘要</h2>
-                <p className="research-serif mt-4 whitespace-pre-wrap text-[15px] text-foreground/85 leading-8">
+                <p className="research-serif mt-4 whitespace-pre-wrap text-base text-foreground/85 leading-8">
                   {paper.abstract || "索引未提供摘要，可打开原文查看。"}
                 </p>
               </section>
               <section className="pt-7">
-                <h2 className="research-serif font-semibold text-xl">证据导读</h2>
+                <h2 className="research-serif font-semibold text-xl">
+                  证据导读
+                </h2>
                 <p className="mt-2 text-xs text-muted-foreground leading-5">
                   这里保留论文的分析结构，不把模型推断伪装成原文结论。启用论文研究卡片后，可在对话中生成带证据边界的导读。
                 </p>
                 <div className="mt-5 divide-y border-y">
                   {[
                     ["01", "研究问题", "从摘要与原文中确认研究目标。"],
-                    ["02", "研究方法", "在对话中提取数据、实验设置与比较基线。"],
+                    [
+                      "02",
+                      "研究方法",
+                      "在对话中提取数据、实验设置与比较基线。",
+                    ],
                     ["03", "关键证据", "回到原文核对结果、指标与统计信息。"],
-                    ["04", "局限与下一步", "记录作者明确说明的限制，避免过度外推。"],
+                    [
+                      "04",
+                      "局限与下一步",
+                      "记录作者明确说明的限制，避免过度外推。",
+                    ],
                   ].map(([number, title, description]) => (
                     <div className="flex gap-4 py-4" key={number}>
-                      <span className="research-serif grid size-7 shrink-0 place-items-center rounded-full border text-xs">{number}</span>
+                      <span className="research-serif grid size-7 shrink-0 place-items-center rounded-full border text-xs">
+                        {number}
+                      </span>
                       <div>
-                        <h3 className="research-serif font-semibold text-base">{title}</h3>
-                        <p className="mt-1 text-xs text-muted-foreground leading-5">{description}</p>
+                        <h3 className="research-serif font-semibold text-base">
+                          {title}
+                        </h3>
+                        <p className="mt-1 text-xs text-muted-foreground leading-5">
+                          {description}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -500,26 +622,77 @@ function PaperDetailWorkspace({
             </article>
             <aside className="border-l pl-6">
               <section>
-                <h2 className="research-serif font-semibold text-base">来源与核验</h2>
+                <h2 className="research-serif font-semibold text-base">
+                  来源与核验
+                </h2>
                 <dl className="mt-4 grid gap-3 text-xs">
-                  <div><dt className="text-muted-foreground">来源</dt><dd className="mt-1">{paper.sources.join("、") || "未提供"}</dd></div>
-                  <div><dt className="text-muted-foreground">发表年份</dt><dd className="mt-1">{paper.year ?? "未提供"}</dd></div>
-                  <div><dt className="text-muted-foreground">期刊 / 会议</dt><dd className="mt-1">{paper.venue || "未提供"}</dd></div>
-                  <div><dt className="text-muted-foreground">DOI</dt><dd className="mt-1 break-all text-primary">{paper.doi || "未提供"}</dd></div>
-                  <div><dt className="text-muted-foreground">引用次数</dt><dd className="mt-1">{paper.citationCount?.toLocaleString() ?? "未提供"}</dd></div>
+                  <div>
+                    <dt className="text-muted-foreground">来源</dt>
+                    <dd className="mt-1">
+                      {paper.sources.join("、") || "未提供"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">发表年份</dt>
+                    <dd className="mt-1">{paper.year ?? "未提供"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">期刊 / 会议</dt>
+                    <dd className="mt-1">{paper.venue || "未提供"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">DOI</dt>
+                    <dd className="mt-1 break-all text-primary">
+                      {paper.doi || "未提供"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">引用次数</dt>
+                    <dd className="mt-1">
+                      {paper.citationCount?.toLocaleString() ?? "未提供"}
+                    </dd>
+                  </div>
                 </dl>
               </section>
               <section className="mt-8 border-t pt-6">
-                <h2 className="research-serif font-semibold text-base">核验状态</h2>
-                <div className={cn("mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs", paper.verified ? "border-emerald-200 bg-emerald-500/6 text-emerald-800 dark:border-emerald-900 dark:text-emerald-200" : "border-amber-200 bg-amber-500/6 text-amber-800 dark:border-amber-900 dark:text-amber-200")}>
-                  {paper.verified ? <CheckCircle2Icon className="size-3.5" /> : <TriangleAlertIcon className="size-3.5" />}
-                  {paper.verified ? "已通过多源元信息核验" : "单一来源，需打开原文核对"}
+                <h2 className="research-serif font-semibold text-base">
+                  核验状态
+                </h2>
+                <div
+                  className={cn(
+                    "mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs",
+                    paper.verified
+                      ? "border-emerald-200 bg-emerald-500/6 text-emerald-800 dark:border-emerald-900 dark:text-emerald-200"
+                      : "border-amber-200 bg-amber-500/6 text-amber-800 dark:border-amber-900 dark:text-amber-200",
+                  )}
+                >
+                  {paper.verified ? (
+                    <CheckCircle2Icon className="size-3.5" />
+                  ) : (
+                    <TriangleAlertIcon className="size-3.5" />
+                  )}
+                  {paper.verified
+                    ? "已通过多源元信息核验"
+                    : "单一来源，需打开原文核对"}
                 </div>
                 <div className="mt-4 space-y-2">
                   {evidence.map((item) => (
-                    <div className="border-b pb-2 text-[11px]" key={`${item.source}:${item.recordId ?? item.title}`}>
-                      <div className="flex items-center justify-between gap-2"><span className="font-medium">{item.source}</span><span className="text-emerald-700 dark:text-emerald-300">已匹配</span></div>
-                      <p className="mt-1 truncate text-muted-foreground" title={item.recordId}>{item.recordId || "记录 ID 未提供"}</p>
+                    <div
+                      className="border-b pb-2 text-[11px]"
+                      key={`${item.source}:${item.recordId ?? item.title}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{item.source}</span>
+                        <span className="text-emerald-700 dark:text-emerald-300">
+                          已匹配
+                        </span>
+                      </div>
+                      <p
+                        className="mt-1 truncate text-muted-foreground"
+                        title={item.recordId}
+                      >
+                        {item.recordId || "记录 ID 未提供"}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -542,9 +715,10 @@ function SearchWorkspace({
   projectName: string;
 }) {
   const addPapers = useResearchStore((state) => state.addPapers);
-  const addSearchHistory = useResearchStore((state) => state.addSearchHistory);
   const inbox = useResearchStore((state) => state.inbox);
-  const setResearchInbox = useResearchStore((state) => state.setResearchInbox);
+  const recordSearchResult = useResearchStore(
+    (state) => state.recordSearchResult,
+  );
   const history = useResearchStore((state) => state.searchHistory);
   const searchToolEnabled = useResearchCapabilityStore((state) =>
     state.enabledToolIds.includes("search-literature"),
@@ -558,7 +732,9 @@ function SearchWorkspace({
   const [enabledSources, setEnabledSources] = useState<Set<ResearchSource>>(
     () => new Set(DEFAULT_RESEARCH_SEARCH_SOURCES),
   );
-  const [activeView, setActiveView] = useState<"results" | "history">("results");
+  const [activeView, setActiveView] = useState<"results" | "history">(
+    "results",
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -567,6 +743,7 @@ function SearchWorkspace({
   const [showSourceRuns, setShowSourceRuns] = useState(false);
   const [showQueryDetails, setShowQueryDetails] = useState(false);
   const [refinedQuery, setRefinedQuery] = useState("");
+  const searchGateRef = useRef(new RequestGate());
   const queryPlan = useMemo(() => buildResearchQueryPlan(query), [query]);
   const inboxCreatedAt = inbox?.createdAt;
   const displayed = useMemo(() => {
@@ -589,6 +766,7 @@ function SearchWorkspace({
   ).sort((a, b) => b - a);
 
   useEffect(() => {
+    searchGateRef.current.invalidate();
     if (!inbox || inboxCreatedAt === undefined) {
       return;
     }
@@ -603,11 +781,14 @@ function SearchWorkspace({
         .filter((run) => run.status === "success")
         .map((run) => run.source),
     );
-  }, [inboxCreatedAt]);
+  }, [inbox, inboxCreatedAt]);
+
+  useEffect(() => () => searchGateRef.current.invalidate(), []);
 
   const runSearch = async (nextQuery = query, historySearchQuery?: string) => {
     const normalized = nextQuery.trim();
     if (!normalized || !searchToolEnabled) return;
+    const requestToken = searchGateRef.current.begin();
     const nextPlan = buildResearchQueryPlan(normalized);
     const queryForSearch =
       historySearchQuery?.trim() ||
@@ -631,30 +812,28 @@ function SearchWorkspace({
         queryForSearch,
         Array.from(enabledSources),
       );
+      if (!searchGateRef.current.isCurrent(requestToken)) return;
       setPapers(result.papers);
       setChecked(new Set());
       setSourceSummary(result.sources);
       setWarnings(result.warnings);
       setSourceRuns(result.sourceRuns);
-      setResearchInbox({
+      recordSearchResult({
         query: normalized,
         searchQuery: queryForSearch,
-        createdAt: Date.now(),
-        papers: result.papers,
-        sourceRuns: result.sourceRuns,
-      });
-      addSearchHistory(normalized, result.papers.length, {
-        searchQuery: queryForSearch,
         terms: buildResearchQueryPlan(queryForSearch).terms,
-        sources: result.sources,
+        result,
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (!searchGateRef.current.isCurrent(requestToken)) return;
+      setError(toUserMessage(reason));
       setPapers([]);
       setSourceSummary([]);
       setSourceRuns([]);
     } finally {
-      setLoading(false);
+      if (searchGateRef.current.isCurrent(requestToken)) {
+        setLoading(false);
+      }
     }
   };
   return (
@@ -665,15 +844,17 @@ function SearchWorkspace({
           用自然语言描述研究问题，从已接通的真实学术索引中检索并交叉核验。
         </p>
         <ProjectContext projectName={projectName} />
-        <div className="mt-4 rounded-lg border">
+        <div className="mt-4 rounded-lg border focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
           <textarea
+            aria-label="自然语言研究问题"
             className="h-16 w-full resize-none bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
             onChange={(event) => {
               setQuery(event.target.value);
               setRefinedQuery("");
             }}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void runSearch();
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter")
+                void runSearch();
             }}
             placeholder="例如：大语言模型在科研发现中的应用效果如何？有哪些可复现的证据？"
             value={query}
@@ -684,7 +865,9 @@ function SearchWorkspace({
               <SourceToggle
                 checked={enabledSources.has(source)}
                 disabled={source === "OpenAlex"}
-                disabledReason={source === "OpenAlex" ? "需 API Key" : undefined}
+                disabledReason={
+                  source === "OpenAlex" ? "需 API Key" : undefined
+                }
                 key={source}
                 label={source}
                 onCheckedChange={(checked) =>
@@ -698,7 +881,7 @@ function SearchWorkspace({
               />
             ))}
             <Button
-              className="ml-auto"
+              className="sm:ml-auto"
               disabled={
                 !searchToolEnabled ||
                 !query.trim() ||
@@ -708,7 +891,11 @@ function SearchWorkspace({
               onClick={() => void runSearch()}
               size="sm"
             >
-              {loading ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}
+              {loading ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <SearchIcon />
+              )}
               {loading ? "正在检索…" : "检索"}
             </Button>
           </div>
@@ -724,7 +911,9 @@ function SearchWorkspace({
             <div className="flex items-center gap-2 text-xs">
               <WandSparklesIcon className="size-3.5 text-muted-foreground" />
               <span className="font-medium">检索词草案</span>
-              <span className="text-muted-foreground">本地规则整理，可编辑</span>
+              <span className="text-muted-foreground">
+                本地规则整理，可编辑
+              </span>
               <Button
                 aria-expanded={showQueryDetails}
                 className="ml-auto h-6 gap-1 px-1.5 text-[11px]"
@@ -733,7 +922,9 @@ function SearchWorkspace({
                 variant="ghost"
               >
                 {showQueryDetails ? "收起改写过程" : "查看改写过程"}
-                <ChevronDownIcon className={cn("size-3", showQueryDetails && "rotate-180")} />
+                <ChevronDownIcon
+                  className={cn("size-3", showQueryDetails && "rotate-180")}
+                />
               </Button>
             </div>
             <Input
@@ -760,7 +951,9 @@ function SearchWorkspace({
                 </div>
                 <div className="grid grid-cols-[68px_1fr] gap-2">
                   <span className="text-muted-foreground">实际提交</span>
-                  <span className="break-words">{refinedQuery || queryPlan.query}</span>
+                  <span className="break-words">
+                    {refinedQuery || queryPlan.query}
+                  </span>
                 </div>
                 <div className="grid grid-cols-[68px_1fr] gap-2">
                   <span className="text-muted-foreground">处理方式</span>
@@ -779,14 +972,17 @@ function SearchWorkspace({
                   </div>
                 ) : null}
                 <p className="text-muted-foreground text-[10px] leading-4">
-                  这一步不会假装成 AI 结论；你可以直接修改实际提交词，检索历史也会保存这份改写记录。
+                  这一步不会假装成 AI
+                  结论；你可以直接修改实际提交词，检索历史也会保存这份改写记录。
                 </p>
               </div>
             ) : null}
           </div>
         ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <span>支持多源检索与 DOI 元信息核验；打开一篇论文进入专注详情页。</span>
+          <span>
+            支持多源检索与 DOI 元信息核验；打开一篇论文进入专注详情页。
+          </span>
           <Button
             className="ml-auto h-6 px-2 text-[11px]"
             onClick={() => onNavigate("library")}
@@ -798,27 +994,52 @@ function SearchWorkspace({
           </Button>
         </div>
         <p className="mt-1 text-muted-foreground text-[10px]">
-          核验标记表示同一 DOI 或规范化标题在多个索引中匹配；单一来源仍需打开原文核对。
+          核验标记表示同一 DOI
+          或规范化标题在多个索引中匹配；单一来源仍需打开原文核对。
         </p>
       </header>
       <div className="flex h-10 shrink-0 items-end gap-5 border-b px-6">
         <button
-          className={cn("h-10 border-b-2 px-1 text-xs", activeView === "results" ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground")}
+          aria-pressed={activeView === "results"}
+          className={cn(
+            "h-10 border-b-2 px-1 text-xs",
+            activeView === "results"
+              ? "border-primary font-medium text-primary"
+              : "border-transparent text-muted-foreground",
+          )}
           onClick={() => setActiveView("results")}
           type="button"
         >
           检索结果
         </button>
         <button
-          className={cn("h-10 border-b-2 px-1 text-xs", activeView === "history" ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground")}
+          aria-pressed={activeView === "history"}
+          className={cn(
+            "h-10 border-b-2 px-1 text-xs",
+            activeView === "history"
+              ? "border-primary font-medium text-primary"
+              : "border-transparent text-muted-foreground",
+          )}
           onClick={() => setActiveView("history")}
           type="button"
         >
           检索历史
         </button>
       </div>
-      {error ? <p className="border-b bg-destructive/8 px-6 py-2 text-destructive text-xs">{error}</p> : null}
-      {warnings.length ? <p className="border-b bg-amber-500/8 px-6 py-2 text-amber-800 text-xs dark:text-amber-200">{warnings.join("；")}</p> : null}
+      {error ? (
+        <p
+          aria-live="assertive"
+          className="border-b bg-destructive/8 px-6 py-2 text-destructive text-xs"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+      {warnings.length ? (
+        <p className="border-b bg-amber-500/8 px-6 py-2 text-amber-800 text-xs dark:text-amber-200">
+          {warnings.join("；")}
+        </p>
+      ) : null}
       {sourceRuns.length ? (
         <div className="shrink-0 border-b bg-muted/10 px-6 py-2">
           <button
@@ -829,12 +1050,18 @@ function SearchWorkspace({
           >
             <span className="font-medium">检索证据</span>
             <span className="text-muted-foreground">
-              {sourceRuns.filter((run) => run.status === "success").length}/{sourceRuns.length} 个数据源已响应
+              {sourceRuns.filter((run) => run.status === "success").length}/
+              {sourceRuns.length} 个数据源已响应
             </span>
             <span className="ml-auto text-muted-foreground text-[10px]">
               {showSourceRuns ? "收起" : "查看每个来源的响应"}
             </span>
-            <ChevronDownIcon className={cn("size-3.5 text-muted-foreground", showSourceRuns && "rotate-180")} />
+            <ChevronDownIcon
+              className={cn(
+                "size-3.5 text-muted-foreground",
+                showSourceRuns && "rotate-180",
+              )}
+            />
           </button>
           {showSourceRuns ? (
             <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -852,14 +1079,22 @@ function SearchWorkspace({
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium">{run.source}</span>
                       <span className="text-muted-foreground">
-                        {run.status === "success" ? `${run.resultCount} 条` : "请求失败"}
+                        {run.status === "success"
+                          ? `${run.resultCount} 条`
+                          : "请求失败"}
                       </span>
                     </div>
-                    <p className="mt-1 truncate text-muted-foreground" title={run.requestQuery ?? run.query}>
+                    <p
+                      className="mt-1 truncate text-muted-foreground"
+                      title={run.requestQuery ?? run.query}
+                    >
                       {run.requestQuery ?? run.query}
                     </p>
                     {run.message ? (
-                      <p className="mt-1 line-clamp-2 text-amber-700 dark:text-amber-300" title={run.message}>
+                      <p
+                        className="mt-1 line-clamp-2 text-amber-700 dark:text-amber-300"
+                        title={run.message}
+                      >
                         {run.message}
                       </p>
                     ) : null}
@@ -875,7 +1110,12 @@ function SearchWorkspace({
           {history.length ? (
             <div className="max-w-4xl divide-y border-y">
               {history.map((item) => (
-                <button className="flex w-full items-center gap-3 px-2 py-3 text-left hover:bg-muted/40" key={item.id} onClick={() => void runSearch(item.query, item.searchQuery)} type="button">
+                <button
+                  className="flex w-full items-center gap-3 px-2 py-3 text-left hover:bg-muted/40"
+                  key={item.id}
+                  onClick={() => void runSearch(item.query, item.searchQuery)}
+                  type="button"
+                >
                   <HistoryIcon className="size-4 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm">{item.query}</span>
@@ -885,44 +1125,80 @@ function SearchWorkspace({
                       </span>
                     ) : null}
                   </span>
-                  <span className="text-muted-foreground text-xs">{item.resultCount} 条</span>
+                  <span className="text-muted-foreground text-xs">
+                    {item.resultCount} 条
+                  </span>
                   {item.sources?.length ? (
                     <span className="hidden text-muted-foreground text-[10px] lg:inline">
                       {item.sources.join("、")}
                     </span>
                   ) : null}
-                  <span className="text-muted-foreground text-[11px]">{new Date(item.createdAt).toLocaleString()}</span>
+                  <span className="text-muted-foreground text-[11px]">
+                    {new Date(item.createdAt).toLocaleString()}
+                  </span>
                 </button>
               ))}
             </div>
-          ) : <p className="py-12 text-center text-muted-foreground text-xs">暂无检索历史。完成一次检索后会保存在当前项目中。</p>}
+          ) : (
+            <p className="py-12 text-center text-muted-foreground text-xs">
+              暂无检索历史。完成一次检索后会保存在当前项目中。
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
           <section className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
-              <span className="font-medium text-xs">{displayed.length} 条结果</span>
+            <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+              <span className="font-medium text-xs">
+                {displayed.length} 条结果
+              </span>
               {sourceSummary.length ? (
                 <span className="text-muted-foreground text-[11px]">
-                  {sourceSummary.join("、")} · {papers.filter((paper) => paper.verified).length} 篇已多源匹配
+                  {sourceSummary.join("、")} ·{" "}
+                  {papers.filter((paper) => paper.verified).length} 篇已多源匹配
                 </span>
               ) : null}
-              <select className="ml-auto h-7 rounded-md border bg-background px-2 text-xs" onChange={(event) => setYear(event.target.value)} value={year}>
+              <select
+                aria-label="按年份筛选"
+                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:ml-auto"
+                onChange={(event) => setYear(event.target.value)}
+                value={year}
+              >
                 <option value="all">全部年份</option>
-                {years.map((value) => <option key={value} value={value}>{value}</option>)}
+                {years.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
               </select>
-              <select className="h-7 rounded-md border bg-background px-2 text-xs" onChange={(event) => setSort(event.target.value as ResultSort)} value={sort}>
+              <select
+                aria-label="排序方式"
+                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                onChange={(event) => setSort(event.target.value as ResultSort)}
+                value={sort}
+              >
                 <option value="relevance">相关度排序</option>
                 <option value="year">最新发表</option>
                 <option value="citations">引用次数</option>
               </select>
-              <label className="flex items-center gap-1.5 px-2 text-xs">
-                <input checked={verifiedOnly} className="accent-primary" onChange={(event) => setVerifiedOnly(event.target.checked)} type="checkbox" />
+              <label className="flex min-h-6 items-center gap-1.5 px-2 text-xs">
+                <input
+                  checked={verifiedOnly}
+                  className="accent-primary"
+                  onChange={(event) => setVerifiedOnly(event.target.checked)}
+                  type="checkbox"
+                />
                 仅已核验
               </label>
               <Button
                 disabled={checked.size === 0}
-                onClick={() => addPapers(papers.filter((paper) => checked.has(paper.id)).map((paper) => ({ ...paper, saved: true })))}
+                onClick={() =>
+                  addPapers(
+                    papers
+                      .filter((paper) => checked.has(paper.id))
+                      .map((paper) => ({ ...paper, saved: true })),
+                  )
+                }
                 size="sm"
                 variant="outline"
               >
@@ -933,26 +1209,40 @@ function SearchWorkspace({
             <div className="min-h-0 flex-1 overflow-auto">
               <ResultTable
                 checked={checked}
-                onCheck={(id) => setChecked((current) => {
-                  const next = new Set(current);
-                  if (next.has(id)) next.delete(id); else next.add(id);
-                  return next;
-                })}
+                onCheck={(id) =>
+                  setChecked((current) => {
+                    const next = new Set(current);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  })
+                }
                 onSelect={onOpenPaper}
                 papers={displayed}
                 emptyAction={
                   <EmptyWorkflow
                     actions={
                       <>
-                        <Button onClick={() => void runSearch(EXAMPLE_RESEARCH_QUERY)} size="sm">
+                        <Button
+                          onClick={() => void runSearch(EXAMPLE_RESEARCH_QUERY)}
+                          size="sm"
+                        >
                           <SearchIcon />
                           {query.trim() ? "试用示例问题" : "运行示例检索"}
                         </Button>
-                        <Button onClick={() => onNavigate("library")} size="sm" variant="outline">
+                        <Button
+                          onClick={() => onNavigate("library")}
+                          size="sm"
+                          variant="outline"
+                        >
                           <FolderOpenIcon />
                           导入或查看文献库
                         </Button>
-                        <Button onClick={() => onNavigate("tracking")} size="sm" variant="ghost">
+                        <Button
+                          onClick={() => onNavigate("tracking")}
+                          size="sm"
+                          variant="ghost"
+                        >
                           <RadarIcon />
                           创建科研追踪
                         </Button>
@@ -964,11 +1254,24 @@ function SearchWorkspace({
                         : "没有预置假论文；运行示例会访问真实学术索引，返回结果后可以直接保存为知识资产。"
                     }
                     steps={[
-                      { title: "描述问题", description: "用白话写下你想研究的方向。" },
-                      { title: "多源检索", description: "查看各索引的返回数量和异常。" },
-                      { title: "保存为知识资产", description: "收藏论文并在详情中继续阅读。" },
+                      {
+                        title: "描述问题",
+                        description: "用白话写下你想研究的方向。",
+                      },
+                      {
+                        title: "多源检索",
+                        description: "查看各索引的返回数量和异常。",
+                      },
+                      {
+                        title: "保存为知识资产",
+                        description: "收藏论文并在详情中继续阅读。",
+                      },
                     ]}
-                    title={query.trim() ? "换一个可验证的研究问题" : "从一个研究问题开始"}
+                    title={
+                      query.trim()
+                        ? "换一个可验证的研究问题"
+                        : "从一个研究问题开始"
+                    }
                   />
                 }
               />
@@ -1073,7 +1376,10 @@ function InboxWorkspace({
             description="完成一次真实检索后，结果会自动进入这里。你可以先批量加入文献库，再挑选值得长期保留的论文生成知识资产。"
             steps={[
               { title: "运行一次检索", description: "用白话描述研究问题。" },
-              { title: "选择候选论文", description: "查看来源、摘要与核验状态。" },
+              {
+                title: "选择候选论文",
+                description: "查看来源、摘要与核验状态。",
+              },
               { title: "批量沉淀", description: "入库、收藏或创建追踪主题。" },
             ]}
             title="研究收件箱还没有结果"
@@ -1088,14 +1394,23 @@ function InboxWorkspace({
       <header className="shrink-0 border-b px-6 py-4">
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
-            <h1 className="research-serif font-semibold text-2xl">研究收件箱</h1>
-            <p className="mt-1 truncate text-muted-foreground text-xs" title={inbox.query}>
+            <h1 className="research-serif font-semibold text-2xl">
+              研究收件箱
+            </h1>
+            <p
+              className="mt-1 truncate text-muted-foreground text-xs"
+              title={inbox.query}
+            >
               {inbox.query}
             </p>
             <ProjectContext projectName={projectName} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button onClick={() => onNavigate("search")} size="sm" variant="outline">
+            <Button
+              onClick={() => onNavigate("search")}
+              size="sm"
+              variant="outline"
+            >
               <SearchIcon />
               新建检索
             </Button>
@@ -1166,9 +1481,7 @@ function InboxWorkspace({
           onClick={() => setMatrixOpen((value) => !value)}
           size="sm"
           title={
-            evidenceMatrixEnabled
-              ? undefined
-              : "请先在科研能力中启用证据矩阵"
+            evidenceMatrixEnabled ? undefined : "请先在科研能力中启用证据矩阵"
           }
           variant="outline"
         >
@@ -1190,9 +1503,7 @@ function InboxWorkspace({
             onClick={() => selected && onAskPaper(selected)}
             size="sm"
             title={
-              studyCardEnabled
-                ? undefined
-                : "请先在科研能力中启用论文研究卡片"
+              studyCardEnabled ? undefined : "请先在科研能力中启用论文研究卡片"
             }
             variant="ghost"
           >
@@ -1218,9 +1529,13 @@ function InboxWorkspace({
             />
           </label>
           <span className="max-w-md pb-2 text-muted-foreground text-[11px] leading-4">
-            将使用本次检索词“{inbox.searchQuery}”作为刷新科研追踪时发送给数据源的查询。
+            将使用本次检索词“{inbox.searchQuery}
+            ”作为刷新科研追踪时发送给数据源的查询。
           </span>
-          <Button disabled={!trackingTitle.trim()} onClick={createTrackingTopic}>
+          <Button
+            disabled={!trackingTitle.trim()}
+            onClick={createTrackingTopic}
+          >
             <PlusIcon />
             创建并查看追踪
           </Button>
@@ -1231,7 +1546,8 @@ function InboxWorkspace({
           <div className="flex items-center gap-2">
             <span className="font-medium text-xs">证据矩阵草稿</span>
             <span className="text-muted-foreground text-[11px]">
-              {selectedPapers.length} 篇 · 保留论文 ID，待从摘要或全文补齐研究设计和结果
+              {selectedPapers.length} 篇 · 保留论文
+              ID，待从摘要或全文补齐研究设计和结果
             </span>
           </div>
           <div className="mt-2 overflow-x-auto border bg-background">
@@ -1249,11 +1565,19 @@ function InboxWorkspace({
                   <tr key={row.id}>
                     <td className="max-w-[260px] px-3 py-2 align-top">
                       <p className="font-medium">{row.identity}</p>
-                      <p className="mt-1 text-muted-foreground">{row.authors}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {row.authors}
+                      </p>
                     </td>
-                    <td className="px-3 py-2 align-top text-muted-foreground">{row.design}</td>
-                    <td className="px-3 py-2 align-top text-muted-foreground">{row.outcome}</td>
-                    <td className="px-3 py-2 align-top text-muted-foreground">{row.limitations}</td>
+                    <td className="px-3 py-2 align-top text-muted-foreground">
+                      {row.design}
+                    </td>
+                    <td className="px-3 py-2 align-top text-muted-foreground">
+                      {row.outcome}
+                    </td>
+                    <td className="px-3 py-2 align-top text-muted-foreground">
+                      {row.limitations}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1311,10 +1635,19 @@ function TrackingWorkspace({
         <div className="mt-4 max-w-4xl border bg-muted/10 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="research-serif font-semibold text-base">新建追踪主题</h2>
-              <p className="mt-1 text-muted-foreground text-[11px]">主题名称给人看，检索词给学术索引用。</p>
+              <h2 className="research-serif font-semibold text-base">
+                新建追踪主题
+              </h2>
+              <p className="mt-1 text-muted-foreground text-[11px]">
+                主题名称给人看，检索词给学术索引用。
+              </p>
             </div>
-            <Button className="h-7 px-2 text-[11px]" onClick={useExampleTopic} size="sm" variant="outline">
+            <Button
+              className="h-7 px-2 text-[11px]"
+              onClick={useExampleTopic}
+              size="sm"
+              variant="outline"
+            >
               使用示例
             </Button>
           </div>
@@ -1337,7 +1670,9 @@ function TrackingWorkspace({
                 placeholder="例如：multimodal RAG evaluation reproducibility benchmark"
                 value={query}
               />
-              <span className="text-muted-foreground text-[10px] leading-4">刷新时会把这段关键词发送给已启用的数据源。</span>
+              <span className="text-muted-foreground text-[10px] leading-4">
+                刷新时会把这段关键词发送给已启用的数据源。
+              </span>
             </label>
             <Button
               disabled={!title.trim() || !query.trim()}
@@ -1347,7 +1682,8 @@ function TrackingWorkspace({
                 setQuery("");
               }}
             >
-              <PlusIcon />添加追踪
+              <PlusIcon />
+              添加追踪
             </Button>
           </div>
         </div>
@@ -1356,10 +1692,16 @@ function TrackingWorkspace({
         <section className="mx-auto w-full max-w-4xl px-6 py-6">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="research-serif font-semibold text-lg">已保存的研究方向</h2>
-              <p className="mt-1 text-muted-foreground text-xs">每个主题都有独立详情页，避免在列表里同时阅读多组结果。</p>
+              <h2 className="research-serif font-semibold text-lg">
+                已保存的研究方向
+              </h2>
+              <p className="mt-1 text-muted-foreground text-xs">
+                每个主题都有独立详情页，避免在列表里同时阅读多组结果。
+              </p>
             </div>
-            <span className="text-muted-foreground text-xs tabular-nums">{topics.length} 个主题</span>
+            <span className="text-muted-foreground text-xs tabular-nums">
+              {topics.length} 个主题
+            </span>
           </div>
           {topics.length ? (
             <div className="mt-4 divide-y border-y">
@@ -1374,8 +1716,12 @@ function TrackingWorkspace({
                     <RadarIcon className="size-4 text-muted-foreground" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-sm">{topic.title}</span>
-                    <span className="mt-1 block truncate text-muted-foreground text-xs">{topic.query}</span>
+                    <span className="block truncate font-medium text-sm">
+                      {topic.title}
+                    </span>
+                    <span className="mt-1 block truncate text-muted-foreground text-xs">
+                      {topic.query}
+                    </span>
                     <span className="mt-2 block text-muted-foreground text-[11px]">
                       {topic.lastCheckedAt
                         ? `最近刷新 ${new Date(topic.lastCheckedAt).toLocaleString()} · ${topic.latestCount} 条结果`
@@ -1398,7 +1744,11 @@ function TrackingWorkspace({
                       <RadarIcon />
                       使用示例主题
                     </Button>
-                    <Button onClick={() => onNavigate("search")} size="sm" variant="outline">
+                    <Button
+                      onClick={() => onNavigate("search")}
+                      size="sm"
+                      variant="outline"
+                    >
                       <SearchIcon />
                       先做一次自然语言检索
                     </Button>
@@ -1406,8 +1756,14 @@ function TrackingWorkspace({
                 }
                 description="主题名称只是你在项目里看到的标题；检索词才会在刷新时发送给 Crossref、arXiv、PubMed 等学术索引。创建后会在独立详情页查看进展。"
                 steps={[
-                  { title: "命名方向", description: "写一个便于识别的中文标题。" },
-                  { title: "填写检索词", description: "写实际发送给数据源的关键词。" },
+                  {
+                    title: "命名方向",
+                    description: "写一个便于识别的中文标题。",
+                  },
+                  {
+                    title: "填写检索词",
+                    description: "写实际发送给数据源的关键词。",
+                  },
                   { title: "按需刷新", description: "打开详情查看新论文。" },
                 ]}
                 title="设置第一个科研追踪主题"
@@ -1435,40 +1791,52 @@ function TrackingDetailWorkspace({
     state.trackingTopics.find((item) => item.id === topicId),
   );
   const papers = useResearchStore((state) => state.papers);
-  const addPapers = useResearchStore((state) => state.addPapers);
-  const removeTrackingTopic = useResearchStore((state) => state.removeTrackingTopic);
-  const updateTrackingTopic = useResearchStore((state) => state.updateTrackingTopic);
+  const removeTrackingTopic = useResearchStore(
+    (state) => state.removeTrackingTopic,
+  );
+  const refreshTrackingTopic = useResearchStore(
+    (state) => state.refreshTrackingTopic,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
-  const topicPapers = topic?.paperIds?.flatMap((id) => {
-    const paper = papers.find((item) => item.id === id);
-    return paper ? [paper] : [];
-  }) ?? [];
+  const refreshGateRef = useRef(new RequestGate());
+  const topicPapers =
+    topic?.paperIds?.flatMap((id) => {
+      const paper = papers.find((item) => item.id === id);
+      return paper ? [paper] : [];
+    }) ?? [];
 
   const refresh = async () => {
     if (!topic) return;
+    const requestToken = refreshGateRef.current.begin();
     setRefreshing(true);
     setError(undefined);
     try {
       const result = await searchResearchPapers(topic.query);
-      addPapers(result.papers);
-      updateTrackingTopic(topic.id, {
-        lastCheckedAt: Date.now(),
-        latestCount: result.papers.length,
-        paperIds: result.papers.map((paper) => paper.id),
-      });
+      if (!refreshGateRef.current.isCurrent(requestToken)) return;
+      refreshTrackingTopic(topic.id, result.papers);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (!refreshGateRef.current.isCurrent(requestToken)) return;
+      setError(toUserMessage(reason));
     } finally {
-      setRefreshing(false);
+      if (refreshGateRef.current.isCurrent(requestToken)) {
+        setRefreshing(false);
+      }
     }
   };
+
+  useEffect(() => () => refreshGateRef.current.invalidate(), []);
 
   if (!topic) {
     return (
       <div className="flex size-full items-center justify-center bg-background p-6">
         <EmptyWorkflow
-          actions={<Button onClick={onBack} size="sm"><ArrowLeftIcon />返回科研追踪</Button>}
+          actions={
+            <Button onClick={onBack} size="sm">
+              <ArrowLeftIcon />
+              返回科研追踪
+            </Button>
+          }
           description="这个追踪主题可能已被删除，或当前项目尚未加载完成。"
           steps={[]}
           title="找不到追踪主题"
@@ -1480,21 +1848,43 @@ function TrackingDetailWorkspace({
   return (
     <div className="flex size-full min-h-0 flex-col overflow-y-auto bg-background">
       <header className="shrink-0 border-b px-6 py-5">
-        <Button className="-ml-2 h-7 px-2 text-xs" onClick={onBack} size="sm" variant="ghost">
-          <ArrowLeftIcon />返回科研追踪
+        <Button
+          className="-ml-2 h-7 px-2 text-xs"
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          <ArrowLeftIcon />
+          返回科研追踪
         </Button>
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="research-serif font-semibold text-3xl tracking-tight">{topic.title}</h1>
-            <p className="mt-2 max-w-3xl text-muted-foreground text-sm leading-6">{topic.query}</p>
+            <h1 className="research-serif font-semibold text-3xl tracking-tight">
+              {topic.title}
+            </h1>
+            <p className="mt-2 max-w-3xl text-muted-foreground text-sm leading-6">
+              {topic.query}
+            </p>
             <ProjectContext projectName={projectName} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button disabled={refreshing} onClick={() => void refresh()} size="sm">
+            <Button
+              disabled={refreshing}
+              onClick={() => void refresh()}
+              size="sm"
+            >
               <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
               {refreshing ? "正在刷新…" : "刷新进展"}
             </Button>
-            <Button aria-label="删除追踪主题" onClick={() => { removeTrackingTopic(topic.id); onBack(); }} size="icon-sm" variant="ghost">
+            <Button
+              aria-label="删除追踪主题"
+              onClick={() => {
+                removeTrackingTopic(topic.id);
+                onBack();
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
               <Trash2Icon />
             </Button>
           </div>
@@ -1502,18 +1892,36 @@ function TrackingDetailWorkspace({
         <div className="mt-4 flex flex-wrap items-center gap-3 border-t pt-3 text-xs text-muted-foreground">
           <span>{topicPapers.length} 条已关联结果</span>
           <span>·</span>
-          <span>{topic.lastCheckedAt ? `最近刷新 ${new Date(topic.lastCheckedAt).toLocaleString()}` : "尚未刷新"}</span>
+          <span>
+            {topic.lastCheckedAt
+              ? `最近刷新 ${new Date(topic.lastCheckedAt).toLocaleString()}`
+              : "尚未刷新"}
+          </span>
         </div>
-        {error ? <p className="mt-3 text-destructive text-xs">{error}</p> : null}
+        {error ? (
+          <p
+            aria-live="assertive"
+            className="mt-3 text-destructive text-xs"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
       </header>
       <main className="min-h-0 flex-1 overflow-auto px-6 py-5">
         <div className="mx-auto max-w-5xl">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="research-serif font-semibold text-xl">最新研究进展</h2>
-              <p className="mt-1 text-muted-foreground text-xs">打开任意论文进入独立详情页，逐篇阅读并核验。</p>
+              <h2 className="research-serif font-semibold text-xl">
+                最新研究进展
+              </h2>
+              <p className="mt-1 text-muted-foreground text-xs">
+                打开任意论文进入独立详情页，逐篇阅读并核验。
+              </p>
             </div>
-            <span className="text-muted-foreground text-xs">按最近一次刷新排序</span>
+            <span className="text-muted-foreground text-xs">
+              按最近一次刷新排序
+            </span>
           </div>
           <div className="mt-4 border-y">
             <ResultTable
@@ -1573,7 +1981,7 @@ function LibraryWorkspace({
       setCandidate("");
       setImportOpen(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setImporting(false);
     }
@@ -1586,10 +1994,11 @@ function LibraryWorkspace({
           集中管理与研究相关的真实文献、收藏和元信息。
         </p>
         <ProjectContext projectName={projectName} />
-        <div className="mt-4 flex items-center gap-2">
-          <div className="flex h-8 min-w-72 max-w-xl flex-1 items-center rounded-md border px-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="flex h-8 min-w-0 w-full max-w-xl flex-1 items-center rounded-md border px-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40 sm:w-auto">
             <SearchIcon className="size-3.5 text-muted-foreground" />
             <input
+              aria-label="检索文献库"
               className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
               onChange={(event) => setQuery(event.target.value)}
               placeholder="检索标题、作者或 DOI"
@@ -1603,17 +2012,28 @@ function LibraryWorkspace({
               size="sm"
               variant={scope === value ? "secondary" : "ghost"}
             >
-              {value === "all" ? "全部文献" : value === "saved" ? "已保存" : "已核验"}
+              {value === "all"
+                ? "全部文献"
+                : value === "saved"
+                  ? "已保存"
+                  : "已核验"}
             </Button>
           ))}
-          <Button className="ml-auto" onClick={() => setImportOpen((value) => !value)} size="sm" variant="outline">
+          <Button
+            className="sm:ml-auto"
+            onClick={() => setImportOpen((value) => !value)}
+            size="sm"
+            variant="outline"
+          >
             <PlusIcon />
             导入文献
           </Button>
         </div>
         {importOpen ? (
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Input
+              aria-label="导入文献地址或 DOI"
+              className="min-w-0 flex-1"
               onChange={(event) => setCandidate(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && candidate.trim() && !importing)
@@ -1622,15 +2042,31 @@ function LibraryWorkspace({
               placeholder="arXiv 链接、doi.org 链接或 DOI"
               value={candidate}
             />
-            <Button disabled={!candidate.trim() || importing} onClick={() => void runImport()} size="sm">
-              {importing ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />}
+            <Button
+              disabled={!candidate.trim() || importing}
+              onClick={() => void runImport()}
+              size="sm"
+            >
+              {importing ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <PlusIcon />
+              )}
               {importing ? "正在查询…" : "确认导入"}
             </Button>
           </div>
         ) : null}
-        {error ? <p className="mt-2 text-destructive text-xs">{error}</p> : null}
+        {error ? (
+          <p
+            aria-live="assertive"
+            className="mt-2 text-destructive text-xs"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
       </header>
-      <div className="flex h-10 shrink-0 items-center border-b px-4">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-1">
         <span className="font-medium text-xs">{visible.length} 篇文献</span>
         <Button
           className="ml-auto"
@@ -1662,7 +2098,11 @@ function LibraryWorkspace({
                       <PlusIcon />
                       导入第一篇论文
                     </Button>
-                    <Button onClick={() => onNavigate("search")} size="sm" variant="outline">
+                    <Button
+                      onClick={() => onNavigate("search")}
+                      size="sm"
+                      variant="outline"
+                    >
                       <SearchIcon />
                       从自然语言检索开始
                     </Button>
@@ -1670,9 +2110,18 @@ function LibraryWorkspace({
                 }
                 description="粘贴 DOI 或 arXiv 链接即可拉取真实元信息；之后可以打开原文、收藏，并在知识资产中继续整理。"
                 steps={[
-                  { title: "粘贴链接", description: "支持 DOI、doi.org 或 arXiv。" },
-                  { title: "查看详情", description: "读取摘要、作者、来源和 PDF。" },
-                  { title: "加入知识资产", description: "收藏后即可形成项目阅读脉络。" },
+                  {
+                    title: "粘贴链接",
+                    description: "支持 DOI、doi.org 或 arXiv。",
+                  },
+                  {
+                    title: "查看详情",
+                    description: "读取摘要、作者、来源和 PDF。",
+                  },
+                  {
+                    title: "加入知识资产",
+                    description: "收藏后即可形成项目阅读脉络。",
+                  },
                 ]}
                 title="导入或发现第一篇文献"
               />
@@ -1704,10 +2153,7 @@ function KnowledgeWorkspace({
   projectName: string;
 }) {
   const papers = useResearchStore((state) => state.papers);
-  const saved = useMemo(
-    () => papers.filter((paper) => paper.saved),
-    [papers],
-  );
+  const saved = useMemo(() => papers.filter((paper) => paper.saved), [papers]);
   const [venue, setVenue] = useState("all");
   const venues = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1731,12 +2177,15 @@ function KnowledgeWorkspace({
         <ProjectContext projectName={projectName} />
       </header>
       <div className="flex min-h-0 flex-1">
-        <aside className="w-72 shrink-0 overflow-y-auto border-r">
+        <aside className="research-knowledge-venues w-72 shrink-0 overflow-y-auto border-r">
           <div className="flex h-10 items-center border-b px-3 font-medium text-xs">
             出版来源
           </div>
           <button
-            className={cn("flex w-full items-center px-3 py-2.5 text-xs hover:bg-muted/40", venue === "all" && "bg-muted/60")}
+            className={cn(
+              "flex w-full items-center px-3 py-2.5 text-xs hover:bg-muted/40",
+              venue === "all" && "bg-muted/60",
+            )}
             onClick={() => setVenue("all")}
             type="button"
           >
@@ -1745,7 +2194,10 @@ function KnowledgeWorkspace({
           </button>
           {venues.map(([name, count]) => (
             <button
-              className={cn("flex w-full items-center border-t px-3 py-2.5 text-xs hover:bg-muted/40", venue === name && "bg-muted/60")}
+              className={cn(
+                "flex w-full items-center border-t px-3 py-2.5 text-xs hover:bg-muted/40",
+                venue === name && "bg-muted/60",
+              )}
               key={name}
               onClick={() => setVenue(name)}
               type="button"
@@ -1757,8 +2209,12 @@ function KnowledgeWorkspace({
         </aside>
         <section className="min-w-0 flex-1 overflow-y-auto">
           <div className="flex h-10 items-center border-b px-4 text-xs">
-            <span className="font-medium">{venue === "all" ? "全部收藏" : venue}</span>
-            <span className="ml-2 text-muted-foreground">{visible.length} 篇</span>
+            <span className="font-medium">
+              {venue === "all" ? "全部收藏" : venue}
+            </span>
+            <span className="ml-2 text-muted-foreground">
+              {visible.length} 篇
+            </span>
           </div>
           {visible.length ? (
             <div className="divide-y">
@@ -1769,9 +2225,15 @@ function KnowledgeWorkspace({
                   onClick={() => onOpenPaper(paper)}
                   type="button"
                 >
-                  <h2 className="research-serif text-base font-semibold leading-5">{paper.title}</h2>
-                  <p className="mt-1 text-muted-foreground text-xs">{paper.authors.join(" · ") || "作者未收录"}</p>
-                  <p className="mt-2 line-clamp-2 max-w-3xl research-serif text-[13px] text-muted-foreground leading-5">{paper.abstract || "索引未提供摘要。"}</p>
+                  <h2 className="research-serif text-base font-semibold leading-5">
+                    {paper.title}
+                  </h2>
+                  <p className="mt-1 text-muted-foreground text-xs">
+                    {paper.authors.join(" · ") || "作者未收录"}
+                  </p>
+                  <p className="mt-2 line-clamp-2 max-w-3xl research-serif text-sm text-muted-foreground leading-5">
+                    {paper.abstract || "索引未提供摘要。"}
+                  </p>
                 </button>
               ))}
             </div>
@@ -1785,7 +2247,11 @@ function KnowledgeWorkspace({
                       从检索结果生成知识资产
                       <ArrowRightIcon />
                     </Button>
-                    <Button onClick={() => onNavigate("library")} size="sm" variant="outline">
+                    <Button
+                      onClick={() => onNavigate("library")}
+                      size="sm"
+                      variant="outline"
+                    >
                       <FolderOpenIcon />
                       从文献库收藏
                     </Button>
@@ -1793,9 +2259,18 @@ function KnowledgeWorkspace({
                 }
                 description="这里不会自动塞入无法追溯的示例论文。先检索真实来源，再用“保存为知识资产”收藏论文，摘要与来源记录会保留在当前项目。"
                 steps={[
-                  { title: "提出问题", description: "用自然语言描述你的研究方向。" },
-                  { title: "选择论文", description: "打开结果详情，核对来源与原文。" },
-                  { title: "生成资产", description: "保存后在这里按出版来源整理。" },
+                  {
+                    title: "提出问题",
+                    description: "用自然语言描述你的研究方向。",
+                  },
+                  {
+                    title: "选择论文",
+                    description: "打开结果详情，核对来源与原文。",
+                  },
+                  {
+                    title: "生成资产",
+                    description: "保存后在这里按出版来源整理。",
+                  },
                 ]}
                 title="建立第一份知识资产"
               />
@@ -1826,7 +2301,15 @@ function ExperimentWorkspace({
         </div>
       </header>
       <div className="min-h-0 flex-1">
-        <FileWorkspace embedded root={root} />
+        <Suspense
+          fallback={
+            <div className="grid size-full place-items-center text-muted-foreground text-xs">
+              正在加载实验资源…
+            </div>
+          }
+        >
+          <FileWorkspace embedded root={root} />
+        </Suspense>
       </div>
     </div>
   );
@@ -1851,7 +2334,15 @@ function SandboxWorkspace({
         </div>
       </header>
       <div className="min-h-0 flex-1">
-        <TerminalPanel cwd={cwd} embedded />
+        <Suspense
+          fallback={
+            <div className="grid size-full place-items-center text-muted-foreground text-xs">
+              正在加载研究沙盒…
+            </div>
+          }
+        >
+          <TerminalPanel cwd={cwd} embedded />
+        </Suspense>
       </div>
     </div>
   );
@@ -1929,7 +2420,37 @@ function CapabilitiesWorkspace({
   const [mcpConfigured, setMcpConfigured] = useState(false);
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpError, setMcpError] = useState<string>();
-  const [capabilityView, setCapabilityView] = useState<"skills" | "tools" | "mcp">("skills");
+  const [capabilityView, setCapabilityView] = useState<
+    "skills" | "tools" | "mcp"
+  >("skills");
+
+  const handleCapabilityTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    value: "skills" | "tools" | "mcp",
+  ) => {
+    const values = ["skills", "tools", "mcp"] as const;
+    const index = values.indexOf(value);
+    let nextIndex = index;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (index + 1) % values.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (index - 1 + values.length) % values.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = values.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const nextValue = values[nextIndex];
+    setCapabilityView(nextValue);
+    requestAnimationFrame(() =>
+      document
+        .getElementById(`research-capabilities-tab-${nextValue}`)
+        ?.focus(),
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1971,7 +2492,7 @@ function CapabilitiesWorkspace({
       setMcpConfigured(enabled);
       setMcpEnabled(enabled);
     } catch (reason) {
-      setMcpError(reason instanceof Error ? reason.message : String(reason));
+      setMcpError(toUserMessage(reason));
     } finally {
       setMcpBusy(false);
     }
@@ -1984,10 +2505,13 @@ function CapabilitiesWorkspace({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <BlocksIcon className="size-5 text-muted-foreground" />
-              <h1 className="research-serif font-semibold text-2xl">科研能力</h1>
+              <h1 className="research-serif font-semibold text-2xl">
+                科研能力
+              </h1>
             </div>
             <p className="mt-1 max-w-2xl text-muted-foreground text-xs leading-5">
-              Research 内置一套证据优先的技能、工具和本地 MCP。启用后会参与论文检索、导读、核验和对话，不需要在每次任务里重新说明工作方法。
+              Research 内置一套证据优先的技能、工具和本地
+              MCP。启用后会参与论文检索、导读、核验和对话，不需要在每次任务里重新说明工作方法。
             </p>
             <ProjectContext projectName={projectName} />
           </div>
@@ -2014,142 +2538,216 @@ function CapabilitiesWorkspace({
             打开研究收件箱
           </Button>
         </div>
-        <nav aria-label="科研能力分组" className="mt-5 flex max-w-2xl items-end gap-5 border-b">
-          {([
-            ["skills", "内置技能", `${enabledSkillIds.length} 项`],
-            ["tools", "可调用工具", `${enabledToolIds.length} 项`],
-            ["mcp", "本地 MCP", mcpEnabled ? "已启用" : "可选"],
-          ] as const).map(([value, label, count]) => (
+        <nav
+          aria-label="科研能力分组"
+          className="mt-5 flex max-w-2xl items-end gap-5 border-b"
+          role="tablist"
+        >
+          {(
+            [
+              ["skills", "内置技能", `${enabledSkillIds.length} 项`],
+              ["tools", "可调用工具", `${enabledToolIds.length} 项`],
+              ["mcp", "本地 MCP", mcpEnabled ? "已启用" : "可选"],
+            ] as const
+          ).map(([value, label, count]) => (
             <button
-              className={cn("border-b-2 px-1 pb-2 text-left text-xs", capabilityView === value ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground")}
+              aria-controls={`research-capabilities-panel-${value}`}
+              aria-selected={capabilityView === value}
+              className={cn(
+                "border-b-2 px-1 pb-2 text-left text-xs",
+                capabilityView === value
+                  ? "border-primary font-medium text-primary"
+                  : "border-transparent text-muted-foreground",
+              )}
+              id={`research-capabilities-tab-${value}`}
               key={value}
               onClick={() => setCapabilityView(value)}
+              onKeyDown={(event) => handleCapabilityTabKeyDown(event, value)}
+              role="tab"
+              tabIndex={capabilityView === value ? 0 : -1}
               type="button"
             >
               <span className="block">{label}</span>
-              <span className="mt-1 block text-[10px] font-normal text-muted-foreground">{count}</span>
+              <span className="mt-1 block text-[10px] font-normal text-muted-foreground">
+                {count}
+              </span>
             </button>
           ))}
         </nav>
       </header>
 
       <div className="mx-auto w-full max-w-6xl space-y-8 p-6">
-        {capabilityView === "skills" ? <section>
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <h2 className="research-serif font-semibold text-lg">内置 Research 技能</h2>
+        {capabilityView === "skills" ? (
+          <section
+            aria-labelledby="research-capabilities-tab-skills"
+            id="research-capabilities-panel-skills"
+            role="tabpanel"
+            tabIndex={0}
+          >
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 className="research-serif font-semibold text-lg">
+                  内置 Research 技能
+                </h2>
+                <p className="mt-1 text-muted-foreground text-xs">
+                  每项技能都带有触发场景、输出边界和可复用的工作流；停用后不会写入对话上下文。
+                </p>
+              </div>
+              <Badge variant="secondary">本地插件 · melody-research</Badge>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {RESEARCH_SKILLS.map((skill) => (
+                <CapabilityCard
+                  category={skill.category}
+                  checked={enabledSkillIds.includes(skill.id)}
+                  description={skill.description}
+                  key={skill.id}
+                  onCheckedChange={(checked) =>
+                    setSkillEnabled(skill.id, checked)
+                  }
+                  title={`${skill.title} · ${skill.englishTitle}`}
+                  trigger={skill.trigger}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {capabilityView === "tools" ? (
+          <section
+            aria-labelledby="research-capabilities-tab-tools"
+            id="research-capabilities-panel-tools"
+            role="tabpanel"
+            tabIndex={0}
+          >
+            <div className="mb-3">
+              <h2 className="research-serif font-semibold text-lg">
+                可调用工具
+              </h2>
               <p className="mt-1 text-muted-foreground text-xs">
-                每项技能都带有触发场景、输出边界和可复用的工作流；停用后不会写入对话上下文。
+                工具对应真实的 Research 页面或本地 MCP
+                方法；开关只控制它们是否进入 Research 对话的可用能力集合。
               </p>
             </div>
-            <Badge variant="secondary">本地插件 · melody-research</Badge>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {RESEARCH_SKILLS.map((skill) => (
-              <CapabilityCard
-                category={skill.category}
-                checked={enabledSkillIds.includes(skill.id)}
-                description={skill.description}
-                key={skill.id}
-                onCheckedChange={(checked) => setSkillEnabled(skill.id, checked)}
-                title={`${skill.title} · ${skill.englishTitle}`}
-                trigger={skill.trigger}
-              />
-            ))}
-          </div>
-        </section> : null}
+            <div className="divide-y border">
+              {RESEARCH_TOOLS.map((tool) => (
+                <article
+                  className="flex items-start gap-3 bg-background/70 p-4"
+                  key={tool.id}
+                >
+                  <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-muted/30">
+                    <CheckCircle2Icon className="size-4 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="research-serif font-semibold text-sm">
+                        {tool.title}
+                      </h3>
+                      <Badge variant="outline">{tool.availability}</Badge>
+                    </div>
+                    <p className="mt-1 text-muted-foreground text-xs leading-5">
+                      {tool.description}
+                    </p>
+                    <p className="mt-1 text-muted-foreground text-[11px]">
+                      {tool.detail}
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label={`${enabledToolIds.includes(tool.id) ? "停用" : "启用"}${tool.title}`}
+                    checked={enabledToolIds.includes(tool.id)}
+                    onCheckedChange={(checked) =>
+                      setToolEnabled(tool.id, checked)
+                    }
+                  />
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
-        {capabilityView === "tools" ? <section>
-          <div className="mb-3">
-            <h2 className="research-serif font-semibold text-lg">可调用工具</h2>
-            <p className="mt-1 text-muted-foreground text-xs">
-              工具对应真实的 Research 页面或本地 MCP 方法；开关只控制它们是否进入 Research 对话的可用能力集合。
-            </p>
-          </div>
-          <div className="divide-y border">
-            {RESEARCH_TOOLS.map((tool) => (
-              <article className="flex items-start gap-3 bg-background/70 p-4" key={tool.id}>
-                <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-muted/30">
-                  <CheckCircle2Icon className="size-4 text-muted-foreground" />
+        {capabilityView === "mcp" ? (
+          <section
+            aria-labelledby="research-capabilities-tab-mcp"
+            id="research-capabilities-panel-mcp"
+            role="tabpanel"
+            tabIndex={0}
+          >
+            <div className="mb-3">
+              <h2 className="research-serif font-semibold text-lg">
+                本地 MCP 插件
+              </h2>
+              <p className="mt-1 text-muted-foreground text-xs">
+                MCP 按照 tools、resources、prompts
+                分开暴露能力，方便在本地对话代理或其他兼容客户端复用。
+              </p>
+            </div>
+            <article className="border bg-muted/10 p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg border bg-background">
+                  <BlocksIcon className="size-4 text-muted-foreground" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="research-serif font-semibold text-sm">{tool.title}</h3>
-                    <Badge variant="outline">{tool.availability}</Badge>
+                    <h3 className="research-serif font-semibold text-sm">
+                      {RESEARCH_MCP.title}
+                    </h3>
+                    <Badge variant={mcpConfigured ? "outline" : "secondary"}>
+                      {mcpConfigured ? "已写入当前项目" : "可选启用"}
+                    </Badge>
                   </div>
                   <p className="mt-1 text-muted-foreground text-xs leading-5">
-                    {tool.description}
+                    {RESEARCH_MCP.description}
                   </p>
-                  <p className="mt-1 text-muted-foreground text-[11px]">{tool.detail}</p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {RESEARCH_MCP.sources.map((source) => (
+                      <Badge key={source} variant="secondary">
+                        source · {source}
+                      </Badge>
+                    ))}
+                    {RESEARCH_MCP.tools.map((tool) => (
+                      <Badge key={tool} variant="outline">
+                        tool · {tool}
+                      </Badge>
+                    ))}
+                    {RESEARCH_MCP.resources.map((resource) => (
+                      <Badge key={resource} variant="outline">
+                        resource · {resource}
+                      </Badge>
+                    ))}
+                    {RESEARCH_MCP.prompts.map((prompt) => (
+                      <Badge key={prompt} variant="outline">
+                        prompt · {prompt}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
+                    node {RESEARCH_MCP.relativeCommand}
+                  </p>
+                  <p className="mt-2 text-muted-foreground text-[11px] leading-4">
+                    启用会更新当前项目的 <code>.melody/config.toml</code>
+                    ；已打开的会话不会自动重载，下一次新建或重新载入会话后生效。
+                  </p>
+                  {mcpError ? (
+                    <p
+                      aria-live="assertive"
+                      className="mt-2 flex items-center gap-1.5 text-destructive text-xs"
+                      role="alert"
+                    >
+                      <TriangleAlertIcon className="size-3.5" />
+                      {mcpError}
+                    </p>
+                  ) : null}
                 </div>
                 <Switch
-                  aria-label={`${enabledToolIds.includes(tool.id) ? "停用" : "启用"}${tool.title}`}
-                  checked={enabledToolIds.includes(tool.id)}
-                  onCheckedChange={(checked) => setToolEnabled(tool.id, checked)}
+                  aria-label={`${mcpEnabled ? "停用" : "启用"} Melody Research MCP`}
+                  checked={mcpEnabled}
+                  disabled={mcpBusy}
+                  onCheckedChange={(checked) => void toggleMcp(checked)}
                 />
-              </article>
-            ))}
-          </div>
-        </section> : null}
-
-        {capabilityView === "mcp" ? <section>
-          <div className="mb-3">
-            <h2 className="research-serif font-semibold text-lg">本地 MCP 插件</h2>
-            <p className="mt-1 text-muted-foreground text-xs">
-              MCP 按照 tools、resources、prompts 分开暴露能力，方便在本地对话代理或其他兼容客户端复用。
-            </p>
-          </div>
-          <article className="border bg-muted/10 p-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg border bg-background">
-                <BlocksIcon className="size-4 text-muted-foreground" />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="research-serif font-semibold text-sm">{RESEARCH_MCP.title}</h3>
-                  <Badge variant={mcpConfigured ? "outline" : "secondary"}>
-                    {mcpConfigured ? "已写入当前项目" : "可选启用"}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-muted-foreground text-xs leading-5">
-                  {RESEARCH_MCP.description}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {RESEARCH_MCP.sources.map((source) => (
-                    <Badge key={source} variant="secondary">source · {source}</Badge>
-                  ))}
-                  {RESEARCH_MCP.tools.map((tool) => (
-                    <Badge key={tool} variant="outline">tool · {tool}</Badge>
-                  ))}
-                  {RESEARCH_MCP.resources.map((resource) => (
-                    <Badge key={resource} variant="outline">resource · {resource}</Badge>
-                  ))}
-                  {RESEARCH_MCP.prompts.map((prompt) => (
-                    <Badge key={prompt} variant="outline">prompt · {prompt}</Badge>
-                  ))}
-                </div>
-                <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
-                  node {RESEARCH_MCP.relativeCommand}
-                </p>
-                <p className="mt-2 text-muted-foreground text-[11px] leading-4">
-                  启用会更新当前项目的 <code>.melody/config.toml</code>；已打开的会话不会自动重载，下一次新建或重新载入会话后生效。
-                </p>
-                {mcpError ? (
-                  <p className="mt-2 flex items-center gap-1.5 text-destructive text-xs">
-                    <TriangleAlertIcon className="size-3.5" />
-                    {mcpError}
-                  </p>
-                ) : null}
-              </div>
-              <Switch
-                aria-label={`${mcpEnabled ? "停用" : "启用"} Melody Research MCP`}
-                checked={mcpEnabled}
-                disabled={mcpBusy}
-                onCheckedChange={(checked) => void toggleMcp(checked)}
-              />
-            </div>
-          </article>
-        </section> : null}
+            </article>
+          </section>
+        ) : null}
 
         <p className="border-t pt-4 text-muted-foreground text-[11px] leading-5">
           这些技能借鉴证据矩阵、系统综述和高影响力期刊常见的严谨写作流程；它们不是任何期刊的官方插件，也不会替代原文、同行评审或人工核验。
@@ -2185,16 +2783,32 @@ export function ResearchMainWorkspace({
   root: string;
 }) {
   const setActiveProject = useResearchStore((state) => state.setActiveProject);
+  const [visitedKinds, setVisitedKinds] = useState<Set<ResearchMainKind>>(
+    () => new Set([kind]),
+  );
 
   useEffect(() => {
     setActiveProject(projectId);
   }, [projectId, setActiveProject]);
 
+  useEffect(() => {
+    setVisitedKinds((current) => {
+      if (current.has(kind)) return current;
+      return new Set(current).add(kind);
+    });
+  }, [kind]);
+
   const detailActive = Boolean(detail);
+  const renderedKinds = visitedKinds.has(kind)
+    ? visitedKinds
+    : new Set(visitedKinds).add(kind);
 
   return (
     <div className="relative size-full min-h-0">
-      <ResearchViewLayer active={kind === "overview" && !detailActive}>
+      <ResearchViewLayer
+        active={kind === "overview" && !detailActive}
+        mounted={renderedKinds.has("overview")}
+      >
         <ResearchOverviewWorkspace
           key={`overview:${projectId ?? "unscoped"}`}
           onNavigate={onNavigate}
@@ -2202,7 +2816,10 @@ export function ResearchMainWorkspace({
           projectName={projectName}
         />
       </ResearchViewLayer>
-      <ResearchViewLayer active={kind === "search" && !detailActive}>
+      <ResearchViewLayer
+        active={kind === "search" && !detailActive}
+        mounted={renderedKinds.has("search")}
+      >
         <SearchWorkspace
           key={`search:${projectId ?? "unscoped"}`}
           onOpenPaper={onOpenPaper}
@@ -2210,7 +2827,10 @@ export function ResearchMainWorkspace({
           projectName={projectName}
         />
       </ResearchViewLayer>
-      <ResearchViewLayer active={kind === "tracking" && !detailActive}>
+      <ResearchViewLayer
+        active={kind === "tracking" && !detailActive}
+        mounted={renderedKinds.has("tracking")}
+      >
         <TrackingWorkspace
           key={`tracking:${projectId ?? "unscoped"}`}
           onOpenTopic={onOpenTrackingTopic}
@@ -2218,7 +2838,10 @@ export function ResearchMainWorkspace({
           projectName={projectName}
         />
       </ResearchViewLayer>
-      <ResearchViewLayer active={kind === "inbox" && !detailActive}>
+      <ResearchViewLayer
+        active={kind === "inbox" && !detailActive}
+        mounted={renderedKinds.has("inbox")}
+      >
         <InboxWorkspace
           key={`inbox:${projectId ?? "unscoped"}`}
           onAskPaper={onAskPaper}
@@ -2258,10 +2881,7 @@ export function ResearchMainWorkspace({
             className="absolute inset-0"
             key={`experiments:${projectId ?? "unscoped"}`}
           >
-            <ExperimentWorkspace
-              projectName={projectName}
-              root={root}
-            />
+            <ExperimentWorkspace projectName={projectName} root={root} />
           </MotionPage>
         ) : null}
         {kind === "sandbox" && !detailActive ? (

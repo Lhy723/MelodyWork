@@ -2,6 +2,7 @@ import { TerminalSquareIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { toUserMessage } from "@/domain/app-error";
 import {
   closeTerminalSession,
   createTerminalSession,
@@ -9,6 +10,7 @@ import {
   subscribeToTerminal,
   writeTerminalInput,
 } from "@/lib/melody-bridge";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 interface TerminalPanelProps {
   cwd: string;
@@ -23,13 +25,19 @@ export function TerminalPanel({
   embedded = false,
   onClose,
 }: TerminalPanelProps) {
+  const codeFont = useAppSettingsStore((state) => state.codeFont);
+  const codeFontSize = useAppSettingsStore((state) => state.codeFontSize);
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<import("@xterm/xterm").Terminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const lineBufferRef = useRef("");
-  const [phase, setPhase] = useState<
-    "starting" | "ready" | "closed" | "error"
-  >("starting");
+  const codeFontRef = useRef(codeFont);
+  const codeFontSizeRef = useRef(codeFontSize);
+  codeFontRef.current = codeFont;
+  codeFontSizeRef.current = codeFontSize;
+  const [phase, setPhase] = useState<"starting" | "ready" | "closed" | "error">(
+    "starting",
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -44,23 +52,24 @@ export function TerminalPanel({
       if (disposed || !containerRef.current) {
         return;
       }
-      const dark = document.documentElement.classList.contains("dark");
+      const styles = getComputedStyle(document.documentElement);
+      const themeColor = (name: string, fallback: string) =>
+        styles.getPropertyValue(name).trim() || fallback;
       const terminal = new Terminal({
         convertEol: true,
         cursorBlink: true,
         disableStdin: false,
-        fontFamily:
-          '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-        fontSize: 12,
+        fontFamily: codeFontRef.current,
+        fontSize: codeFontSizeRef.current,
         scrollback: 5_000,
         theme: {
-          background: dark ? "#171717" : "#fafafa",
-          foreground: dark ? "#f5f5f5" : "#202020",
-          cursor: dark ? "#f5f5f5" : "#202020",
-          red: dark ? "#f87171" : "#b42318",
-          green: dark ? "#4ade80" : "#067647",
-          yellow: dark ? "#fbbf24" : "#b54708",
-          blue: dark ? "#60a5fa" : "#175cd3",
+          background: themeColor("--harness-bg-base", "#fafafa"),
+          foreground: themeColor("--harness-label-primary", "#202020"),
+          cursor: themeColor("--harness-label-primary", "#202020"),
+          red: themeColor("--harness-red", "#b42318"),
+          green: themeColor("--harness-green", "#157a45"),
+          yellow: themeColor("--harness-amber", "#8a5316"),
+          blue: themeColor("--harness-blue", "#245fba"),
         },
       });
       terminal.open(containerRef.current);
@@ -127,7 +136,7 @@ export function TerminalPanel({
         terminal.focus();
       } catch (reason) {
         terminal.write(
-          `\r\n${reason instanceof Error ? reason.message : String(reason)}\r\n`,
+          `\r\n${toUserMessage(reason, "终端启动失败，请稍后重试。")}\r\n`,
         );
         setPhase("error");
       }
@@ -154,7 +163,7 @@ export function TerminalPanel({
             const input = `${command}\nprintf '\\n${PROMPT}'\n`;
             void writeTerminalInput(terminalId, input).catch((reason) => {
               terminal.write(
-                `\r\n${reason instanceof Error ? reason.message : String(reason)}\r\n`,
+                `\r\n${toUserMessage(reason, "终端写入失败，请稍后重试。")}\r\n`,
               );
               setPhase("error");
             });
@@ -196,12 +205,22 @@ export function TerminalPanel({
     };
   }, [cwd]);
 
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    terminal.options.fontFamily = codeFont;
+    terminal.options.fontSize = codeFontSize;
+    terminal.refresh(0, terminal.rows - 1);
+  }, [codeFont, codeFontSize]);
+
   return (
     <section
       className={
         embedded
           ? "flex size-full min-h-0 flex-col overflow-hidden bg-background"
-          : "absolute inset-x-4 bottom-4 z-30 flex h-[28rem] flex-col overflow-hidden rounded-2xl border bg-background shadow-xl"
+          : "absolute inset-x-4 bottom-4 z-30 flex h-[28rem] flex-col overflow-hidden rounded-2xl border bg-background"
       }
     >
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -232,7 +251,7 @@ export function TerminalPanel({
       </header>
       <div
         aria-label="终端输入"
-        className="min-h-0 flex-1 bg-[#fafafa] p-3 dark:bg-[#171717]"
+        className="min-h-0 flex-1 bg-[var(--harness-bg-base)] p-3"
         onClick={() => terminalRef.current?.focus()}
         ref={containerRef}
         role="textbox"

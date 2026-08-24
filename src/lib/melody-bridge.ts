@@ -14,16 +14,8 @@ import type {
   PluginDetails,
   SkillDetails,
 } from "@/domain/config";
-import type {
-  GitBranch,
-  GitChange,
-  GitDiff,
-  GitWorktree,
-} from "@/domain/git";
-import type {
-  PermissionDecision,
-  PermissionRule,
-} from "@/domain/permission";
+import type { GitBranch, GitChange, GitDiff, GitWorktree } from "@/domain/git";
+import type { PermissionDecision, PermissionRule } from "@/domain/permission";
 import type { UsageStatistics } from "@/domain/statistics";
 import type {
   ProjectRecord,
@@ -99,16 +91,21 @@ export const openExternalUrl = async (candidate: string): Promise<void> => {
     await openUrl(url);
     return;
   }
-  window.open(url, "_blank", "noopener,noreferrer");
+  const externalWindow = window.open(url, "_blank", "noopener,noreferrer");
+  if (!externalWindow) {
+    throw new Error("浏览器阻止了打开外部链接。");
+  }
 };
 
 export const fetchResearchResource = async (
   url: string,
   accept?: string,
+  signal?: AbortSignal,
 ): Promise<string> => {
   if (!isTauriRuntime()) {
     const response = await fetch(url, {
       headers: accept ? { Accept: accept } : undefined,
+      signal,
     });
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);
@@ -174,7 +171,9 @@ const dispatchPreviewAcp = (message: AcpEnvelope) => {
       ? (params._meta as Record<string, unknown>)
       : undefined;
   const promptId =
-    typeof requestMeta?.promptId === "string" ? requestMeta.promptId : undefined;
+    typeof requestMeta?.promptId === "string"
+      ? requestMeta.promptId
+      : undefined;
   const fixtureMeta = { fixtureVersion: PREVIEW_FIXTURE_VERSION };
   if (method === "initialize") {
     emitPreviewAcp({
@@ -303,10 +302,7 @@ const dispatchPreviewAcp = (message: AcpEnvelope) => {
   if (method === "session/cancel" && sessionId) {
     return;
   }
-  if (
-    method === "session/set_model" ||
-    method === "session/set_mode"
-  ) {
+  if (method === "session/set_model" || method === "session/set_mode") {
     emitPreviewAcp({ jsonrpc: "2.0", id: message.id, result: fixtureMeta });
   }
 };
@@ -388,9 +384,7 @@ export const createGitBranch = async (
   }
 };
 
-export const getGitWorktrees = async (
-  cwd: string,
-): Promise<GitWorktree[]> =>
+export const getGitWorktrees = async (cwd: string): Promise<GitWorktree[]> =>
   isTauriRuntime()
     ? invoke<GitWorktree[]>("git_worktrees", { cwd })
     : [
@@ -443,14 +437,12 @@ export const subscribeToAcp = async (
     "melody://acp-message",
     (event) => onMessage(event.payload),
   );
-  const unlistenStderr = await listen<string>(
-    "melody://acp-stderr",
-    (event) => onStderr(event.payload),
+  const unlistenStderr = await listen<string>("melody://acp-stderr", (event) =>
+    onStderr(event.payload),
   );
   const unlistenStatus = onStatus
-    ? await listen<AgentStatus>(
-        "melody://agent-status",
-        (event) => onStatus(event.payload),
+    ? await listen<AgentStatus>("melody://agent-status", (event) =>
+        onStatus(event.payload),
       )
     : undefined;
   return [
@@ -499,15 +491,14 @@ const previewSessions: SessionRecord[] = [
     updatedAt: Math.floor(Date.now() / 1000) - 172_800,
   },
 ];
+const previewTimelineArchives = new Map<string, Map<number, string>>();
 
 export const listProjects = async (): Promise<ProjectRecord[]> =>
   isTauriRuntime()
     ? invoke<ProjectRecord[]>("list_projects")
     : [previewProject];
 
-export const upsertProject = async (
-  path: string,
-): Promise<ProjectRecord> =>
+export const upsertProject = async (path: string): Promise<ProjectRecord> =>
   isTauriRuntime()
     ? invoke<ProjectRecord>("upsert_project", { path })
     : previewProject;
@@ -552,20 +543,56 @@ export const updateStoredSession = async (
     const existing = previewSessions.find(
       (session) => session.id === request.id,
     );
+    if (request.timelineEntries?.length) {
+      const archive =
+        previewTimelineArchives.get(request.id) ?? new Map<number, string>();
+      for (const entry of request.timelineEntries) {
+        archive.set(entry.ordinal, entry.entryJson);
+      }
+      previewTimelineArchives.set(request.id, archive);
+    }
     return {
       ...(existing ?? previewSessions[0]),
       ...request,
-      acpCursor: request.acpCursor ?? existing?.acpCursor,
+      acpCursor:
+        request.acpCursor === null
+          ? undefined
+          : (request.acpCursor ?? existing?.acpCursor),
       updatedAt: Math.floor(Date.now() / 1000),
     };
   }
   return invoke<SessionRecord>("update_session", { request });
 };
 
+export const readStoredSessionTimeline = async (
+  id: string,
+): Promise<string | undefined> => {
+  if (isTauriRuntime()) {
+    return (
+      (await invoke<string | null>("read_session_timeline", { id })) ??
+      undefined
+    );
+  }
+  const archive = previewTimelineArchives.get(id);
+  if (!archive || archive.size === 0) {
+    return undefined;
+  }
+  return (
+    "[" +
+    [...archive.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, entryJson]) => entryJson)
+      .join(",") +
+    "]"
+  );
+};
+
 export const deleteStoredSession = async (id: string): Promise<void> => {
   if (isTauriRuntime()) {
     await invoke("delete_session", { id });
+    return;
   }
+  previewTimelineArchives.delete(id);
 };
 
 export const getWorkspaceTree = async (
@@ -645,9 +672,7 @@ export const writeWorkspaceFile = async (
   }
 };
 
-export const createTerminalSession = async (
-  cwd: string,
-): Promise<string> =>
+export const createTerminalSession = async (cwd: string): Promise<string> =>
   isTauriRuntime()
     ? invoke<string>("create_terminal_session", { cwd })
     : `preview-terminal-${Date.now()}`;
@@ -872,10 +897,13 @@ export const addMarketplaceSource = async (
     ? invoke<MarketplaceSource[]>("add_marketplace_source", { input })
     : [
         {
-          name: input.split("/").at(-1)?.replace(/\.git$/, "") || "plugins",
-          kind: input.startsWith(".") || input.startsWith("/")
-            ? "local"
-            : "git",
+          name:
+            input
+              .split("/")
+              .at(-1)
+              ?.replace(/\.git$/, "") || "plugins",
+          kind:
+            input.startsWith(".") || input.startsWith("/") ? "local" : "git",
           location: input,
         },
       ];
@@ -958,9 +986,9 @@ export const updateMelodyPlugin = async (
         message: `${name} 已是最新版本。`,
       };
 
-export const listInstalledMelodyPlugins = async (cwd: string): Promise<
-  MelodyExtension[]
-> =>
+export const listInstalledMelodyPlugins = async (
+  cwd: string,
+): Promise<MelodyExtension[]> =>
   isTauriRuntime()
     ? invoke<MelodyExtension[]>("list_installed_melody_plugins", { cwd })
     : [];
@@ -1065,10 +1093,10 @@ export const findPermissionRule = async (
   toolKey: string,
 ): Promise<PermissionRule | undefined> =>
   isTauriRuntime()
-    ? (await invoke<PermissionRule | null>("find_permission_rule", {
+    ? ((await invoke<PermissionRule | null>("find_permission_rule", {
         projectId,
         toolKey,
-      })) ?? undefined
+      })) ?? undefined)
     : undefined;
 
 export const upsertPermissionRule = async (request: {

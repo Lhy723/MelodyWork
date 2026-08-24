@@ -18,11 +18,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import {
-  useEffect,
-  useState,
-  type PointerEventHandler,
-} from "react";
+import { useEffect, useState, type PointerEventHandler } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -132,10 +128,12 @@ export function AppSidebar({
       session.title.toLocaleLowerCase().includes(normalizedQuery),
     );
     return projectMatches || matchingSessions.length > 0
-      ? [{
-          project,
-          sessions: projectMatches ? projectSessions : matchingSessions,
-        }]
+      ? [
+          {
+            project,
+            sessions: projectMatches ? projectSessions : matchingSessions,
+          },
+        ]
       : [];
   });
 
@@ -159,7 +157,10 @@ export function AppSidebar({
       data-app-sidebar
       style={{ width: sidebarWidth }}
     >
-      <div className="harness-window-titlebar shrink-0" data-tauri-drag-region />
+      <div
+        className="harness-window-titlebar shrink-0"
+        data-tauri-drag-region
+      />
 
       <div
         className="flex h-10 shrink-0 items-center gap-1.5 px-1"
@@ -171,12 +172,7 @@ export function AppSidebar({
               className="min-w-0 justify-start gap-1 px-2 font-semibold text-lg text-sidebar-foreground hover:text-sidebar-foreground"
               variant="ghost"
             >
-              <span
-                className={cn(
-                  "truncate",
-                  workspaceMode === "research" && "research-serif",
-                )}
-              >
+              <span className="truncate">
                 {workspaceMode === "research"
                   ? "Melody Research"
                   : "Melody Work"}
@@ -201,7 +197,7 @@ export function AppSidebar({
             <DropdownMenuItem onSelect={() => onModeChange("research")}>
               <BrainCircuitIcon />
               <div className="min-w-0 flex-1">
-                <p className="research-serif font-medium">Melody Research</p>
+                <p className="font-medium">Melody Research</p>
                 <p className="text-muted-foreground text-xs">
                   文献、实验与研究智能
                 </p>
@@ -234,10 +230,11 @@ export function AppSidebar({
             className="motion-sidebar-search px-1 pb-2"
             data-motion-state={motionState}
           >
-            <div className="flex h-8 items-center gap-2 rounded-lg border bg-background/70 px-2.5 shadow-xs">
+            <div className="flex h-8 items-center gap-2 rounded-lg border bg-background/70 px-2.5 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
               <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <input
                 autoFocus
+                aria-label="搜索项目和任务"
                 className="min-w-0 flex-1 bg-transparent text-sidebar-foreground text-sm outline-none placeholder:text-muted-foreground"
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="搜索项目和任务"
@@ -251,8 +248,7 @@ export function AppSidebar({
       <nav aria-label="主导航" className="mt-2 flex flex-col gap-0 px-1">
         <Button
           className={cn(
-            "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-            workspaceMode === "research" && "research-serif",
+            "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
           )}
           disabled={loading || !activeProject}
           onClick={() => onNewSession()}
@@ -265,9 +261,8 @@ export function AppSidebar({
           <>
             <Button
               className={cn(
-                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "overview" &&
-                  "bg-sidebar-selected",
+                "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "overview" && "bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("overview")}
               variant="ghost"
@@ -277,9 +272,8 @@ export function AppSidebar({
             </Button>
             <Button
               className={cn(
-                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "search" &&
-                  "bg-sidebar-selected",
+                "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "search" && "bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("search")}
               variant="ghost"
@@ -289,9 +283,8 @@ export function AppSidebar({
             </Button>
             <Button
               className={cn(
-                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "tracking" &&
-                  "bg-sidebar-selected",
+                "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "tracking" && "bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("tracking")}
               variant="ghost"
@@ -301,9 +294,8 @@ export function AppSidebar({
             </Button>
             <Button
               className={cn(
-                "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "inbox" &&
-                  "bg-sidebar-selected",
+                "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
+                activeResearchSection === "inbox" && "bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("inbox")}
               variant="ghost"
@@ -314,7 +306,7 @@ export function AppSidebar({
           </>
         ) : (
           <Button
-            className="h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground"
+            className="h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground"
             disabled={!activeProject}
             onClick={onOpenGit}
             variant="ghost"
@@ -325,8 +317,7 @@ export function AppSidebar({
         )}
         <Button
           className={cn(
-            "h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
-            workspaceMode === "research" && "research-serif",
+            "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
             workspaceMode === "research" &&
               activeResearchSection === "capabilities" &&
               "bg-sidebar-selected",
@@ -346,22 +337,24 @@ export function AppSidebar({
       <div className="mt-5 flex min-h-0 flex-1 flex-col">
         {workspaceMode === "research" ? (
           <>
-            <p className="research-serif px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
+            <p className="px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide">
               研究
             </p>
             <nav
               aria-label="研究模块"
               className="flex shrink-0 flex-col gap-0.5 px-1"
             >
-              {([
-                ["knowledge", BrainCircuitIcon, "知识资产"],
-                ["library", LibraryIcon, "文献库"],
-                ["experiments", FlaskConicalIcon, "实验资源"],
-                ["sandbox", BeakerIcon, "研究沙盒"],
-              ] as const).map(([section, Icon, label]) => (
+              {(
+                [
+                  ["knowledge", BrainCircuitIcon, "知识资产"],
+                  ["library", LibraryIcon, "文献库"],
+                  ["experiments", FlaskConicalIcon, "实验资源"],
+                  ["sandbox", BeakerIcon, "研究沙盒"],
+                ] as const
+              ).map(([section, Icon, label]) => (
                 <Button
                   className={cn(
-                    "research-serif h-9 justify-start rounded-lg px-2 text-[15px] text-sidebar-foreground hover:text-sidebar-foreground",
+                    "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
                     activeResearchSection === section &&
                       "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
                   )}
@@ -391,8 +384,7 @@ export function AppSidebar({
           {visibleProjects.map(({ project, sessions }, projectIndex) => {
             const active = project.id === activeProject?.id;
             const expanded =
-              Boolean(normalizedQuery) ||
-              expandedProjectIds.has(project.id);
+              Boolean(normalizedQuery) || expandedProjectIds.has(project.id);
             return (
               <Collapsible
                 className="motion-list-item"
@@ -424,7 +416,7 @@ export function AppSidebar({
                   <CollapsibleTrigger asChild>
                     <button
                       aria-label={`${expanded ? "收起" : "展开"}项目 ${project.name}`}
-                      className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left text-[15px]"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left text-base"
                       title={project.path}
                       type="button"
                     >
@@ -456,9 +448,7 @@ export function AppSidebar({
                         <FolderOpenIcon />
                         切换到项目
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => onNewSession(project)}
-                      >
+                      <DropdownMenuItem onSelect={() => onNewSession(project)}>
                         <SquarePenIcon />
                         {workspaceMode === "research"
                           ? "在此项目新建研究任务"
@@ -544,9 +534,7 @@ export function AppSidebar({
                     })}
                     {!loading && sessions.length === 0 ? (
                       <p className="px-2 py-2 text-sidebar-foreground text-xs">
-                        {normalizedQuery
-                          ? "没有匹配的任务"
-                          : "暂无任务"}
+                        {normalizedQuery ? "没有匹配的任务" : "暂无任务"}
                       </p>
                     ) : null}
                   </div>
@@ -566,9 +554,7 @@ export function AppSidebar({
         <Button
           className={cn(
             "h-9 w-full justify-start rounded-lg px-2 text-sidebar-foreground hover:text-sidebar-foreground",
-            workspaceMode === "research" && "research-serif",
-            settingsActive &&
-              "bg-sidebar-selected hover:bg-sidebar-selected",
+            settingsActive && "bg-sidebar-selected hover:bg-sidebar-selected",
           )}
           onClick={onOpenSettings}
           variant="ghost"
@@ -590,9 +576,8 @@ export function AppSidebar({
           <DialogHeader>
             <DialogTitle>删除任务？</DialogTitle>
             <DialogDescription>
-              “{pendingDelete
-                ? localizedSessionTitle(pendingDelete.title)
-                : ""}”及其本地对话记录将被永久删除，工作区文件不会受到影响。
+              “{pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}
+              ”及其本地对话记录将被永久删除，工作区文件不会受到影响。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -620,7 +605,7 @@ export function AppSidebar({
         aria-valuemax={420}
         aria-valuemin={224}
         aria-valuenow={Math.round(sidebarWidth)}
-        className="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize touch-none outline-none"
+        className="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onDoubleClick={onResetWidth}
         onKeyDown={(event) => {
           if (event.key === "ArrowLeft") {

@@ -596,7 +596,7 @@ export function TrajectoryView({ entries, running }: TrajectoryViewProps) {
       </div>
 
       <div
-        className="harness-trajectory-table"
+        className="harness-trajectory-table harness-trajectory-table--wipe"
         role="table"
         aria-label="轨迹事件列表"
       >

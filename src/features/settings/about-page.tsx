@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import appPackage from "../../../package.json";
 import appIcon from "../../../src-tauri/icons/128x128.png";
 import { Button } from "@/components/ui/button";
+import { toUserMessage } from "@/domain/app-error";
 import {
   checkAppUpdate,
   isTauriRuntime,
@@ -56,6 +57,7 @@ export function AboutPage() {
   const [updateState, setUpdateState] = useState<UpdateCheckState>({
     status: "idle",
   });
+  const [repositoryError, setRepositoryError] = useState<string>();
 
   const isBusy =
     updateState.status === "checking" || updateState.status === "installing";
@@ -78,7 +80,7 @@ export function AboutPage() {
     } catch (reason) {
       setUpdateState({
         status: "error",
-        message: reason instanceof Error ? reason.message : String(reason),
+        message: toUserMessage(reason, "检查更新失败，请稍后重试。"),
       });
     }
   };
@@ -92,8 +94,19 @@ export function AboutPage() {
     } catch (reason) {
       setUpdateState({
         status: "error",
-        message: reason instanceof Error ? reason.message : String(reason),
+        message: toUserMessage(reason, "安装更新失败，请稍后重试。"),
       });
+    }
+  };
+
+  const openRepository = async () => {
+    setRepositoryError(undefined);
+    try {
+      await openExternalUrl(GITHUB_REPO_URL);
+    } catch (reason) {
+      setRepositoryError(
+        toUserMessage(reason, "无法打开 GitHub 仓库，请稍后重试。"),
+      );
     }
   };
 
@@ -143,14 +156,12 @@ export function AboutPage() {
             <RefreshCwIcon
               className={cn("mr-2 size-4", isBusy && "animate-spin")}
             />
-            {updateState.status === "checking"
-              ? "正在检查更新…"
-              : "检查更新"}
+            {updateState.status === "checking" ? "正在检查更新…" : "检查更新"}
           </Button>
 
           <Button
             className="w-full"
-            onClick={() => void openExternalUrl(GITHUB_REPO_URL)}
+            onClick={() => void openRepository()}
             variant="outline"
           >
             <GithubMark className="size-4" />
@@ -173,7 +184,10 @@ export function AboutPage() {
               <div className="flex items-center gap-2">
                 <InfoIcon className="size-4 text-blue-500" />
                 <p className="font-medium text-sm">
-                  发现新版本 v{updateState.status === "available" ? updateState.version : ""}
+                  发现新版本 v
+                  {updateState.status === "available"
+                    ? updateState.version
+                    : ""}
                 </p>
               </div>
               {updateState.status === "available" && updateState.notes ? (
@@ -199,7 +213,11 @@ export function AboutPage() {
           ) : null}
 
           {updateState.status === "error" ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+            <div
+              aria-live="assertive"
+              className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm"
+              role="alert"
+            >
               检查更新失败：{updateState.message}
             </div>
           ) : null}
@@ -207,6 +225,16 @@ export function AboutPage() {
           {updateState.status === "not-configured" ? (
             <p className="text-muted-foreground text-xs">
               更新服务未配置，开发环境下不支持自动更新。
+            </p>
+          ) : null}
+
+          {repositoryError ? (
+            <p
+              aria-live="assertive"
+              className="mt-3 text-destructive text-xs"
+              role="alert"
+            >
+              无法打开 GitHub 仓库：{repositoryError}
             </p>
           ) : null}
         </div>

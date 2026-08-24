@@ -12,39 +12,37 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { installMelodyPlugin } from "@/lib/melody-bridge";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
 
 interface PluginInstallerProps {
   cwd: string;
   onInstalled: () => Promise<void> | void;
 }
 
-export function PluginInstaller({
-  cwd,
-  onInstalled,
-}: PluginInstallerProps) {
+export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState("");
-  const [installing, setInstalling] = useState(false);
-  const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<string>();
+  const installation = useAsyncOperation();
+  const installing = installation.state.phase === "pending";
+  const error = installation.state.error;
 
   const reset = () => {
     setSource("");
-    setError(undefined);
+    installation.reset();
     setSuccess(undefined);
   };
 
   const install = async () => {
-    setInstalling(true);
-    setError(undefined);
     try {
-      const result = await installMelodyPlugin(cwd, source);
+      const result = await installation.run(async () => {
+        const installed = await installMelodyPlugin(cwd, source);
+        await onInstalled();
+        return installed;
+      });
       setSuccess(result.message);
-      await onInstalled();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setInstalling(false);
+    } catch {
+      // The operation state owns the user-visible error.
     }
   };
 
@@ -96,11 +94,7 @@ export function PluginInstaller({
                   autoFocus
                   onChange={(event) => setSource(event.target.value)}
                   onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      source.trim() &&
-                      !installing
-                    ) {
+                    if (event.key === "Enter" && source.trim() && !installing) {
                       event.preventDefault();
                       void install();
                     }
@@ -116,13 +110,17 @@ export function PluginInstaller({
               <div className="flex gap-2 rounded-xl bg-amber-500/8 p-3 text-amber-900 text-xs dark:text-amber-200">
                 <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
                 <p>
-                  安装即表示信任该来源。插件可能加载技能、代理、Hook、MCP
-                  和 LSP 服务。
+                  安装即表示信任该来源。插件可能加载技能、代理、Hook、MCP 和 LSP
+                  服务。
                 </p>
               </div>
 
               {error ? (
-                <p className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs">
+                <p
+                  aria-live="assertive"
+                  className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+                  role="alert"
+                >
                   {error}
                 </p>
               ) : null}

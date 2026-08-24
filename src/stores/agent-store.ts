@@ -1,9 +1,9 @@
 import { create } from "zustand";
 
+import { toUserMessage as reasonMessage } from "@/domain/app-error";
 import type {
   AcpEnvelope,
   AcpSessionPhase,
-  AgentBillingUsage,
   AgentContextUsage,
   AgentModelOption,
   AgentPlanDecision,
@@ -17,16 +17,19 @@ import type {
   PermissionOption,
   TimelineEntry,
 } from "@/domain/acp";
-import {
-  applySessionUpdate as reduceSessionUpdate,
-  type SessionUpdateResult,
-} from "@/domain/agent-session-reducer";
 import { settlePlanApproval, upsertPlanApproval } from "@/domain/plan-approval";
 import {
+  appendSessionError,
+  applySessionUpdate,
   isSessionUpdateMethod,
   notificationMetadata,
+  parseSessionContextUsage,
   parseTimelineProjection,
+  projectPermissionRequest,
+  readTimelineProjection,
   SessionEventDeduplicator,
+  settleSessionProjection,
+  type SessionUpdateResult,
   TIMELINE_PROJECTION_VERSION,
   usableTimelineProjection,
 } from "@/domain/session-projection";
@@ -40,7 +43,6 @@ import {
   promptResponseDisposition,
   shouldCancelBeforeFirstEvent,
 } from "@/domain/prompt-timeout";
-import { extractToolActivity } from "@/domain/tool-activity";
 import {
   findPermissionRule,
   isTauriRuntime,
@@ -228,6 +230,7 @@ interface AgentStore {
     timelineJson?: string,
     acpCursor?: string,
     timelineVersion?: number,
+    archivedTimelineJson?: string,
   ) => Promise<void>;
   receiveAcp: (message: AcpEnvelope) => Promise<void>;
   submitPrompt: (
@@ -300,10 +303,7 @@ const markPromptActivity = (sessionId?: string) => {
     return;
   }
   clearPromptTimeout(pending[0]);
-  pendingPrompts.set(
-    pending[0],
-    markPromptStarted(pending[1], Date.now()),
-  );
+  pendingPrompts.set(pending[0], markPromptStarted(pending[1], Date.now()));
 };
 
 const objectValue = (value: unknown): Record<string, unknown> | undefined =>
@@ -326,301 +326,8 @@ const wireValue = (
   snakeCase: string,
 ) => value?.[camelCase] ?? value?.[snakeCase];
 
-const stringifyValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value === undefined || value === null) {
-    return "";
-  }
-  return JSON.stringify(value, null, 2);
-};
-
-const toolCommand = (tool: Record<string, unknown>): string => {
-  const rawInput = objectValue(tool.rawInput);
-  return (
-    stringValue(rawInput?.command) ??
-    stringValue(rawInput?.cmd) ??
-    stringValue(rawInput?.path) ??
-    stringifyValue(tool.rawInput)
-  );
-};
-
-const toolOutput = (tool: Record<string, unknown>): string => {
-  const content = Array.isArray(tool.content) ? tool.content : [];
-  const contentText = content
-    .map((item) => {
-      const block = objectValue(item);
-      return (
-        stringValue(block?.text) ??
-        stringifyValue(block?.content) ??
-        stringifyValue(item)
-      );
-    })
-    .filter(Boolean)
-    .join("\n");
-  return contentText || stringifyValue(tool.rawOutput);
-};
-
 const permissionToolKey = (title: string, command: string) =>
   `${title.trim()}\n${command.trim()}`;
-
-const appendAgentChunk = (
-  timeline: TimelineEntry[],
-  text: string,
-): TimelineEntry[] => {
-  const now = Date.now();
-  const last = timeline.at(-1);
-  if (last?.kind === "message" && last.role === "assistant" && last.streaming) {
-    return [
-      ...timeline.slice(0, -1),
-      { ...last, content: `${last.content}${text}` },
-    ];
-  }
-  const settledTimeline = timeline.map((entry) =>
-    entry.kind === "thought" && entry.streaming
-      ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
-      : entry,
-  );
-  return [
-    ...settledTimeline,
-    {
-      id: `assistant-${Date.now()}`,
-      kind: "message",
-      role: "assistant",
-      content: text,
-      startedAt: now,
-      streaming: true,
-    },
-  ];
-};
-
-const appendThoughtChunk = (
-  timeline: TimelineEntry[],
-  text: string,
-): TimelineEntry[] => {
-  const now = Date.now();
-  const last = timeline.at(-1);
-  if (last?.kind === "thought" && last.streaming) {
-    return [
-      ...timeline.slice(0, -1),
-      { ...last, content: `${last.content}${text}` },
-    ];
-  }
-  return [
-    ...timeline.map((entry) =>
-      entry.kind === "message" && entry.streaming
-        ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
-        : entry,
-    ),
-    {
-      id: `thought-${now}`,
-      kind: "thought",
-      content: text,
-      startedAt: now,
-      streaming: true,
-    },
-  ];
-};
-
-const settleStreamingEntries = (timeline: TimelineEntry[]): TimelineEntry[] => {
-  const now = Date.now();
-  return timeline.map((entry) =>
-    (entry.kind === "message" || entry.kind === "thought") && entry.streaming
-      ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
-      : entry,
-  );
-};
-
-const stampLatestTurnAnalytics = (
-  timeline: TimelineEntry[],
-  usage: AgentContextUsage | undefined,
-  billingUsage: AgentBillingUsage | undefined,
-  reasoningEffort: string | undefined,
-  sessionModeId: string | undefined,
-): TimelineEntry[] => {
-  const settled = settleStreamingEntries(timeline);
-  let lastUserIndex = -1;
-  let assistantIndex = -1;
-  for (let index = settled.length - 1; index >= 0; index -= 1) {
-    const entry = settled[index];
-    if (
-      assistantIndex < 0 &&
-      entry?.kind === "message" &&
-      entry.role === "assistant"
-    ) {
-      assistantIndex = index;
-    }
-    if (entry?.kind === "message" && entry.role === "user") {
-      lastUserIndex = index;
-      break;
-    }
-  }
-  if (assistantIndex <= lastUserIndex) {
-    assistantIndex = -1;
-  }
-  if (assistantIndex < 0) {
-    return settled;
-  }
-  return settled.map((entry, index) =>
-    index === assistantIndex && entry.kind === "message"
-      ? {
-          ...entry,
-          ...(usage
-            ? {
-                tokenUsage: {
-                  usedTokens: usage.usedTokens,
-                  maxTokens: usage.maxTokens,
-                },
-              }
-            : {}),
-          ...(billingUsage ? { billingUsage } : {}),
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-          ...(sessionModeId ? { sessionModeId } : {}),
-        }
-      : entry,
-  );
-};
-
-const appendUserChunk = (
-  timeline: TimelineEntry[],
-  update: Record<string, unknown>,
-  eventId?: string,
-): TimelineEntry[] => {
-  const content = objectValue(update.content);
-  const contentMeta = objectValue(content?._meta);
-  const chunkMeta = objectValue(update._meta);
-  if (chunkMeta?.hideFromScrollback === true) {
-    return timeline;
-  }
-  const text =
-    stringValue(contentMeta?.displayText) ?? stringValue(content?.text);
-  if (!text) {
-    return timeline;
-  }
-  const promptIndex = numberValue(chunkMeta?.promptIndex);
-  const settled = settleStreamingEntries(timeline);
-  const last = settled.at(-1);
-  if (
-    last?.kind === "message" &&
-    last.role === "user" &&
-    last.content === text
-  ) {
-    return [
-      ...settled.slice(0, -1),
-      { ...last, sourcePromptIndex: promptIndex },
-    ];
-  }
-  if (
-    last?.kind === "message" &&
-    last.role === "user" &&
-    promptIndex !== undefined &&
-    last.sourcePromptIndex === promptIndex
-  ) {
-    return [
-      ...settled.slice(0, -1),
-      {
-        ...last,
-        content: `${last.content}\n${text}`,
-        streaming: true,
-      },
-    ];
-  }
-  return [
-    ...settled,
-    {
-      id: eventId ? `user-${eventId}` : `user-${Date.now()}`,
-      kind: "message",
-      role: "user",
-      content: text,
-      startedAt: Date.now(),
-      streaming: true,
-      sourcePromptIndex: promptIndex,
-    },
-  ];
-};
-
-const appendAgentError = (
-  timeline: TimelineEntry[],
-  message: string,
-): TimelineEntry[] => {
-  const now = Date.now();
-  const content = `Melody 无法完成请求：${message}`;
-  const last = timeline.at(-1);
-  if (
-    last?.kind === "message" &&
-    last.role === "assistant" &&
-    last.content === content
-  ) {
-    return timeline;
-  }
-  return [
-    ...settleStreamingEntries(timeline),
-    {
-      id: `assistant-error-${now}`,
-      kind: "message",
-      role: "assistant",
-      content,
-      completedAt: now,
-      startedAt: now,
-    },
-  ];
-};
-
-const upsertTool = (
-  timeline: TimelineEntry[],
-  tool: Record<string, unknown>,
-): TimelineEntry[] => {
-  const toolCallId =
-    stringValue(tool.toolCallId) ?? `tool-${Date.now().toString(36)}`;
-  const index = timeline.findIndex(
-    (entry) => entry.kind === "tool" && entry.toolCallId === toolCallId,
-  );
-  const existing = index >= 0 ? timeline[index] : undefined;
-  const status =
-    stringValue(tool.status) ??
-    (existing?.kind === "tool" ? existing.status : undefined);
-  const completed =
-    status === "completed" ||
-    status === "failed" ||
-    (existing?.kind === "tool" && existing.permission === "denied");
-  const next: TimelineEntry = {
-    id: existing?.id ?? `tool-${toolCallId}`,
-    kind: "tool",
-    toolCallId,
-    title:
-      stringValue(tool.title) ??
-      (existing?.kind === "tool" ? existing.title : "工具调用"),
-    command:
-      toolCommand(tool) || (existing?.kind === "tool" ? existing.command : ""),
-    output:
-      toolOutput(tool) || (existing?.kind === "tool" ? existing.output : ""),
-    startedAt: existing?.kind === "tool" ? existing.startedAt : Date.now(),
-    completedAt:
-      existing?.kind === "tool" && existing.completedAt
-        ? existing.completedAt
-        : completed
-          ? Date.now()
-          : undefined,
-    activity: extractToolActivity(
-      tool,
-      existing?.kind === "tool" ? existing.activity : undefined,
-    ),
-    status,
-    permission: existing?.kind === "tool" ? existing.permission : undefined,
-    permissionRequestId:
-      existing?.kind === "tool" ? existing.permissionRequestId : undefined,
-    permissionOptions:
-      existing?.kind === "tool" ? existing.permissionOptions : undefined,
-  };
-
-  if (index < 0) {
-    return [...timeline, next];
-  }
-  return timeline.map((entry, entryIndex) =>
-    entryIndex === index ? next : entry,
-  );
-};
 
 const parsePermissionOptions = (value: unknown): PermissionOption[] =>
   Array.isArray(value)
@@ -637,9 +344,6 @@ const errorMessage = (message: AcpEnvelope, fallback: string) =>
   stringValue(objectValue(message.error?.data)?.message) ??
   message.error?.message ??
   fallback;
-
-const reasonMessage = (reason: unknown) =>
-  reason instanceof Error ? reason.message : String(reason);
 
 const parseDataUrl = (url: string) => {
   const match = /^data:([^;,]*)(;base64)?,([\s\S]*)$/.exec(url);
@@ -840,47 +544,17 @@ const armSetupTimeout = (
   }, SETUP_TIMEOUT_MS);
 };
 
-const contextUsageValue = (
-  value: Record<string, unknown> | undefined,
-): AgentContextUsage | undefined => {
-  const usedTokens = numberValue(value?.used);
-  const maxTokens = numberValue(value?.size);
-  if (
-    usedTokens === undefined ||
-    maxTokens === undefined ||
-    usedTokens < 0 ||
-    maxTokens <= 0
-  ) {
-    return undefined;
-  }
-
-  const rawCost = objectValue(value?.cost);
-  const amount = numberValue(rawCost?.amount);
-  const currency = stringValue(rawCost?.currency);
-  const normalizedCurrency =
-    currency && /^[a-z]{3}$/i.test(currency)
-      ? currency.toUpperCase()
-      : undefined;
-  return {
-    usedTokens,
-    maxTokens,
-    ...(amount !== undefined && amount >= 0 && normalizedCurrency
-      ? { cost: { amount, currency: normalizedCurrency } }
-      : {}),
-  };
-};
-
 const contextUsageFromResult = (
   result: Record<string, unknown> | undefined,
   fallback?: AgentContextUsage,
 ): AgentContextUsage | undefined => {
-  const directUsage = contextUsageValue(objectValue(result?.usage));
+  const directUsage = parseSessionContextUsage(objectValue(result?.usage));
   if (directUsage) {
     return directUsage;
   }
 
   const meta = objectValue(result?._meta);
-  const metadataUsage = contextUsageValue(
+  const metadataUsage = parseSessionContextUsage(
     objectValue(meta?.["x.ai/contextUsage"]),
   );
   if (metadataUsage) {
@@ -896,39 +570,6 @@ const contextUsageFromResult = (
   }
 
   return undefined;
-};
-
-const billingUsageValue = (
-  value: Record<string, unknown> | undefined,
-): AgentBillingUsage | undefined => {
-  const inputTokens = numberValue(value?.inputTokens);
-  const outputTokens = numberValue(value?.outputTokens);
-  if (
-    inputTokens === undefined ||
-    outputTokens === undefined ||
-    inputTokens < 0 ||
-    outputTokens < 0
-  ) {
-    return undefined;
-  }
-  const cachedReadTokens = numberValue(value?.cachedReadTokens) ?? 0;
-  const reasoningTokens = numberValue(value?.reasoningTokens) ?? 0;
-  const modelCalls = numberValue(value?.modelCalls) ?? 0;
-  const apiDurationMs = numberValue(value?.apiDurationMs) ?? 0;
-  const costUsdTicks = numberValue(value?.costUsdTicks);
-  return {
-    inputTokens,
-    outputTokens,
-    cachedReadTokens: Math.max(0, cachedReadTokens),
-    reasoningTokens: Math.max(0, reasoningTokens),
-    modelCalls: Math.max(0, modelCalls),
-    apiDurationMs: Math.max(0, apiDurationMs),
-    usageIsIncomplete: value?.usageIsIncomplete === true,
-    costIsPartial: value?.costIsPartial === true,
-    ...(costUsdTicks !== undefined && costUsdTicks >= 0
-      ? { costUsdTicks }
-      : {}),
-  };
 };
 
 const contextUsageForModel = (
@@ -964,28 +605,6 @@ const extractSessionUpdateParams = (
   }
   return objectValue(params.params);
 };
-
-// 将 session update 应用到指定 timeline，返回更新后的 timeline 和状态标志。
-const sessionUpdateDependencies = {
-  objectValue,
-  stringValue,
-  appendUserChunk,
-  appendAgentChunk,
-  appendThoughtChunk,
-  appendAgentError,
-  settleStreamingEntries,
-  stampLatestTurnAnalytics,
-  upsertTool,
-  contextUsageValue,
-  billingUsageValue,
-};
-
-const applySessionUpdate = (
-  timeline: TimelineEntry[],
-  update: Record<string, unknown> | undefined,
-  eventId?: string,
-): SessionUpdateResult =>
-  reduceSessionUpdate(timeline, update, eventId, sessionUpdateDependencies);
 
 const applySubagentUpdate = (
   subagents: Record<string, AgentSubagent>,
@@ -1174,7 +793,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const current = get();
     const sessionLost =
       status.phase === "stopped" &&
-      (current.chatStatus === "submitted" || current.chatStatus === "streaming");
+      (current.chatStatus === "submitted" ||
+        current.chatStatus === "streaming");
     if (
       status.phase === "stopped" ||
       status.phase === "missing" ||
@@ -1192,7 +812,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         : {}),
       ...(sessionLost
         ? {
-            timeline: appendAgentError(
+            timeline: appendSessionError(
               state.timeline,
               status.message ?? "ACP sidecar 已停止，当前请求已结束。",
             ),
@@ -1212,16 +832,33 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     timelineJson,
     acpCursor,
     timelineVersion,
+    archivedTimelineJson,
   ) => {
-    const fallbackTimeline = parseTimelineProjection(timelineJson);
-    const restoredTimeline = usableTimelineProjection({
-      timelineJson,
-      cursor: acpCursor,
-      version: timelineVersion,
-    });
+    const projectionTimelineJson = archivedTimelineJson ?? timelineJson;
+    // The archive can restore the display independently. A cursor is only
+    // safe when the bounded snapshot was written as a complete projection;
+    // version 0 deliberately forces ACP replay after compaction or migration.
+    const projectionVersion = timelineVersion;
+    const projectionCursor =
+      projectionVersion === TIMELINE_PROJECTION_VERSION ? acpCursor : undefined;
+    const fallbackTimeline = parseTimelineProjection(projectionTimelineJson);
+    const archivedProjection = archivedTimelineJson
+      ? readTimelineProjection(archivedTimelineJson)
+      : undefined;
+    const projectionRead = readTimelineProjection(projectionTimelineJson);
+    const restoredTimeline = archivedProjection
+      ? archivedProjection.status === "valid"
+        ? archivedProjection.timeline
+        : []
+      : usableTimelineProjection({
+          timelineJson: projectionTimelineJson,
+          cursor: projectionCursor,
+          version: projectionVersion,
+        });
     const restoredCursor =
-      timelineVersion === TIMELINE_PROJECTION_VERSION && acpCursor
-        ? acpCursor
+      projectionVersion === TIMELINE_PROJECTION_VERSION &&
+      (archivedProjection?.status ?? projectionRead.status) === "valid"
+        ? projectionCursor
         : undefined;
     if (!isTauriRuntime()) {
       set({
@@ -1714,10 +1351,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         const promptId = message.id;
         const pendingPrompt = pendingPrompts.get(promptId);
         const responsePromptId = stringValue(responseMeta(message)?.promptId);
-        if (
-          responsePromptId &&
-          cancelledPromptIds.has(responsePromptId)
-        ) {
+        if (responsePromptId && cancelledPromptIds.has(responsePromptId)) {
           return;
         }
         if (!pendingPrompt) {
@@ -1774,7 +1408,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
               : state.runningSessions,
             backgroundTimelines: {
               ...state.backgroundTimelines,
-              [promptSessionId]: appendAgentError(
+              [promptSessionId]: appendSessionError(
                 state.backgroundTimelines[promptSessionId] ?? [],
                 promptError ?? "Melody 请求失败",
               ),
@@ -1807,7 +1441,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           status: promptError
             ? { ...state.status, message: promptError }
             : state.status,
-          timeline: appendAgentError(
+          timeline: appendSessionError(
             state.timeline,
             promptError ?? "Melody 请求失败",
           ),
@@ -1820,36 +1454,20 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         message.id !== undefined
       ) {
         const params = message.params ?? {};
-        markPromptActivity(
-          stringValue(params.sessionId) ?? get().acpSessionId,
-        );
+        markPromptActivity(stringValue(params.sessionId) ?? get().acpSessionId);
         const tool = objectValue(params.toolCall) ?? {};
-        const toolCallId =
-          stringValue(tool.toolCallId) ?? `permission-${String(message.id)}`;
         const options = parsePermissionOptions(params.options);
 
-        set((state) => {
-          const withTool = upsertTool(state.timeline, {
-            ...tool,
-            toolCallId,
-          });
-          return {
-            timeline: withTool.map((entry) =>
-              entry.kind === "tool" && entry.toolCallId === toolCallId
-                ? {
-                    ...entry,
-                    permission: "pending",
-                    permissionRequestId: message.id,
-                    permissionOptions: options,
-                  }
-                : entry,
-            ),
-          };
-        });
+        const permissionProjection = projectPermissionRequest(
+          get().timeline,
+          tool,
+          message.id,
+          options,
+        );
+        set({ timeline: permissionProjection.timeline });
 
         const projectId = useWorkspaceStore.getState().activeProject?.id;
-        const title = stringValue(tool.title) ?? "工具调用";
-        const command = toolCommand(tool);
+        const { title, command, toolCallId } = permissionProjection;
         if (projectId) {
           const rule = await findPermissionRule(
             projectId,
@@ -1904,10 +1522,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         return;
       }
       const metadata = notificationMetadata(updateParams);
-      if (
-        metadata.promptId &&
-        cancelledPromptIds.has(metadata.promptId)
-      ) {
+      if (metadata.promptId && cancelledPromptIds.has(metadata.promptId)) {
         return;
       }
       markPromptActivity(routedSessionId);
@@ -2266,9 +1881,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const stateBeforeCancel = get();
     const localSessionId = stateBeforeCancel.localSessionId;
     const sessionId = stateBeforeCancel.acpSessionId;
-    const pending = sessionId
-      ? pendingPromptForSession(sessionId)
-      : undefined;
+    const pending = sessionId ? pendingPromptForSession(sessionId) : undefined;
     if (
       stateBeforeCancel.chatStatus !== "submitted" &&
       stateBeforeCancel.chatStatus !== "streaming" &&
@@ -2296,7 +1909,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           params: {
             sessionId,
             _meta: {
-              ...(pendingPrompt ? { cancelPromptId: pendingPrompt.promptId } : {}),
+              ...(pendingPrompt
+                ? { cancelPromptId: pendingPrompt.promptId }
+                : {}),
               cancelSubagents: true,
               cancelTrigger: reason === "timeout" ? "timeout" : "mouse",
             },
@@ -2308,8 +1923,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         chatStatus: "ready",
         timeline:
           reason === "timeout"
-            ? appendAgentError(state.timeline, timeoutMessage)
-            : settleStreamingEntries(state.timeline),
+            ? appendSessionError(state.timeline, timeoutMessage)
+            : settleSessionProjection(state.timeline),
         runningSessions: localSessionId
           ? { ...state.runningSessions, [localSessionId]: false }
           : state.runningSessions,
@@ -2322,7 +1937,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       set((state) => ({
         acpPhase: "error",
         chatStatus: "error",
-        timeline: appendAgentError(state.timeline, `取消当前请求失败：${detail}`),
+        timeline: appendSessionError(
+          state.timeline,
+          `取消当前请求失败：${detail}`,
+        ),
         runningSessions: localSessionId
           ? { ...state.runningSessions, [localSessionId]: false }
           : state.runningSessions,

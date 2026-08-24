@@ -13,6 +13,27 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep stable UI framework dependencies out of the app entry. These
+        // chunks remain cacheable across feature changes without pulling
+        // feature-specific runtimes into the initial module.
+        manualChunks(id) {
+          if (
+            id.includes("/node_modules/@radix-ui/") ||
+            id.includes("/node_modules/radix-ui/")
+          ) {
+            return "vendor-radix";
+          }
+          if (id.includes("/node_modules/motion/")) {
+            return "vendor-motion";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

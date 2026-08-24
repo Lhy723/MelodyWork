@@ -15,12 +15,9 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  MOTION_EASE,
-  MOTION_LEAVE_EASE,
-} from "@/components/motion/page-transition";
+import { MOTION_EASE } from "@/components/motion/page-transition";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,21 +29,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
+import { RequestGate } from "@/domain/request-gate";
 import { openExternalUrl } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
-import {
-  importResearchPaper,
-  searchResearchPapers,
-} from "./research-api";
+import { importResearchPaper, searchResearchPapers } from "./research-api";
 import { useResearchStore } from "./research-store";
 
-export type ResearchPanelKind =
-  | "knowledge"
-  | "library"
-  | "search"
-  | "tracking";
+export type ResearchPanelKind = "knowledge" | "library" | "search" | "tracking";
 
 interface ResearchPanelProps {
   kind: ResearchPanelKind;
@@ -54,7 +46,7 @@ interface ResearchPanelProps {
 
 function PaperMetadata({ paper }: { paper: ResearchPaper }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-[11px]">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
       {paper.year ? <span>{paper.year}</span> : null}
       {paper.venue ? <span>· {paper.venue}</span> : null}
       {paper.doi ? <span className="truncate">· {paper.doi}</span> : null}
@@ -99,7 +91,7 @@ function PaperList({
           type="button"
         >
           <div className="flex items-start gap-2">
-            <p className="line-clamp-2 min-w-0 flex-1 font-medium text-xs leading-4">
+            <p className="line-clamp-2 min-w-0 flex-1 font-medium text-sm leading-5">
               {paper.title}
             </p>
             {paper.verified ? (
@@ -109,7 +101,7 @@ function PaperList({
               />
             ) : null}
           </div>
-          <p className="mt-1 truncate text-muted-foreground text-[11px]">
+          <p className="mt-1 truncate text-muted-foreground text-xs">
             {paper.authors.join(" · ") || "作者信息未收录"}
           </p>
           <div className="mt-1">
@@ -149,7 +141,12 @@ function PaperDetail({
             <PaperMetadata paper={paper} />
           </div>
         </div>
-        <Button aria-label="关闭详情" onClick={onClose} size="icon-sm" variant="ghost">
+        <Button
+          aria-label="关闭详情"
+          onClick={onClose}
+          size="icon-sm"
+          variant="ghost"
+        >
           <span aria-hidden="true">×</span>
         </Button>
       </header>
@@ -209,9 +206,7 @@ function PaperDetail({
                   {paper.sources.join(" / ")} 已通过元信息核验
                 </Badge>
               ) : (
-                <Badge variant="secondary">
-                  {paper.sources.join(" / ")}
-                </Badge>
+                <Badge variant="secondary">{paper.sources.join(" / ")}</Badge>
               )}
             </div>
             <p className="mt-3 whitespace-pre-wrap text-muted-foreground text-xs leading-5">
@@ -245,7 +240,7 @@ function ImportPaperDialog({
       setCandidate("");
       setOpen(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -256,11 +251,13 @@ function ImportPaperDialog({
         <DialogHeader>
           <DialogTitle>导入论文</DialogTitle>
           <DialogDescription>
-            支持 arXiv 链接、doi.org 链接或 DOI。元信息来自真实学术索引，不会生成缺失字段。
+            支持 arXiv 链接、doi.org 链接或
+            DOI。元信息来自真实学术索引，不会生成缺失字段。
           </DialogDescription>
         </DialogHeader>
         <Input
           autoFocus
+          aria-label="论文地址或 DOI"
           onChange={(event) => setCandidate(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && candidate.trim() && !loading) {
@@ -272,7 +269,11 @@ function ImportPaperDialog({
           value={candidate}
         />
         {error ? (
-          <p className="rounded-lg bg-destructive/8 px-3 py-2 text-destructive text-xs">
+          <p
+            aria-live="assertive"
+            className="rounded-lg bg-destructive/8 px-3 py-2 text-destructive text-xs"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}
@@ -281,7 +282,11 @@ function ImportPaperDialog({
             disabled={!candidate.trim() || loading}
             onClick={() => void runImport()}
           >
-            {loading ? <LoaderCircleIcon className="animate-spin" /> : <ImportIcon />}
+            {loading ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <ImportIcon />
+            )}
             {loading ? "正在查询学术索引…" : "导入"}
           </Button>
         </DialogFooter>
@@ -302,35 +307,44 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
   const [error, setError] = useState<string>();
   const [warnings, setWarnings] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const searchGateRef = useRef(new RequestGate());
   const visiblePapers = searchMode ? results : papers;
   const selected = visiblePapers.find((paper) => paper.id === selectedId);
   const selectedInLibrary = papers.find((paper) => paper.id === selectedId);
 
   const runSearch = async () => {
+    const requestToken = searchGateRef.current.begin();
     setLoading(true);
     setError(undefined);
     setWarnings([]);
     try {
       const response = await searchResearchPapers(query);
+      if (!searchGateRef.current.isCurrent(requestToken)) return;
       setResults(response.papers);
       setWarnings(response.warnings);
       setSelectedId(response.papers[0]?.id);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (!searchGateRef.current.isCurrent(requestToken)) return;
+      setError(toUserMessage(reason));
       setResults([]);
     } finally {
-      setLoading(false);
+      if (searchGateRef.current.isCurrent(requestToken)) {
+        setLoading(false);
+      }
     }
   };
 
+  useEffect(() => () => searchGateRef.current.invalidate(), []);
+
   return (
     <div className="flex size-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b px-2 py-1">
         {searchMode ? (
           <>
-            <div className="flex h-8 min-w-0 flex-1 items-center rounded-lg border bg-background px-2">
+            <div className="flex h-8 min-w-0 flex-1 basis-48 items-center rounded-lg border bg-background px-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
               <SearchIcon className="size-3.5 text-muted-foreground" />
               <input
+                aria-label="搜索文献"
                 className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
@@ -348,7 +362,11 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
               onClick={() => void runSearch()}
               size="sm"
             >
-              {loading ? <LoaderCircleIcon className="animate-spin" /> : <SearchIcon />}
+              {loading ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <SearchIcon />
+              )}
               检索
             </Button>
           </>
@@ -356,7 +374,7 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
           <>
             <LibraryIcon className="size-4 text-muted-foreground" />
             <span className="font-medium text-xs">本地文献库</span>
-            <span className="text-muted-foreground text-[11px]">
+            <span className="text-muted-foreground text-xs">
               {papers.length} 篇
             </span>
             <Button
@@ -372,26 +390,33 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         )}
       </div>
       {error ? (
-        <p className="border-b bg-destructive/8 px-3 py-2 text-destructive text-xs">
+        <p
+          aria-live="assertive"
+          className="border-b bg-destructive/8 px-3 py-2 text-destructive text-xs"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
       {warnings.length > 0 ? (
-        <div className="flex gap-2 border-b bg-amber-500/8 px-3 py-2 text-amber-800 text-xs dark:text-amber-200">
+        <div
+          aria-live="polite"
+          className="flex gap-2 border-b bg-amber-500/8 px-3 py-2 text-amber-800 text-xs dark:text-amber-200"
+          role="status"
+        >
           <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
           <span>{warnings.join("；")}</span>
         </div>
       ) : null}
-      <div className="flex min-h-0 flex-1">
-        <motion.div
-          animate={{ width: selected ? "46%" : "100%" }}
-          className="min-h-0 shrink-0 overflow-y-auto"
-          initial={false}
-          transition={{
-            duration: selected ? 0.28 : 0.16,
-            ease: selected ? MOTION_EASE : MOTION_LEAVE_EASE,
-          }}
-        >
+      <div
+        className={cn(
+          "grid min-h-0 flex-1",
+          selected
+            ? "grid-cols-1 grid-rows-[minmax(12rem,1fr)_minmax(0,1fr)] md:grid-cols-[minmax(0,46%)_minmax(0,1fr)] md:grid-rows-1"
+            : "grid-cols-1",
+        )}
+      >
+        <div className="min-h-0 min-w-0 overflow-y-auto">
           <PaperList
             empty={
               searchMode
@@ -402,12 +427,12 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
             papers={visiblePapers}
             selectedId={selectedId}
           />
-        </motion.div>
+        </div>
         <AnimatePresence initial={false} mode="wait">
           {selected ? (
             <motion.div
               animate={{ opacity: 1, x: 0 }}
-              className="min-h-0 min-w-0 flex-1"
+              className="min-h-0 min-w-0"
               exit={{ opacity: 0, x: 12 }}
               initial={{ opacity: 0, x: 12 }}
               key={selected.id}
@@ -436,12 +461,14 @@ function LibraryPanel({ searchMode }: { searchMode: boolean }) {
       </div>
       {searchMode && results.length > 0 ? (
         <div className="flex h-10 shrink-0 items-center border-t px-3">
-          <span className="text-muted-foreground text-[11px]">
+          <span className="text-muted-foreground text-xs">
             {results.length} 条结果 · 来自实际 API 响应
           </span>
           <Button
             className="ml-auto"
-            onClick={() => addPapers(results.map((paper) => ({ ...paper, saved: true })))}
+            onClick={() =>
+              addPapers(results.map((paper) => ({ ...paper, saved: true })))
+            }
             size="sm"
             variant="outline"
           >
@@ -468,9 +495,12 @@ function KnowledgePanel() {
   const venues = useMemo(() => {
     const counts = new Map<string, number>();
     for (const paper of saved) {
-      if (paper.venue) counts.set(paper.venue, (counts.get(paper.venue) ?? 0) + 1);
+      if (paper.venue)
+        counts.set(paper.venue, (counts.get(paper.venue) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).sort((left, right) => right[1] - left[1]);
+    return Array.from(counts.entries()).sort(
+      (left, right) => right[1] - left[1],
+    );
   }, [saved]);
   return (
     <div className="size-full overflow-y-auto p-4">
@@ -504,30 +534,42 @@ function KnowledgePanel() {
 function TrackingPanel() {
   const topics = useResearchStore((state) => state.trackingTopics);
   const addTrackingTopic = useResearchStore((state) => state.addTrackingTopic);
-  const updateTrackingTopic = useResearchStore(
-    (state) => state.updateTrackingTopic,
+  const refreshTrackingTopic = useResearchStore(
+    (state) => state.refreshTrackingTopic,
   );
-  const addPapers = useResearchStore((state) => state.addPapers);
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState<string>();
   const [error, setError] = useState<string>();
+  const refreshGatesRef = useRef(new Map<string, RequestGate>());
   const refresh = async (id: string, topicQuery: string) => {
+    const gate = refreshGatesRef.current.get(id) ?? new RequestGate();
+    refreshGatesRef.current.set(id, gate);
+    const requestToken = gate.begin();
     setRefreshing(id);
     setError(undefined);
     try {
       const result = await searchResearchPapers(topicQuery);
-      addPapers(result.papers);
-      updateTrackingTopic(id, {
-        lastCheckedAt: Date.now(),
-        latestCount: result.papers.length,
-      });
+      if (!gate.isCurrent(requestToken)) return;
+      refreshTrackingTopic(id, result.papers);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (!gate.isCurrent(requestToken)) return;
+      setError(toUserMessage(reason));
     } finally {
-      setRefreshing(undefined);
+      if (gate.isCurrent(requestToken)) {
+        setRefreshing((current) => (current === id ? undefined : current));
+      }
     }
   };
+
+  useEffect(
+    () => () => {
+      for (const gate of refreshGatesRef.current.values()) {
+        gate.invalidate();
+      }
+    },
+    [],
+  );
   return (
     <div className="size-full overflow-y-auto">
       <div className="border-b p-3">
@@ -557,7 +599,11 @@ function TrackingPanel() {
         </div>
       </div>
       {error ? (
-        <p className="border-b bg-destructive/8 px-3 py-2 text-destructive text-xs">
+        <p
+          aria-live="assertive"
+          className="border-b bg-destructive/8 px-3 py-2 text-destructive text-xs"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -576,10 +622,10 @@ function TrackingPanel() {
             <div className="flex items-center gap-3 px-3 py-3" key={topic.id}>
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-xs">{topic.title}</p>
-                <p className="mt-1 truncate text-muted-foreground text-[11px]">
+                <p className="mt-1 truncate text-muted-foreground text-xs">
                   {topic.query}
                 </p>
-                <p className="mt-1 text-muted-foreground text-[10px]">
+                <p className="mt-1 text-muted-foreground text-xs">
                   {topic.lastCheckedAt
                     ? `${new Date(topic.lastCheckedAt).toLocaleString()} · ${topic.latestCount} 条`
                     : "尚未检索"}

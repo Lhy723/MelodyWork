@@ -23,8 +23,14 @@ export interface UpdateSessionRequest {
   title?: string;
   acpSessionId?: string;
   timelineJson?: string;
+  timelineEntries?: TimelineArchiveEntry[];
   acpCursor?: string | null;
   timelineVersion?: number;
+}
+
+export interface TimelineArchiveEntry {
+  ordinal: number;
+  entryJson: string;
 }
 
 export interface WorkspaceEntry {

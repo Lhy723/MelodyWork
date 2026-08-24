@@ -1,5 +1,6 @@
 import {
   CheckIcon,
+  CheckCircle2Icon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
   PlusIcon,
@@ -8,10 +9,11 @@ import {
   TreesIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toUserMessage as messageFrom } from "@/domain/app-error";
 import type { GitBranch, GitChange, GitWorktree } from "@/domain/git";
 import {
   checkoutGitBranch,
@@ -33,9 +35,6 @@ interface GitWorkspaceProps {
   onRefreshChanges: () => void;
 }
 
-const messageFrom = (reason: unknown) =>
-  reason instanceof Error ? reason.message : String(reason);
-
 export function GitWorkspace({
   changes,
   cwd,
@@ -54,7 +53,7 @@ export function GitWorkspace({
   const [notice, setNotice] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<string>();
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(undefined);
     try {
@@ -75,16 +74,13 @@ export function GitWorkspace({
     } finally {
       setLoading(false);
     }
-  };
+  }, [cwd]);
 
   useEffect(() => {
     void refresh();
-  }, [cwd]);
+  }, [refresh]);
 
-  const runAction = async (
-    action: () => Promise<void>,
-    success: string,
-  ) => {
+  const runAction = async (action: () => Promise<void>, success: string) => {
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -130,7 +126,11 @@ export function GitWorkspace({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-2">
           {error ? (
-            <p className="motion-view-enter col-span-full rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+            <p
+              aria-live="assertive"
+              className="motion-view-enter col-span-full rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm"
+              role="alert"
+            >
               {error}
             </p>
           ) : null}
@@ -181,22 +181,26 @@ export function GitWorkspace({
                 </div>
               ))}
               {changes.length === 0 ? (
-                <p className="motion-view-enter px-3 py-8 text-center text-muted-foreground text-sm">
-                  工作树是干净的。
-                </p>
+                <div className="motion-view-enter flex flex-col items-center gap-1 px-3 py-8 text-center">
+                  <CheckCircle2Icon
+                    aria-hidden="true"
+                    className="mb-1 size-5 text-emerald-600"
+                  />
+                  <p className="text-sm">工作树是干净的。</p>
+                  <p className="text-muted-foreground text-xs">
+                    可以开始下一步了。
+                  </p>
+                </div>
               ) : null}
             </div>
             <form
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(
-                  async () => {
-                    await commitGitChanges(cwd, commitMessage);
-                    setCommitMessage("");
-                  },
-                  "提交已创建。",
-                );
+                void runAction(async () => {
+                  await commitGitChanges(cwd, commitMessage);
+                  setCommitMessage("");
+                }, "提交已创建。");
               }}
             >
               <Input
@@ -236,9 +240,7 @@ export function GitWorkspace({
                 >
                   <GitBranchIcon className="size-4 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{branch.name}</span>
-                  {branch.current ? (
-                    <CheckIcon className="size-4" />
-                  ) : null}
+                  {branch.current ? <CheckIcon className="size-4" /> : null}
                 </button>
               ))}
             </div>
@@ -246,13 +248,10 @@ export function GitWorkspace({
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(
-                  async () => {
-                    await createGitBranch(cwd, newBranch);
-                    setNewBranch("");
-                  },
-                  `已创建 ${newBranch}。`,
-                );
+                void runAction(async () => {
+                  await createGitBranch(cwd, newBranch);
+                  setNewBranch("");
+                }, `已创建 ${newBranch}。`);
               }}
             >
               <Input
@@ -305,9 +304,7 @@ export function GitWorkspace({
                           "工作树已移除。",
                         );
                       }}
-                      size={
-                        pendingRemoval === worktree.path ? "sm" : "icon"
-                      }
+                      size={pendingRemoval === worktree.path ? "sm" : "icon"}
                       variant={
                         pendingRemoval === worktree.path
                           ? "destructive"
@@ -315,9 +312,9 @@ export function GitWorkspace({
                       }
                     >
                       <Trash2Icon />
-                      {pendingRemoval === worktree.path
-                        ? <span className="motion-view-enter">确认移除</span>
-                        : null}
+                      {pendingRemoval === worktree.path ? (
+                        <span className="motion-view-enter">确认移除</span>
+                      ) : null}
                     </Button>
                   ) : null}
                 </div>
@@ -327,19 +324,16 @@ export function GitWorkspace({
               className="grid gap-2 border-t p-3 md:grid-cols-[1fr_1fr_auto]"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(
-                  async () => {
-                    await createGitWorktree({
-                      cwd,
-                      path: worktreePath,
-                      branch: worktreeBranch,
-                      createBranch: true,
-                    });
-                    setWorktreePath("");
-                    setWorktreeBranch("");
-                  },
-                  "工作树已创建。",
-                );
+                void runAction(async () => {
+                  await createGitWorktree({
+                    cwd,
+                    path: worktreePath,
+                    branch: worktreeBranch,
+                    createBranch: true,
+                  });
+                  setWorktreePath("");
+                  setWorktreeBranch("");
+                }, "工作树已创建。");
               }}
             >
               <Input
