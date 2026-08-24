@@ -473,6 +473,7 @@ body {
   transition:
     width var(--motion-duration-base) var(--motion-ease-drawer),
     opacity var(--motion-duration-fast) var(--motion-ease-out);
+  will-change: width, opacity;
 }
 
 .sidebar-shell > aside {
