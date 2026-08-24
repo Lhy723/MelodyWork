@@ -17,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ProjectRecord } from "@/domain/workspace";
-import { cn } from "@/lib/utils";
 
 interface NewTaskWorkspaceProps {
   children: ReactNode;
@@ -47,12 +46,7 @@ export function NewTaskWorkspace({
         data-tauri-drag-region
       >
         <SquarePenIcon className="size-3.5 text-muted-foreground" />
-        <span
-          className={cn(
-            "ml-2 font-medium text-sm",
-            researchMode && "research-serif",
-          )}
-        >
+        <span className="ml-2 font-medium text-sm">
           {researchMode ? "新建研究任务" : "新建任务"}
         </span>
         <div
@@ -60,19 +54,19 @@ export function NewTaskWorkspace({
           className="min-w-3 flex-1"
           data-tauri-drag-region
         />
-        <Button className="ml-auto" onClick={onCancel} size="sm" variant="ghost">
+        <Button
+          className="ml-auto"
+          onClick={onCancel}
+          size="sm"
+          variant="ghost"
+        >
           取消
         </Button>
       </header>
       <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-6 pt-[12vh]">
         <div className="w-full max-w-5xl">
           <div className="mb-7 px-6 text-center">
-            <h1
-              className={cn(
-                "font-semibold text-2xl",
-                researchMode && "research-serif",
-              )}
-            >
+            <h1 className="font-semibold text-2xl">
               {researchMode ? "今天想研究什么？" : "今天要完成什么？"}
             </h1>
             <p className="mt-2 text-muted-foreground text-sm">
@@ -81,7 +75,7 @@ export function NewTaskWorkspace({
                 : "选择 Melody 可以访问的工作目录，然后描述任务。"}
             </p>
           </div>
-          <div className="mx-auto mb-3 max-w-[calc(64rem-3rem)]">
+          <div className="mx-auto mb-3 w-full max-w-3xl px-4 sm:px-6">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -95,7 +89,10 @@ export function NewTaskWorkspace({
                   <ChevronDownIcon className="shrink-0 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[min(34rem,80vw)]">
+              <DropdownMenuContent
+                align="start"
+                className="w-[min(34rem,80vw)]"
+              >
                 <DropdownMenuLabel>工作目录</DropdownMenuLabel>
                 {projects.map((project) => (
                   <DropdownMenuItem
@@ -103,7 +100,9 @@ export function NewTaskWorkspace({
                     onSelect={() => onSelectProject(project)}
                   >
                     <FolderIcon />
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {project.name}
+                    </span>
                     {selectedProject?.id === project.id ? <CheckIcon /> : null}
                   </DropdownMenuItem>
                 ))}
@@ -116,7 +115,7 @@ export function NewTaskWorkspace({
             </DropdownMenu>
           </div>
           {children}
-          <p className="mt-1 px-6 text-center text-muted-foreground text-[11px]">
+          <p className="mt-1 px-6 text-center text-muted-foreground text-xs">
             {researchMode ? "新研究任务" : "新任务"}
             会在所选目录中运行；提交消息前不会创建会话。
           </p>

@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 
+import { toUserMessage } from "@/domain/app-error";
 import {
   getAgentStatus,
   isTauriRuntime,
+  readStoredSessionTimeline,
   startAgent,
   subscribeToAcp,
 } from "@/lib/melody-bridge";
@@ -61,25 +63,34 @@ export const useAgentBridge = (session?: SessionRecord) => {
             setStatus(running);
           }
         }
-        if (
-          !disposed &&
-          (running.phase === "running" || !isTauriRuntime())
-        ) {
+        if (!disposed && (running.phase === "running" || !isTauriRuntime())) {
+          let archiveReadFailed = false;
+          let archivedTimelineJson: string | undefined;
+          try {
+            archivedTimelineJson = await readStoredSessionTimeline(sessionId);
+          } catch {
+            // A corrupt or incomplete archive must never leave the old cursor
+            // looking trustworthy. The session loader will request a replay.
+            archiveReadFailed = true;
+          }
+          if (disposed) {
+            return;
+          }
           await beginSession(
             sessionCwd,
             sessionId,
             sessionAcpId,
             currentSession.timelineJson,
             currentSession.acpCursor,
-            currentSession.timelineVersion,
+            archiveReadFailed ? 0 : currentSession.timelineVersion,
+            archivedTimelineJson,
           );
         }
       } catch (reason) {
         if (!disposed) {
           setStatus({
             phase: "failed",
-            message:
-              reason instanceof Error ? reason.message : String(reason),
+            message: toUserMessage(reason, "Agent 连接失败，请稍后重试。"),
           });
         }
       }

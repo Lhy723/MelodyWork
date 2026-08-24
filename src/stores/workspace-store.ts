@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { toUserMessage } from "@/domain/app-error";
 import type { ProjectRecord, SessionRecord } from "@/domain/workspace";
 import {
   createStoredSession,
@@ -23,14 +24,13 @@ interface WorkspaceStore {
   addProject: () => Promise<ProjectRecord | undefined>;
   chooseProject: () => Promise<void>;
   selectProject: (project: ProjectRecord) => Promise<void>;
-  createSession: (project?: ProjectRecord) => Promise<void>;
+  createSession: (
+    project?: ProjectRecord,
+  ) => Promise<SessionRecord | undefined>;
   deleteSession: (session: SessionRecord) => Promise<void>;
   selectSession: (session: SessionRecord) => void;
   replaceSession: (session: SessionRecord) => void;
 }
-
-const messageFrom = (reason: unknown) =>
-  reason instanceof Error ? reason.message : String(reason);
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   projects: [],
@@ -53,10 +53,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         projects = [await upsertProject(path)];
       }
       const sessionEntries = await Promise.all(
-        projects.map(async (project) => [
-          project.id,
-          await listStoredSessions(project.id),
-        ] as const),
+        projects.map(
+          async (project) =>
+            [project.id, await listStoredSessions(project.id)] as const,
+        ),
       );
       set({
         projects,
@@ -64,7 +64,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       });
       await get().selectProject(projects[0]);
     } catch (reason) {
-      set({ error: messageFrom(reason), loading: false });
+      set({ error: toUserMessage(reason), loading: false });
     }
   },
   addProject: async () => {
@@ -83,7 +83,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }));
       return project;
     } catch (reason) {
-      set({ error: messageFrom(reason) });
+      set({ error: toUserMessage(reason) });
       return undefined;
     }
   },
@@ -102,7 +102,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       set({ projects });
       await get().selectProject(project);
     } catch (reason) {
-      set({ error: messageFrom(reason), loading: false });
+      set({ error: toUserMessage(reason), loading: false });
     }
   },
   selectProject: async (project) => {
@@ -132,7 +132,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         loading: false,
       }));
     } catch (reason) {
-      set({ error: messageFrom(reason), loading: false });
+      set({ error: toUserMessage(reason), loading: false });
     }
   },
   createSession: async (requestedProject) => {
@@ -159,8 +159,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           loading: false,
         };
       });
+      return session;
     } catch (reason) {
-      set({ error: messageFrom(reason), loading: false });
+      set({ error: toUserMessage(reason), loading: false });
+      return undefined;
     }
   },
   deleteSession: async (session) => {
@@ -174,9 +176,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       await deleteStoredSession(session.id);
       const state = get();
-      let projectSessions = (
-        state.sessionsByProject[project.id] ?? []
-      ).filter((item) => item.id !== session.id);
+      let projectSessions = (state.sessionsByProject[project.id] ?? []).filter(
+        (item) => item.id !== session.id,
+      );
       let activeSession = state.activeSession;
       if (activeSession?.id === session.id) {
         if (projectSessions.length === 0) {
@@ -199,7 +201,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         loading: false,
       }));
     } catch (reason) {
-      set({ error: messageFrom(reason), loading: false });
+      set({ error: toUserMessage(reason), loading: false });
     }
   },
   selectSession: (session) =>
@@ -210,16 +212,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return {
         activeProject: project ?? state.activeProject,
         activeSession: session,
-        sessions:
-          state.sessionsByProject[session.projectId] ?? state.sessions,
+        sessions: state.sessionsByProject[session.projectId] ?? state.sessions,
       };
     }),
   replaceSession: (session) =>
     set((state) => ({
       activeSession:
-        state.activeSession?.id === session.id
-          ? session
-          : state.activeSession,
+        state.activeSession?.id === session.id ? session : state.activeSession,
       sessions: state.sessions.map((item) =>
         item.id === session.id ? session : item,
       ),

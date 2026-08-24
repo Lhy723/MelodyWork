@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { toUserMessage } from "@/domain/app-error";
 import type {
   ResearchNote,
   ResearchPaper,
@@ -128,11 +129,11 @@ const parseProjectBackup = (value: unknown): Partial<ResearchProjectState> => {
   return {
     papers: (source.papers as ResearchProjectState["papers"] | undefined) ?? [],
     searchHistory:
-      (source.searchHistory as ResearchProjectState["searchHistory"] | undefined) ??
-      [],
+      (source.searchHistory as
+        ResearchProjectState["searchHistory"] | undefined) ?? [],
     trackingTopics:
-      (source.trackingTopics as ResearchProjectState["trackingTopics"] | undefined) ??
-      [],
+      (source.trackingTopics as
+        ResearchProjectState["trackingTopics"] | undefined) ?? [],
     notes: (source.notes as ResearchProjectState["notes"] | undefined) ?? [],
     tasks: (source.tasks as ResearchProjectState["tasks"] | undefined) ?? [],
     inbox: isRecord(source.inbox)
@@ -198,14 +199,16 @@ function ActivityRow({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-sm">{item.title}</span>
-          <span className="text-muted-foreground text-[10px]">{item.label}</span>
+          <span className="text-muted-foreground text-[10px]">
+            {item.label}
+          </span>
         </div>
         {editing && item.kind === "note" ? (
           <div className="mt-2 space-y-2">
             <Textarea
               aria-label="编辑研究记录"
               autoFocus
-              className="min-h-20 text-[13px] leading-6"
+              className="min-h-20 text-sm leading-6"
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -241,8 +244,8 @@ function ActivityRow({
           <p
             className={
               item.completed
-                ? "research-serif mt-1 whitespace-pre-wrap text-[13px] text-muted-foreground leading-6 line-through"
-                : "research-serif mt-1 whitespace-pre-wrap text-[13px] text-muted-foreground leading-6"
+                ? "research-serif mt-1 whitespace-pre-wrap text-sm text-muted-foreground leading-6 line-through"
+                : "research-serif mt-1 whitespace-pre-wrap text-sm text-muted-foreground leading-6"
             }
           >
             {item.body}
@@ -252,7 +255,8 @@ function ActivityRow({
           <button
             className="mt-2 flex max-w-full items-center gap-1.5 text-left text-primary text-xs hover:underline"
             onClick={() => {
-              if (item.linkedPaper && onOpenPaper) onOpenPaper(item.linkedPaper);
+              if (item.linkedPaper && onOpenPaper)
+                onOpenPaper(item.linkedPaper);
               else onNavigate("library");
             }}
             type="button"
@@ -290,7 +294,8 @@ function ActivityRow({
           aria-label="打开活动来源"
           className="mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
           onClick={() => {
-            if (item.kind === "paper" && item.linkedPaper && onOpenPaper) onOpenPaper(item.linkedPaper);
+            if (item.kind === "paper" && item.linkedPaper && onOpenPaper)
+              onOpenPaper(item.linkedPaper);
             else if (item.kind === "paper") onNavigate("library");
             if (item.kind === "search") onNavigate("search");
             if (item.kind === "tracking") onNavigate("tracking");
@@ -329,7 +334,9 @@ function ProgressRail({
   );
   const [taskDraft, setTaskDraft] = useState("");
   const completed = tasks.filter((task) => task.completed).length;
-  const progress = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+  const progress = tasks.length
+    ? Math.round((completed / tasks.length) * 100)
+    : 0;
   const pendingTasks = tasks.filter((task) => !task.completed).slice(0, 6);
   const recentPapers = papers
     .filter((paper) => paper.saved)
@@ -362,14 +369,16 @@ function ProgressRail({
           </div>
           <div className="pl-3">
             <p className="text-muted-foreground text-[11px]">进行中</p>
-            <p className="research-serif mt-1 text-2xl">{tasks.length - completed}</p>
+            <p className="research-serif mt-1 text-2xl">
+              {tasks.length - completed}
+            </p>
           </div>
         </div>
         <div className="mt-4">
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-primary transition-[width]"
-              style={{ width: `${progress}%` }}
+              className="h-full origin-left rounded-full bg-primary transition-transform"
+              style={{ transform: `scaleX(${progress / 100})` }}
             />
           </div>
           <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
@@ -387,7 +396,10 @@ function ProgressRail({
         <div className="mt-3 space-y-1">
           {pendingTasks.length ? (
             pendingTasks.map((task) => (
-              <div className="group flex items-start gap-2 py-1.5" key={task.id}>
+              <div
+                className="group flex items-start gap-2 py-1.5"
+                key={task.id}
+              >
                 <button
                   aria-label={`完成任务：${task.title}`}
                   className="mt-0.5 text-muted-foreground hover:text-primary"
@@ -396,10 +408,12 @@ function ProgressRail({
                 >
                   <CircleIcon className="size-4" />
                 </button>
-                <span className="min-w-0 flex-1 text-xs leading-5">{task.title}</span>
+                <span className="min-w-0 flex-1 text-xs leading-5">
+                  {task.title}
+                </span>
                 <button
                   aria-label={`删除任务：${task.title}`}
-                  className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:relative focus-visible:z-10 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring hover:text-destructive"
                   onClick={() => removeResearchTask(task.id)}
                   type="button"
                 >
@@ -413,7 +427,7 @@ function ProgressRail({
             </p>
           )}
         </div>
-        <div className="mt-3 flex items-center gap-2 border-t pt-3">
+        <div className="mt-3 flex items-center gap-2 rounded-md border-t px-1 pt-3 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
           <input
             aria-label="添加研究任务"
             className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
@@ -442,7 +456,7 @@ function ProgressRail({
               .slice(0, 3)
               .map((task) => (
                 <button
-                  className="flex w-full items-start gap-2 py-1 text-left text-muted-foreground text-xs line-through"
+                  className="flex w-full items-start gap-2 rounded-md py-1 text-left text-muted-foreground text-xs line-through focus-visible:ring-2 focus-visible:ring-ring"
                   key={task.id}
                   onClick={() => toggleResearchTask(task.id, false)}
                   type="button"
@@ -482,7 +496,8 @@ function ProgressRail({
                   {paper.title}
                 </p>
                 <p className="mt-1 text-muted-foreground text-[10px]">
-                  {paper.venue || paper.sources[0] || "来源未收录"} · {formatRelative(paper.addedAt)}
+                  {paper.venue || paper.sources[0] || "来源未收录"} ·{" "}
+                  {formatRelative(paper.addedAt)}
                 </p>
               </button>
             ))}
@@ -611,8 +626,12 @@ export function ResearchOverviewWorkspace({
   const inbox = useResearchStore((state) => state.inbox);
   const addResearchNote = useResearchStore((state) => state.addResearchNote);
   const addResearchTask = useResearchStore((state) => state.addResearchTask);
-  const updateResearchNote = useResearchStore((state) => state.updateResearchNote);
-  const removeResearchNote = useResearchStore((state) => state.removeResearchNote);
+  const updateResearchNote = useResearchStore(
+    (state) => state.updateResearchNote,
+  );
+  const removeResearchNote = useResearchStore(
+    (state) => state.removeResearchNote,
+  );
   const replaceActiveProject = useResearchStore(
     (state) => state.replaceActiveProject,
   );
@@ -621,7 +640,8 @@ export function ResearchOverviewWorkspace({
   const [activityQuery, setActivityQuery] = useState("");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [pendingDeleteNote, setPendingDeleteNote] = useState<string>();
-  const [pendingImport, setPendingImport] = useState<Partial<ResearchProjectState>>();
+  const [pendingImport, setPendingImport] =
+    useState<Partial<ResearchProjectState>>();
   const [pendingImportName, setPendingImportName] = useState("");
   const [syncNotice, setSyncNotice] = useState<string>();
   const [syncError, setSyncError] = useState<string>();
@@ -633,7 +653,8 @@ export function ResearchOverviewWorkspace({
   const filteredActivities = useMemo(() => {
     const normalizedQuery = activityQuery.trim().toLocaleLowerCase();
     return activities.filter((item) => {
-      if (activityFilter !== "all" && item.kind !== activityFilter) return false;
+      if (activityFilter !== "all" && item.kind !== activityFilter)
+        return false;
       if (!normalizedQuery) return true;
       return [item.title, item.body, item.label, item.linkedPaper?.title]
         .filter(Boolean)
@@ -686,9 +707,7 @@ export function ResearchOverviewWorkspace({
     setSyncNotice("已导出当前项目的研究记录和文献数据。");
   };
 
-  const handleImportFile = async (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -700,7 +719,7 @@ export function ResearchOverviewWorkspace({
       setSyncNotice(undefined);
     } catch (reason) {
       setSyncNotice(undefined);
-      setSyncError(reason instanceof Error ? reason.message : "无法读取备份文件。");
+      setSyncError(toUserMessage(reason, "无法读取备份文件。"));
     }
   };
 
@@ -715,17 +734,27 @@ export function ResearchOverviewWorkspace({
 
   return (
     <div className="flex size-full min-h-0 flex-col overflow-y-auto bg-background">
-      <header className="flex shrink-0 items-start gap-4 border-b px-6 py-5">
+      <header className="flex shrink-0 flex-wrap items-start gap-4 border-b px-6 py-5">
         <div className="min-w-0 flex-1">
-          <h1 className="research-serif font-semibold text-3xl tracking-tight">研究总览</h1>
+          <h1 className="research-serif font-semibold text-3xl tracking-tight">
+            研究总览
+          </h1>
           <ProjectContext projectName={projectName} />
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          <Button onClick={() => onNavigate("inbox")} size="sm" variant="outline">
+        <div className="flex w-full shrink-0 flex-wrap justify-start gap-2 sm:w-auto sm:justify-end">
+          <Button
+            onClick={() => onNavigate("inbox")}
+            size="sm"
+            variant="outline"
+          >
             <InboxIcon />
             查看收件箱
           </Button>
-          <Button onClick={() => onNavigate("search")} size="sm" variant="outline">
+          <Button
+            onClick={() => onNavigate("search")}
+            size="sm"
+            variant="outline"
+          >
             <SearchIcon />
             继续检索
           </Button>
@@ -742,7 +771,9 @@ export function ResearchOverviewWorkspace({
                 导出当前项目
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => importInputRef.current?.click()}>
+              <DropdownMenuItem
+                onSelect={() => importInputRef.current?.click()}
+              >
                 <UploadIcon />
                 导入项目备份
               </DropdownMenuItem>
@@ -759,11 +790,19 @@ export function ResearchOverviewWorkspace({
       </header>
 
       {syncError ? (
-        <div className="border-b bg-destructive/8 px-6 py-2 text-destructive text-xs">
+        <div
+          aria-live="assertive"
+          className="border-b bg-destructive/8 px-6 py-2 text-destructive text-xs"
+          role="alert"
+        >
           {syncError}
         </div>
       ) : syncNotice ? (
-        <div className="border-b bg-emerald-500/8 px-6 py-2 text-emerald-700 text-xs dark:text-emerald-300">
+        <div
+          aria-live="polite"
+          className="border-b bg-emerald-500/8 px-6 py-2 text-emerald-700 text-xs dark:text-emerald-300"
+          role="status"
+        >
           {syncNotice}
         </div>
       ) : null}
@@ -774,6 +813,7 @@ export function ResearchOverviewWorkspace({
             <div className="flex items-center gap-2 border-b px-4 py-2.5 text-xs">
               <PenLineIcon className="size-3.5 text-muted-foreground" />
               <button
+                aria-pressed={captureMode === "note"}
                 className={cnCapture(captureMode === "note")}
                 onClick={() => setCaptureMode("note")}
                 type="button"
@@ -781,16 +821,21 @@ export function ResearchOverviewWorkspace({
                 记录
               </button>
               <button
+                aria-pressed={captureMode === "task"}
                 className={cnCapture(captureMode === "task")}
                 onClick={() => setCaptureMode("task")}
                 type="button"
               >
                 研究任务
               </button>
-              <span className="ml-auto text-muted-foreground text-[10px]">⌘ ↵ 快速保存</span>
+              <span className="ml-auto text-muted-foreground text-[10px]">
+                ⌘ ↵ 快速保存
+              </span>
             </div>
             <Textarea
-              aria-label={captureMode === "note" ? "记录研究内容" : "记录研究任务"}
+              aria-label={
+                captureMode === "note" ? "记录研究内容" : "记录研究任务"
+              }
               className="min-h-28 resize-none rounded-none border-0 bg-transparent px-4 py-3 text-sm leading-6 shadow-none focus-visible:ring-0"
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -810,7 +855,11 @@ export function ResearchOverviewWorkspace({
               <span className="text-muted-foreground text-[11px]">
                 支持 Markdown · 内容保存在当前项目
               </span>
-              <Button disabled={!draft.trim()} onClick={submitCapture} size="sm">
+              <Button
+                disabled={!draft.trim()}
+                onClick={submitCapture}
+                size="sm"
+              >
                 <PlusIcon />
                 {captureMode === "note" ? "保存记录" : "添加任务"}
               </Button>
@@ -907,7 +956,9 @@ export function ResearchOverviewWorkspace({
           ) : (
             <div className="border-b py-14 text-center">
               <PenLineIcon className="mx-auto size-6 text-muted-foreground" />
-              <h3 className="research-serif mt-3 font-semibold text-lg">从一条研究记录开始</h3>
+              <h3 className="research-serif mt-3 font-semibold text-lg">
+                从一条研究记录开始
+              </h3>
               <p className="mx-auto mt-1 max-w-md text-muted-foreground text-xs leading-5">
                 先写下当前的想法、读论文后的判断或下一步实验；之后所有研究活动都会在这里形成连续脉络。
               </p>
@@ -916,7 +967,11 @@ export function ResearchOverviewWorkspace({
                   <PenLineIcon />
                   开始记录
                 </Button>
-                <Button onClick={() => onNavigate("search")} size="sm" variant="outline">
+                <Button
+                  onClick={() => onNavigate("search")}
+                  size="sm"
+                  variant="outline"
+                >
                   <SearchIcon />
                   从检索开始
                 </Button>
@@ -948,7 +1003,10 @@ export function ResearchOverviewWorkspace({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={() => setPendingDeleteNote(undefined)} variant="outline">
+            <Button
+              onClick={() => setPendingDeleteNote(undefined)}
+              variant="outline"
+            >
               取消
             </Button>
             <Button
@@ -977,7 +1035,8 @@ export function ResearchOverviewWorkspace({
           <DialogHeader>
             <DialogTitle>导入研究数据？</DialogTitle>
             <DialogDescription>
-              将使用“{pendingImportName}”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。
+              将使用“{pendingImportName}
+              ”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

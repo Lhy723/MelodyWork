@@ -39,7 +39,7 @@ export function WindowNavigationControls({
     >
       <Button
         aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
-        className="text-muted-foreground hover:text-[#3a3b3c]"
+        className="text-muted-foreground hover:text-foreground"
         onClick={onToggleSidebar}
         size="icon"
         title={collapsed ? "展开侧边栏" : "收起侧边栏"}
@@ -53,7 +53,7 @@ export function WindowNavigationControls({
       </Button>
       <Button
         aria-label="返回上一个任务"
-        className="text-muted-foreground hover:text-[#3a3b3c]"
+        className="text-muted-foreground hover:text-foreground"
         disabled={!canGoBack}
         onClick={onGoBack}
         size="icon"
@@ -68,7 +68,7 @@ export function WindowNavigationControls({
       </Button>
       <Button
         aria-label="前往下一个任务"
-        className="text-muted-foreground hover:text-[#3a3b3c]"
+        className="text-muted-foreground hover:text-foreground"
         disabled={!canGoForward}
         onClick={onGoForward}
         size="icon"

@@ -11,7 +11,7 @@ import {
   Trash2Icon,
   WebhookIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import type {
   PluginComponentGroup,
   PluginDetails,
 } from "@/domain/config";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
 import {
   getMelodyPluginDetails,
   uninstallMelodyPlugin,
@@ -60,40 +61,34 @@ export function PluginDetailsView({
   onDeleted,
 }: PluginDetailsViewProps) {
   const [details, setDetails] = useState<PluginDetails>();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string>();
+  const { state: loadingState, run: runLoad } = useAsyncOperation();
+  const {
+    state: deleteState,
+    reset: resetDelete,
+    run: runDelete,
+  } = useAsyncOperation();
+  const loading = loadingState.phase === "pending";
+  const error = loadingState.error;
+  const deleting = deleteState.phase === "pending";
+  const deleteError = deleteState.error;
 
-  const load = async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      setDetails(await getMelodyPluginDetails(cwd, plugin));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const load = useCallback(() => {
+    void runLoad(() => getMelodyPluginDetails(cwd, plugin), setDetails).catch(
+      () => undefined,
+    );
+  }, [cwd, plugin, runLoad]);
 
   useEffect(() => {
     void load();
-  }, [cwd, plugin.name, plugin.path]);
+  }, [load]);
 
-  const remove = async () => {
-    setDeleting(true);
-    setDeleteError(undefined);
-    try {
+  const remove = () => {
+    void runDelete(async () => {
       await uninstallMelodyPlugin(cwd, plugin.name);
       setDeleteOpen(false);
       await onDeleted();
-    } catch (reason) {
-      setDeleteError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setDeleting(false);
-    }
+    }).catch(() => undefined);
   };
 
   return (
@@ -135,7 +130,7 @@ export function PluginDetailsView({
         {plugin.managed ? (
           <Button
             onClick={() => {
-              setDeleteError(undefined);
+              resetDelete();
               setDeleteOpen(true);
             }}
             size="sm"
@@ -148,7 +143,11 @@ export function PluginDetailsView({
       </div>
 
       {error ? (
-        <p className="mt-5 rounded-xl bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        <p
+          aria-live="assertive"
+          className="mt-5 rounded-xl bg-destructive/5 px-4 py-3 text-destructive text-sm"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -258,11 +257,16 @@ export function PluginDetailsView({
           <DialogHeader>
             <DialogTitle>删除“{plugin.name}”？</DialogTitle>
             <DialogDescription>
-              这会从 Melody 的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。
+              这会从 Melody
+              的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。
             </DialogDescription>
           </DialogHeader>
           {deleteError ? (
-            <p className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs">
+            <p
+              aria-live="assertive"
+              className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+              role="alert"
+            >
               {deleteError}
             </p>
           ) : null}

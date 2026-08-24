@@ -8,18 +8,18 @@ import {
   PresentationIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { strFromU8, unzipSync, type Unzipped } from "fflate";
-import { loader } from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
 
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
+import { toUserMessage } from "@/domain/app-error";
 import {
   readWorkspaceBinaryFile,
   readWorkspaceFile,
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 import {
   languageFor,
   mimeTypeFor,
@@ -28,9 +28,7 @@ import {
   spreadsheetColumnLabel,
   type PreviewKind,
 } from "@/features/files/file-preview-utils";
-
-const MonacoEditor = lazy(() => import("@monaco-editor/react"));
-loader.config({ monaco });
+import { MonacoEditor } from "@/features/files/monaco-editor";
 
 const kindLabel: Record<PreviewKind, string> = {
   audio: "音频",
@@ -94,14 +92,10 @@ const elementsByLocalName = (root: ParentNode, name: string) =>
   );
 
 type WordBlock =
-  | { kind: "paragraph"; text: string }
-  | { kind: "table"; rows: string[][] };
+  { kind: "paragraph"; text: string } | { kind: "table"; rows: string[][] };
 
 const parseDocx = (buffer: ArrayBuffer): WordBlock[] => {
-  const archive = unzipOffice(
-    buffer,
-    (path) => path === "word/document.xml",
-  );
+  const archive = unzipOffice(buffer, (path) => path === "word/document.xml");
   const document = xml(zipText(archive, "word/document.xml"));
   const body = elementsByLocalName(document, "body")[0];
   if (!body) return [];
@@ -146,9 +140,7 @@ const parseXlsx = (buffer: ArrayBuffer): WorkbookSheet[] => {
       /^xl\/worksheets\/[^/]+\.xml$/.test(path),
   );
   const workbook = xml(zipText(archive, "xl/workbook.xml"));
-  const relationships = xml(
-    zipText(archive, "xl/_rels/workbook.xml.rels"),
-  );
+  const relationships = xml(zipText(archive, "xl/_rels/workbook.xml.rels"));
   const relationshipTargets = new Map(
     elementsByLocalName(relationships, "Relationship").map((node) => [
       node.getAttribute("Id") ?? "",
@@ -198,7 +190,7 @@ const parseXlsx = (buffer: ArrayBuffer): WorkbookSheet[] => {
           const raw = valueNode?.textContent ?? inlineValue;
           values[column] =
             cell.getAttribute("t") === "s"
-              ? sharedStrings[Number(raw)] ?? raw
+              ? (sharedStrings[Number(raw)] ?? raw)
               : raw;
         }
         return values;
@@ -216,9 +208,8 @@ interface PresentationSlide {
 }
 
 const parsePptx = (buffer: ArrayBuffer): PresentationSlide[] => {
-  const archive = unzipOffice(
-    buffer,
-    (path) => /^ppt\/slides\/slide\d+\.xml$/.test(path),
+  const archive = unzipOffice(buffer, (path) =>
+    /^ppt\/slides\/slide\d+\.xml$/.test(path),
   );
   return Object.keys(archive)
     .map((path) => ({
@@ -242,6 +233,8 @@ const parsePptx = (buffer: ArrayBuffer): PresentationSlide[] => {
 };
 
 function SourcePreview({ content, path }: { content: string; path: string }) {
+  const codeFont = useAppSettingsStore((state) => state.codeFont);
+  const codeFontSize = useAppSettingsStore((state) => state.codeFontSize);
   const editorTheme =
     typeof document !== "undefined" &&
     document.documentElement.classList.contains("dark")
@@ -258,9 +251,8 @@ function SourcePreview({ content, path }: { content: string; path: string }) {
         language={languageFor(path)}
         loading="正在加载预览…"
         options={{
-          fontFamily:
-            '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-          fontSize: 12,
+          fontFamily: codeFont,
+          fontSize: codeFontSize,
           lineNumbersMinChars: 3,
           minimap: { enabled: false },
           padding: { top: 12 },
@@ -283,7 +275,7 @@ function WordPreview({ buffer }: { buffer: ArrayBuffer }) {
       return { blocks: parseDocx(buffer) };
     } catch (reason) {
       return {
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: toUserMessage(reason),
       };
     }
   }, [buffer]);
@@ -308,7 +300,10 @@ function WordPreview({ buffer }: { buffer: ArrayBuffer }) {
                     {block.rows.map((row, rowIndex) => (
                       <tr key={rowIndex}>
                         {row.map((cell, cellIndex) => (
-                          <td className="border px-3 py-2 align-top" key={cellIndex}>
+                          <td
+                            className="border px-3 py-2 align-top"
+                            key={cellIndex}
+                          >
                             {cell}
                           </td>
                         ))}
@@ -333,7 +328,7 @@ function SpreadsheetPreview({ buffer }: { buffer: ArrayBuffer }) {
       return { sheets: parseXlsx(buffer) };
     } catch (reason) {
       return {
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: toUserMessage(reason),
       };
     }
   }, [buffer]);
@@ -342,7 +337,10 @@ function SpreadsheetPreview({ buffer }: { buffer: ArrayBuffer }) {
   if (result.error) return <PreviewError message={result.error} />;
 
   const sheet = result.sheets?.[activeSheet];
-  const columnCount = Math.max(0, ...(sheet?.rows.map((row) => row.length) ?? []));
+  const columnCount = Math.max(
+    0,
+    ...(sheet?.rows.map((row) => row.length) ?? []),
+  );
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b bg-muted/20 px-2">
@@ -365,7 +363,10 @@ function SpreadsheetPreview({ buffer }: { buffer: ArrayBuffer }) {
               <tr>
                 <th className="sticky left-0 z-20 min-w-10 border-r border-b px-2 py-1.5" />
                 {Array.from({ length: columnCount }, (_, index) => (
-                  <th className="min-w-28 border-r border-b px-3 py-1.5 font-medium" key={index}>
+                  <th
+                    className="min-w-28 border-r border-b px-3 py-1.5 font-medium"
+                    key={index}
+                  >
                     {spreadsheetColumnLabel(index)}
                   </th>
                 ))}
@@ -403,7 +404,7 @@ function PresentationPreview({ buffer }: { buffer: ArrayBuffer }) {
       return { slides: parsePptx(buffer) };
     } catch (reason) {
       return {
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: toUserMessage(reason),
       };
     }
   }, [buffer]);
@@ -418,7 +419,7 @@ function PresentationPreview({ buffer }: { buffer: ArrayBuffer }) {
               className="relative aspect-video overflow-hidden border bg-background p-[7%] shadow-sm"
               key={slide.number}
             >
-              <span className="absolute right-3 bottom-2 text-muted-foreground text-[10px]">
+              <span className="absolute right-3 bottom-2 text-muted-foreground text-xs">
                 {slide.number}
               </span>
               <div className="flex h-full flex-col justify-center">
@@ -446,11 +447,17 @@ function PresentationPreview({ buffer }: { buffer: ArrayBuffer }) {
 
 function PreviewError({ message }: { message: string }) {
   return (
-    <div className="grid h-full place-items-center p-8 text-center">
+    <div
+      aria-live="assertive"
+      className="grid h-full place-items-center p-8 text-center"
+      role="alert"
+    >
       <div className="max-w-sm">
         <FileTextIcon className="mx-auto mb-3 size-6 text-muted-foreground" />
         <p className="font-medium text-sm">无法预览此文件</p>
-        <p className="mt-1 text-muted-foreground text-xs leading-5">{message}</p>
+        <p className="mt-1 text-muted-foreground text-xs leading-5">
+          {message}
+        </p>
       </div>
     </div>
   );
@@ -507,7 +514,12 @@ function BinaryPreview({
   if (kind === "video") {
     return (
       <div className="grid h-full place-items-center bg-black p-4">
-        <video className="max-h-full max-w-full" controls preload="metadata" src={objectUrl}>
+        <video
+          className="max-h-full max-w-full"
+          controls
+          preload="metadata"
+          src={objectUrl}
+        >
           <track kind="captions" />
         </video>
       </div>
@@ -519,7 +531,12 @@ function BinaryPreview({
         <div className="w-full max-w-md text-center">
           <FileAudioIcon className="mx-auto mb-5 size-12 text-muted-foreground" />
           <p className="mb-5 truncate text-sm">{path.split("/").at(-1)}</p>
-          <audio className="w-full" controls preload="metadata" src={objectUrl} />
+          <audio
+            className="w-full"
+            controls
+            preload="metadata"
+            src={objectUrl}
+          />
         </div>
       </div>
     );
@@ -567,7 +584,7 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
     void request
       .catch((reason) => {
         if (active) {
-          setError(reason instanceof Error ? reason.message : String(reason));
+          setError(toUserMessage(reason));
         }
       })
       .finally(() => {
@@ -585,13 +602,11 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
         <span className="min-w-0 flex-1 truncate text-xs" title={path}>
           {path}
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          {kindLabel[kind]}
-        </span>
+        <span className="text-muted-foreground text-xs">{kindLabel[kind]}</span>
         {kind === "markdown" || kind === "html" ? (
           <div className="flex items-center rounded-md bg-muted p-0.5">
             <Button
-              className="h-6 px-2 text-[10px]"
+              className="h-6 px-2 text-xs"
               onClick={() => setRendered(true)}
               size="sm"
               variant={rendered ? "secondary" : "ghost"}
@@ -599,7 +614,7 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
               预览
             </Button>
             <Button
-              className="h-6 px-2 text-[10px]"
+              className="h-6 px-2 text-xs"
               onClick={() => setRendered(false)}
               size="sm"
               variant={rendered ? "ghost" : "secondary"}

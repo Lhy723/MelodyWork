@@ -26,8 +26,7 @@ const childText = (children: ReactNode) =>
     : undefined;
 
 const referenceLabel = (reference: ProjectReference) => {
-  const ReferenceIcon =
-    reference.kind === "folder" ? FolderIcon : FileIcon;
+  const ReferenceIcon = reference.kind === "folder" ? FolderIcon : FileIcon;
   return (
     <>
       <ReferenceIcon aria-hidden className="size-3" />
@@ -42,11 +41,11 @@ export function ProjectInlineCitation({
   children,
   className,
   cwd,
-  node: _node,
   onOpenReference,
   projectRoot,
   ...props
 }: ProjectInlineCitationProps & { node?: unknown }) {
+  Reflect.deleteProperty(props, "node");
   const text = childText(children);
   const reference = text
     ? resolveProjectReference(text, projectRoot, cwd)

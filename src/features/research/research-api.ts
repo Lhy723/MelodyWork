@@ -4,14 +4,14 @@ import type {
   ResearchSource,
   ResearchVerificationEvidence,
 } from "@/domain/research";
+import { ResearchSourceClient } from "@/domain/research-source-adapter";
 import { fetchResearchResource } from "@/lib/melody-bridge";
 
 const CROSSREF_API = "https://api.crossref.org";
 const OPENALEX_API = "https://api.openalex.org";
 const ARXIV_API = "https://export.arxiv.org";
 const PUBMED_API = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
-const SEMANTIC_SCHOLAR_API =
-  "https://api.semanticscholar.org/graph/v1";
+const SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1";
 
 export const RESEARCH_SEARCH_SOURCES: ResearchSource[] = [
   "Crossref",
@@ -27,6 +27,19 @@ export const DEFAULT_RESEARCH_SEARCH_SOURCES: ResearchSource[] = [
   "PubMed",
 ];
 
+const researchSourceClient = new ResearchSourceClient();
+
+const fetchSourceResource = (
+  source: ResearchSource,
+  url: string,
+  accept?: string,
+) =>
+  researchSourceClient.fetch(
+    source,
+    `${source}:${accept ?? ""}:${url}`,
+    (signal) => fetchResearchResource(url, accept, signal),
+  );
+
 const cleanDoi = (value?: string | null) =>
   value
     ?.trim()
@@ -34,10 +47,18 @@ const cleanDoi = (value?: string | null) =>
     .toLowerCase();
 
 const text = (value: unknown) =>
-  typeof value === "string" ? value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
+  typeof value === "string"
+    ? value
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    : "";
 
 const titleKey = (title: string) =>
-  title.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  title
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 
 const recordIdForPaper = (paper: ResearchPaper) =>
   paper.id.replace(/^(?:doi|arxiv|pubmed|semantic-scholar):/i, "");
@@ -92,9 +113,10 @@ export const mergeResearchPapers = (
       ...current,
       ...paper,
       abstract: current.abstract || paper.abstract,
-      authors: current.authors.length >= paper.authors.length
-        ? current.authors
-        : paper.authors,
+      authors:
+        current.authors.length >= paper.authors.length
+          ? current.authors
+          : paper.authors,
       doi: current.doi || paper.doi,
       pdfUrl: current.pdfUrl || paper.pdfUrl,
       url: current.url || paper.url,
@@ -114,22 +136,24 @@ export const mergeResearchPapers = (
       addedAt: Math.min(current.addedAt, paper.addedAt),
     });
   }
-  return Array.from(merged.values()).sort(
-    (left, right) =>
-      (right.year ?? 0) - (left.year ?? 0) ||
-      (right.citationCount ?? 0) - (left.citationCount ?? 0),
-  ).map((paper) => ({
-    ...paper,
-    verification: {
-      status: paper.verified ? "verified" : "single-source",
-      checkedAt: Date.now(),
-      matchedSources: paper.sources,
-      method: "cross-source-metadata-match",
-      evidence: mergeVerificationEvidence(
-        evidenceForPaper(paper, Date.now()),
-      ),
-    },
-  }));
+  return Array.from(merged.values())
+    .sort(
+      (left, right) =>
+        (right.year ?? 0) - (left.year ?? 0) ||
+        (right.citationCount ?? 0) - (left.citationCount ?? 0),
+    )
+    .map((paper) => ({
+      ...paper,
+      verification: {
+        status: paper.verified ? "verified" : "single-source",
+        checkedAt: Date.now(),
+        matchedSources: paper.sources,
+        method: "cross-source-metadata-match",
+        evidence: mergeVerificationEvidence(
+          evidenceForPaper(paper, Date.now()),
+        ),
+      },
+    }));
 };
 
 export const paperFromCrossref = (
@@ -146,10 +170,9 @@ export const paperFromCrossref = (
         return name ? [name] : [];
       })
     : [];
-  const dateParts =
-    (item.published as { "date-parts"?: number[][] } | undefined)?.[
-      "date-parts"
-    ]?.[0];
+  const dateParts = (
+    item.published as { "date-parts"?: number[][] } | undefined
+  )?.["date-parts"]?.[0];
   const resourceUrl =
     (item.URL as string | undefined) ??
     (doi ? `https://doi.org/${doi}` : undefined);
@@ -182,9 +205,8 @@ export const paperFromOpenAlex = (
   const doi = cleanDoi(item.doi as string | undefined);
   const authorships = Array.isArray(item.authorships) ? item.authorships : [];
   const authors = authorships.flatMap((authorship) => {
-    const name = (
-      authorship as { author?: { display_name?: unknown } }
-    ).author?.display_name;
+    const name = (authorship as { author?: { display_name?: unknown } }).author
+      ?.display_name;
     return typeof name === "string" ? [name] : [];
   });
   const primaryLocation = item.primary_location as
@@ -212,9 +234,7 @@ export const paperFromOpenAlex = (
     url: resourceUrl,
     pdfUrl: primaryLocation?.pdf_url ?? undefined,
     citationCount:
-      typeof item.cited_by_count === "number"
-        ? item.cited_by_count
-        : undefined,
+      typeof item.cited_by_count === "number" ? item.cited_by_count : undefined,
     sources: ["OpenAlex"],
     verified: false,
     saved: false,
@@ -261,9 +281,7 @@ export const paperFromSemanticScholar = (
     pdfUrl: openAccessPdf ? text(openAccessPdf.url) || undefined : undefined,
     abstract: text(item.abstract) || undefined,
     citationCount:
-      typeof item.citationCount === "number"
-        ? item.citationCount
-        : undefined,
+      typeof item.citationCount === "number" ? item.citationCount : undefined,
     sources: ["Semantic Scholar"],
     verified: false,
     saved: false,
@@ -271,14 +289,15 @@ export const paperFromSemanticScholar = (
   };
 };
 
-const fetchJson = async (url: string) => {
-  const body = await fetchResearchResource(url, "application/json");
+const fetchJson = async (source: ResearchSource, url: string) => {
+  const body = await fetchSourceResource(source, url, "application/json");
   return JSON.parse(body) as Record<string, unknown>;
 };
 
-const fetchXml = async (url: string) => {
+const fetchXml = async (source: ResearchSource, url: string) => {
   return new DOMParser().parseFromString(
-    await fetchResearchResource(
+    await fetchSourceResource(
+      source,
       url,
       "application/atom+xml, application/xml, text/xml",
     ),
@@ -291,7 +310,10 @@ const searchCrossref = async (query: string): Promise<ResearchPaper[]> => {
     "query.bibliographic": query,
     rows: "20",
   });
-  const payload = await fetchJson(`${CROSSREF_API}/works?${params}`);
+  const payload = await fetchJson(
+    "Crossref",
+    `${CROSSREF_API}/works?${params}`,
+  );
   const items = (payload.message as { items?: unknown[] } | undefined)?.items;
   return Array.isArray(items)
     ? items.flatMap((item) => {
@@ -303,7 +325,10 @@ const searchCrossref = async (query: string): Promise<ResearchPaper[]> => {
 
 const searchOpenAlex = async (query: string): Promise<ResearchPaper[]> => {
   const params = new URLSearchParams({ search: query, "per-page": "20" });
-  const payload = await fetchJson(`${OPENALEX_API}/works?${params}`);
+  const payload = await fetchJson(
+    "OpenAlex",
+    `${OPENALEX_API}/works?${params}`,
+  );
   const items = payload.results;
   return Array.isArray(items)
     ? items.flatMap((item) => {
@@ -339,8 +364,7 @@ const paperFromArxivEntry = (entry: Element): ResearchPaper | undefined => {
     venue: "arXiv",
     doi,
     url: entryUrl || `https://arxiv.org/abs/${id}`,
-    pdfUrl:
-      pdfLink?.getAttribute("href") ?? `https://arxiv.org/pdf/${id}.pdf`,
+    pdfUrl: pdfLink?.getAttribute("href") ?? `https://arxiv.org/pdf/${id}.pdf`,
     abstract: text(entry.querySelector("summary")?.textContent) || undefined,
     sources: ["arXiv"],
     verified: false,
@@ -357,7 +381,7 @@ const searchArxiv = async (query: string): Promise<ResearchPaper[]> => {
     sortBy: "relevance",
     sortOrder: "descending",
   });
-  const document = await fetchXml(`${ARXIV_API}/api/query?${params}`);
+  const document = await fetchXml("arXiv", `${ARXIV_API}/api/query?${params}`);
   return Array.from(document.querySelectorAll("entry")).flatMap((entry) => {
     const paper = paperFromArxivEntry(entry);
     return paper ? [paper] : [];
@@ -374,13 +398,12 @@ const searchSemanticScholar = async (
       "title,authors,year,venue,externalIds,url,openAccessPdf,citationCount,abstract",
   });
   const payload = await fetchJson(
+    "Semantic Scholar",
     `${SEMANTIC_SCHOLAR_API}/paper/search?${params}`,
   );
   return Array.isArray(payload.data)
     ? payload.data.flatMap((item) => {
-        const paper = paperFromSemanticScholar(
-          item as Record<string, unknown>,
-        );
+        const paper = paperFromSemanticScholar(item as Record<string, unknown>);
         return paper ? [paper] : [];
       })
     : [];
@@ -453,11 +476,11 @@ const searchPubMed = async (query: string): Promise<ResearchPaper[]> => {
     sort: "relevance",
   });
   const searchPayload = await fetchJson(
+    "PubMed",
     `${PUBMED_API}/esearch.fcgi?${searchParams}`,
   );
-  const ids = (
-    searchPayload.esearchresult as { idlist?: unknown } | undefined
-  )?.idlist;
+  const ids = (searchPayload.esearchresult as { idlist?: unknown } | undefined)
+    ?.idlist;
   if (!Array.isArray(ids) || ids.length === 0) return [];
   const normalizedIds = ids.filter(
     (id): id is string => typeof id === "string",
@@ -469,6 +492,7 @@ const searchPubMed = async (query: string): Promise<ResearchPaper[]> => {
     retmode: "xml",
   });
   const document = await fetchXml(
+    "PubMed",
     `${PUBMED_API}/efetch.fcgi?${fetchParams}`,
   );
   return Array.from(document.querySelectorAll("PubmedArticle")).flatMap(
@@ -559,6 +583,7 @@ const extractDoi = (candidate: string) => {
 
 const crossrefByDoi = async (doi: string) => {
   const payload = await fetchJson(
+    "Crossref",
     `${CROSSREF_API}/works/${encodeURIComponent(doi)}`,
   );
   const message = payload.message;
@@ -569,6 +594,7 @@ const crossrefByDoi = async (doi: string) => {
 
 const openAlexByDoi = async (doi: string) => {
   const payload = await fetchJson(
+    "OpenAlex",
     `${OPENALEX_API}/works/${encodeURIComponent(`https://doi.org/${doi}`)}`,
   );
   return paperFromOpenAlex(payload);
@@ -579,7 +605,9 @@ export const verifyResearchPaper = async (
 ): Promise<ResearchPaper> => {
   const doi = cleanDoi(paper.doi);
   if (!doi) {
-    throw new Error("只有带 DOI 的论文可以执行跨来源核验。请先补充 DOI 或打开原文。");
+    throw new Error(
+      "只有带 DOI 的论文可以执行跨来源核验。请先补充 DOI 或打开原文。",
+    );
   }
   const attempts = await Promise.allSettled([
     crossrefByDoi(doi),
@@ -596,9 +624,12 @@ export const verifyResearchPaper = async (
 };
 
 const importArxiv = async (candidate: string): Promise<ResearchPaper> => {
-  const id = candidate.match(/(?:abs|pdf)\/([^?#/]+?)(?:\.pdf)?(?:[?#]|$)/i)?.[1];
+  const id = candidate.match(
+    /(?:abs|pdf)\/([^?#/]+?)(?:\.pdf)?(?:[?#]|$)/i,
+  )?.[1];
   if (!id) throw new Error("无法从链接中识别 arXiv ID。");
   const document = await fetchXml(
+    "arXiv",
     `${ARXIV_API}/api/query?id_list=${encodeURIComponent(id)}`,
   );
   const entry = document.querySelector("entry");

@@ -41,7 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
-  CornerDownLeftIcon,
+  ArrowUpIcon,
   ImageIcon,
   Monitor,
   PlusIcon,
@@ -863,7 +863,9 @@ export const PromptInput = ({
       try {
         // Convert blob URLs to data URLs asynchronously
         const convertedFiles: FileUIPart[] = await Promise.all(
-          files.map(async ({ id: _id, ...item }) => {
+          files.map(async (file) => {
+            const item = { ...file };
+            Reflect.deleteProperty(item, "id");
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
               // If conversion failed, keep the original blob URL
@@ -1236,10 +1238,15 @@ export const PromptInputSubmit = ({
   const shouldStop =
     isGenerating && !hasContent && attachments.files.length === 0;
 
-  const Icon = shouldStop ? (
-    <SquareIcon className="size-4" />
-  ) : (
-    <CornerDownLeftIcon className="size-4" />
+  const Icon = (
+    <span
+      aria-hidden="true"
+      className="prompt-input-submit-icon"
+      data-state={shouldStop ? "stop" : "send"}
+    >
+      <ArrowUpIcon className="prompt-input-submit-icon-send size-4" />
+      <SquareIcon className="prompt-input-submit-icon-stop size-3.5 fill-current" />
+    </span>
   );
 
   const handleClick = useCallback(
@@ -1257,7 +1264,8 @@ export const PromptInputSubmit = ({
   return (
     <InputGroupButton
       aria-label={shouldStop ? "停止" : "发送"}
-      className={cn(className)}
+      className={cn("prompt-input-submit", className)}
+      data-submit-state={shouldStop ? "stop" : "send"}
       onClick={handleClick}
       size={size}
       type={shouldStop && onStop ? "button" : "submit"}

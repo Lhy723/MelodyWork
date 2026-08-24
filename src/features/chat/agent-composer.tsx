@@ -183,7 +183,7 @@ const ModelProviderMark = ({ provider }: { provider: ModelProvider }) => (
   <span className="relative flex size-5 shrink-0 items-center justify-center">
     <BotIcon className="size-3.5 text-muted-foreground" />
     <ModelSelectorLogo
-      className="absolute size-4 rounded-sm bg-background"
+      className="absolute size-4 rounded-full bg-white p-px shadow-sm ring-1 ring-black/10"
       key={provider.id}
       onError={(event) => {
         event.currentTarget.hidden = true;
@@ -399,7 +399,7 @@ export function AgentComposer({
                             <span className="block font-medium text-sm leading-4">
                               {copy?.label ?? mode.name}
                             </span>
-                            <span className="block whitespace-normal text-[11px] text-muted-foreground leading-3.5">
+                            <span className="block whitespace-normal text-muted-foreground text-xs leading-4">
                               {copy?.description ??
                                 mode.description ??
                                 mode.name}
@@ -466,7 +466,7 @@ export function AgentComposer({
                           </span>
                           <span
                             className={cn(
-                              "block whitespace-normal text-[11px] text-muted-foreground leading-3.5",
+                              "block whitespace-normal text-muted-foreground text-xs leading-4",
                               mode.id === "always-approve" && "text-orange-600",
                             )}
                           >

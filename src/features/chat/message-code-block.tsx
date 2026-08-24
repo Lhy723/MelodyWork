@@ -55,15 +55,11 @@ const codeText = (children: ReactNode) =>
     : String(children ?? "");
 
 const requestedLanguage = (className?: string) =>
-  className
-    ?.match(/(?:^|\s)language-([^\s]+)/u)?.[1]
-    ?.toLowerCase();
+  className?.match(/(?:^|\s)language-([^\s]+)/u)?.[1]?.toLowerCase();
 
 const codeLanguage = (className?: string) => {
   const requested = requestedLanguage(className);
-  return requested
-    ? languageAliases[requested] ?? "markdown"
-    : "markdown";
+  return requested ? (languageAliases[requested] ?? "markdown") : "markdown";
 };
 
 const codeFilename = (
@@ -80,16 +76,16 @@ export function MessageCodeBlock({
   children,
   className,
   metastring,
-  node: _node,
   ...props
 }: MarkdownCodeBlockProps) {
+  Reflect.deleteProperty(props, "node");
   const code = codeText(children).replace(/\n$/u, "");
   const language = codeLanguage(className);
   const filename = codeFilename(metastring, requestedLanguage(className));
 
   return (
     <CodeBlock
-      className="my-4 rounded-xl [&_code]:text-xs [&_pre]:text-xs"
+      className="my-4 rounded-xl [&_code]:text-sm [&_pre]:text-sm"
       code={code}
       language={language}
       showLineNumbers={code.includes("\n")}
@@ -101,10 +97,7 @@ export function MessageCodeBlock({
           <CodeBlockFilename>{filename}</CodeBlockFilename>
         </CodeBlockTitle>
         <CodeBlockActions>
-          <CodeBlockCopyButton
-            aria-label="复制代码"
-            className="size-7"
-          />
+          <CodeBlockCopyButton aria-label="复制代码" className="size-7" />
         </CodeBlockActions>
       </CodeBlockHeader>
     </CodeBlock>

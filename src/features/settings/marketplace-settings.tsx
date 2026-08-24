@@ -13,7 +13,7 @@ import {
   Trash2Icon,
   WebhookIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,10 +26,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import type {
-  MarketplacePlugin,
-  MarketplaceSource,
-} from "@/domain/config";
+import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
+import { toUserMessage } from "@/domain/app-error";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
 import {
   addMarketplaceSource,
   deleteMarketplaceSource,
@@ -70,6 +69,9 @@ export function MarketplaceSettings({
   const [busyPlugin, setBusyPlugin] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const { state: pluginActionState, run: runPluginOperation } =
+    useAsyncOperation();
+  const visibleError = pluginActionState.error ?? error;
 
   const pluginsByMarketplace = useMemo(() => {
     const grouped = new Map<string, MarketplacePlugin[]>();
@@ -89,27 +91,30 @@ export function MarketplaceSettings({
     return grouped;
   }, [plugins]);
 
-  const load = async (refresh = false) => {
-    setLoading(true);
-    setError(undefined);
-    setNotice(undefined);
-    try {
-      const [nextSources, nextPlugins] = await Promise.all([
-        listMarketplaceSources(),
-        scanMarketplacePlugins(cwd, refresh),
-      ]);
-      setSources(nextSources);
-      setPlugins(nextPlugins);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const load = useCallback(
+    async (refresh = false) => {
+      setLoading(true);
+      setError(undefined);
+      setNotice(undefined);
+      try {
+        const [nextSources, nextPlugins] = await Promise.all([
+          listMarketplaceSources(),
+          scanMarketplacePlugins(cwd, refresh),
+        ]);
+        setSources(nextSources);
+        setPlugins(nextPlugins);
+      } catch (reason) {
+        setError(toUserMessage(reason));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [cwd],
+  );
 
   useEffect(() => {
     void load();
-  }, [cwd]);
+  }, [load]);
 
   const openEditor = (source?: MarketplaceSource) => {
     setDraft(source ? { ...source } : { ...emptySource });
@@ -134,7 +139,7 @@ export function MarketplaceSettings({
       setPlugins(await scanMarketplacePlugins(cwd, true));
       setNotice("Marketplace 已保存并完成插件扫描。");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setSaving(false);
       setLoading(false);
@@ -150,7 +155,7 @@ export function MarketplaceSettings({
       setSources(nextSources);
       setPlugins(await scanMarketplacePlugins(cwd));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -162,18 +167,21 @@ export function MarketplaceSettings({
     setError(undefined);
     setNotice(undefined);
     try {
-      const result =
-        plugin.status === "installed"
-          ? await updateMelodyPlugin(cwd, plugin.name)
-          : await installMelodyPlugin(cwd, key);
-      const [nextPlugins] = await Promise.all([
-        scanMarketplacePlugins(cwd),
-        onPluginsChanged(),
-      ]);
-      setPlugins(nextPlugins);
+      const result = await runPluginOperation(async () => {
+        const actionResult =
+          plugin.status === "installed"
+            ? await updateMelodyPlugin(cwd, plugin.name)
+            : await installMelodyPlugin(cwd, key);
+        const [nextPlugins] = await Promise.all([
+          scanMarketplacePlugins(cwd),
+          onPluginsChanged(),
+        ]);
+        return { nextPlugins, message: actionResult.message };
+      });
+      setPlugins(result.nextPlugins);
       setNotice(result.message);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+    } catch {
+      // The operation state owns the user-visible error.
     } finally {
       setBusyPlugin(undefined);
     }
@@ -207,9 +215,13 @@ export function MarketplaceSettings({
         </Button>
       </div>
 
-      {error ? (
-        <p className="mt-3 rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs">
-          {error}
+      {visibleError ? (
+        <p
+          aria-live="assertive"
+          className="mt-3 rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+          role="alert"
+        >
+          {visibleError}
         </p>
       ) : null}
       {notice ? (
@@ -221,16 +233,20 @@ export function MarketplaceSettings({
 
       <div className="mt-4 grid gap-3">
         {sources.map((source) => {
-          const SourceIcon =
-            source.kind === "git" ? GitBranchIcon : FolderIcon;
+          const SourceIcon = source.kind === "git" ? GitBranchIcon : FolderIcon;
           const sourcePlugins = pluginsByMarketplace.get(source.name) ?? [];
           return (
-            <article className="overflow-hidden rounded-xl border" key={source.name}>
+            <article
+              className="overflow-hidden rounded-xl border"
+              key={source.name}
+            >
               <header className="flex min-h-14 items-center gap-3 bg-muted/20 px-3 py-2.5">
                 <SourceIcon className="size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="truncate font-medium text-sm">{source.name}</p>
+                    <p className="truncate font-medium text-sm">
+                      {source.name}
+                    </p>
                     <Badge variant="outline">
                       {source.kind === "git" ? "Git" : "本地"}
                     </Badge>
@@ -312,7 +328,11 @@ export function MarketplaceSettings({
               保存后会写入用户级 Melody 配置，并立即同步和扫描插件。
             </DialogDescription>
             {error ? (
-              <p className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs">
+              <p
+                aria-live="assertive"
+                className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+                role="alert"
+              >
                 {error}
               </p>
             ) : null}
@@ -343,8 +363,7 @@ export function MarketplaceSettings({
                         setDraft((current) => ({
                           ...current,
                           kind,
-                          branch:
-                            kind === "git" ? current.branch : undefined,
+                          branch: kind === "git" ? current.branch : undefined,
                         }))
                       }
                       type="button"
@@ -398,11 +417,7 @@ export function MarketplaceSettings({
                 autoFocus
                 onChange={(event) => setSourceInput(event.target.value)}
                 onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    sourceInput.trim() &&
-                    !saving
-                  ) {
+                  if (event.key === "Enter" && sourceInput.trim() && !saving) {
                     event.preventDefault();
                     void save();
                   }

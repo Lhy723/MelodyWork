@@ -1,11 +1,8 @@
-import {
-  FileCode2Icon,
-  RefreshCwIcon,
-  XIcon,
-} from "lucide-react";
+import { FileCode2Icon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { toUserMessage } from "@/domain/app-error";
 import type { GitChange, GitDiff } from "@/domain/git";
 import { cn } from "@/lib/utils";
 import { getGitDiff } from "@/lib/melody-bridge";
@@ -89,7 +86,7 @@ export function ChangeReview({
       })
       .catch((reason) => {
         if (active) {
-          setDiffError(reason instanceof Error ? reason.message : String(reason));
+          setDiffError(toUserMessage(reason));
         }
       })
       .finally(() => {
@@ -110,7 +107,7 @@ export function ChangeReview({
         "flex min-h-0 flex-col bg-background",
         embedded
           ? "size-full"
-          : "absolute inset-y-0 right-0 z-20 w-[min(42rem,calc(100%-2rem))] border-l shadow-xl",
+          : "absolute inset-y-0 right-0 z-20 w-[min(42rem,calc(100%-2rem))] border-l",
       )}
     >
       <header
@@ -147,7 +144,11 @@ export function ChangeReview({
       </header>
 
       {error ? (
-        <p className="motion-view-enter border-b px-4 py-3 text-destructive text-sm">
+        <p
+          aria-live="assertive"
+          className="motion-view-enter border-b px-4 py-3 text-destructive text-sm"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -174,15 +175,13 @@ export function ChangeReview({
                 <span className="block truncate text-sm">
                   {change.path.split("/").at(-1)}
                 </span>
-                <span className="block truncate text-[11px]">
-                  {change.path}
-                </span>
-                <span className="mt-1 block text-[11px]">
+                <span className="block truncate text-xs">{change.path}</span>
+                <span className="mt-1 block text-xs">
                   <span className="text-emerald-700">+{change.additions}</span>
                   <span className="ml-2 text-red-700">−{change.deletions}</span>
                 </span>
               </span>
-              <span className="rounded bg-muted-foreground/10 px-1.5 py-0.5 font-mono text-[10px]">
+              <span className="rounded bg-muted-foreground/10 px-1.5 py-0.5 font-mono text-xs">
                 {statusLabel(change.status)}
               </span>
             </button>
@@ -209,7 +208,7 @@ export function ChangeReview({
               暂不支持预览二进制文件。
             </p>
           ) : diffLines.length > 1 ? (
-            <pre className="py-3 font-mono text-[11px] leading-5">
+            <pre className="py-3 font-mono text-xs leading-5">
               {diffLines.map((line, index) => (
                 <DiffLine key={`${index}-${line}`} line={line} />
               ))}

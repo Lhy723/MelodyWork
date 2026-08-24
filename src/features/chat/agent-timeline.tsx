@@ -102,6 +102,12 @@ export function AgentTimeline({
                   <MessageResponse components={messageComponents}>
                     {entry.content}
                   </MessageResponse>
+                  {entry.streaming ? (
+                    <span
+                      aria-hidden="true"
+                      className="motion-streaming-indicator"
+                    />
+                  ) : null}
                   {entry.role === "assistant" ? (
                     <MessageCitations content={entry.content} />
                   ) : null}

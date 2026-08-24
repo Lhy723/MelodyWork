@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { toUserMessage } from "@/domain/app-error";
 import type { GitChange } from "@/domain/git";
 import { getGitChanges } from "@/lib/melody-bridge";
 
@@ -14,7 +15,7 @@ export const useGitChanges = (cwd: string) => {
     try {
       setChanges(await getGitChanges(cwd));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toUserMessage(reason));
     } finally {
       setLoading(false);
     }

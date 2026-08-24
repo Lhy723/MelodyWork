@@ -1,7 +1,11 @@
+mod acp_policy;
 mod agent_runtime;
+mod capability_lifecycle;
+mod config_io;
 mod config_runtime;
 mod database;
 mod git_runtime;
+mod melody_command;
 mod research_runtime;
 mod update_runtime;
 mod workspace_access;
@@ -18,8 +22,8 @@ use config_runtime::{
 };
 use database::{
     AppDatabase, create_session, delete_permission_rule, delete_session, find_permission_rule,
-    get_usage_statistics, list_permission_rules, list_projects, list_sessions, update_session,
-    upsert_permission_rule, upsert_project,
+    get_usage_statistics, list_permission_rules, list_projects, list_sessions,
+    read_session_timeline, update_session, upsert_permission_rule, upsert_project,
 };
 use git_runtime::{
     git_branches, git_changes, git_checkout_branch, git_commit, git_create_branch,
@@ -72,6 +76,7 @@ pub fn run() {
             list_sessions,
             create_session,
             update_session,
+            read_session_timeline,
             delete_session,
             get_usage_statistics,
             workspace_tree,

@@ -1,14 +1,4 @@
 import {
-  CalendarComponent,
-  GridComponent,
-  LegendComponent,
-  TooltipComponent,
-  VisualMapComponent,
-} from "echarts/components";
-import { BarChart, HeatmapChart } from "echarts/charts";
-import * as echarts from "echarts/core";
-import { CanvasRenderer } from "echarts/renderers";
-import {
   BrainCircuitIcon,
   Clock3Icon,
   FlameIcon,
@@ -17,29 +7,36 @@ import {
   SparklesIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { EChartsType } from "echarts/core";
 
 import { Button } from "@/components/ui/button";
 import type {
   StatisticsActivityDay,
   UsageStatistics,
 } from "@/domain/statistics";
-import {
-  getUsageStatistics,
-  listMelodySkills,
-} from "@/lib/melody-bridge";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
+import { getUsageStatistics, listMelodySkills } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
-echarts.use([
-  CalendarComponent,
-  GridComponent,
-  HeatmapChart,
-  BarChart,
-  LegendComponent,
-  TooltipComponent,
-  VisualMapComponent,
-  CanvasRenderer,
-]);
+const echartsLoader = Promise.all([
+  import("echarts/core"),
+  import("echarts/components"),
+  import("echarts/charts"),
+  import("echarts/renderers"),
+]).then(([echarts, components, charts, renderers]) => {
+  echarts.use([
+    components.CalendarComponent,
+    components.GridComponent,
+    charts.HeatmapChart,
+    charts.BarChart,
+    components.LegendComponent,
+    components.TooltipComponent,
+    components.VisualMapComponent,
+    renderers.CanvasRenderer,
+  ]);
+  return echarts;
+});
 
 type ActivityView = "day" | "week" | "cumulative";
 
@@ -79,6 +76,10 @@ const compactNumber = (value: number) =>
     maximumFractionDigits: value >= 10_000 ? 1 : 0,
     notation: value >= 10_000 ? "compact" : "standard",
   }).format(value);
+
+const readThemeColor = (name: string, fallback: string) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+  fallback;
 
 const formatDuration = (milliseconds: number) => {
   if (milliseconds <= 0) {
@@ -195,81 +196,102 @@ function ActivityHeatmap({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const chart = echarts.init(container, undefined, { renderer: "canvas" });
-    const isDark = document.documentElement.classList.contains("dark");
-    const max = Math.max(1, ...series.map((item) => item.value[1] as number));
-    chart.setOption({
-      animationDuration: 240,
-      calendar: {
-        range: [
-          series[0]?.value[0] ?? dateKey(new Date()),
-          series.at(-1)?.value[0] ?? dateKey(new Date()),
-        ],
-        left: 10,
-        right: 10,
-        top: 4,
-        bottom: 30,
-        cellSize: ["auto", 15],
-        splitLine: { show: false },
-        itemStyle: {
-          borderColor: isDark ? "#181818" : "#ffffff",
-          borderWidth: 3,
-          borderRadius: 3,
-          color: isDark ? "#232425" : "#edf0f2",
-        },
-        yearLabel: { show: false },
-        dayLabel: { show: false },
-        monthLabel: {
-          color: isDark ? "#8d8f92" : "#707276",
-          fontSize: 11,
-          margin: 8,
-          nameMap: "ZH",
-          position: "end",
-        },
-      },
-      tooltip: {
-        backgroundColor: isDark ? "#262728" : "#ffffff",
-        borderColor: isDark ? "#3b3c3e" : "#dfe2e5",
-        borderWidth: 1,
-        textStyle: {
-          color: isDark ? "#f5f5f5" : "#26272a",
-          fontSize: 12,
-        },
-        formatter: (params: {
-          data?: {
-            value: [string, number];
-            tokens: number;
-            tasks: number;
-          };
-        }) => {
-          const item = params.data;
-          if (!item) return "";
-          return `${item.value[0]}<br/>${compactNumber(item.tokens)} Token · ${item.tasks} 个任务`;
-        },
-      },
-      visualMap: {
-        show: false,
-        min: 0,
-        max,
-        inRange: {
-          color: isDark
-            ? ["#232425", "#2e4054", "#4f7eae", "#78b7f4"]
-            : ["#edf0f2", "#d8e9f8", "#82b9ea", "#339cff"],
-        },
-      },
-      series: [
-        {
-          type: "heatmap",
-          coordinateSystem: "calendar",
-          data: series,
-        },
-      ],
-    });
-    const observer = new ResizeObserver(() => chart.resize());
-    observer.observe(container);
+    let disposed = false;
+    let chart: EChartsType | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    void echartsLoader
+      .then((echarts) => {
+        if (disposed) return;
+        chart = echarts.init(container, undefined, { renderer: "canvas" });
+        const chartBorder = readThemeColor("--harness-chart-border", "#dfe2e5");
+        const chartSurface = readThemeColor("--harness-bg-layer-3", "#edf0f2");
+        const chartText = readThemeColor("--harness-label-caption", "#707276");
+        const chartTooltip = readThemeColor("--harness-bg-layer-1", "#ffffff");
+        const chartTooltipText = readThemeColor(
+          "--harness-label-primary",
+          "#26272a",
+        );
+        const chartLow = readThemeColor("--harness-chart-low", "#edf2f7");
+        const chartMid = readThemeColor("--harness-chart-mid", "#a8c8e8");
+        const chartHigh = readThemeColor("--harness-chart-high", "#5c91c5");
+        const chartAccent = readThemeColor("--harness-chart-accent", "#245fba");
+        const max = Math.max(
+          1,
+          ...series.map((item) => item.value[1] as number),
+        );
+        chart.setOption({
+          animationDuration: 240,
+          calendar: {
+            range: [
+              series[0]?.value[0] ?? dateKey(new Date()),
+              series.at(-1)?.value[0] ?? dateKey(new Date()),
+            ],
+            left: 10,
+            right: 10,
+            top: 4,
+            bottom: 30,
+            cellSize: ["auto", 15],
+            splitLine: { show: false },
+            itemStyle: {
+              borderColor: chartTooltip,
+              borderWidth: 3,
+              borderRadius: 3,
+              color: chartSurface,
+            },
+            yearLabel: { show: false },
+            dayLabel: { show: false },
+            monthLabel: {
+              color: chartText,
+              fontSize: 11,
+              margin: 8,
+              nameMap: "ZH",
+              position: "end",
+            },
+          },
+          tooltip: {
+            backgroundColor: chartTooltip,
+            borderColor: chartBorder,
+            borderWidth: 1,
+            textStyle: {
+              color: chartTooltipText,
+              fontSize: 12,
+            },
+            formatter: (params: {
+              data?: {
+                value: [string, number];
+                tokens: number;
+                tasks: number;
+              };
+            }) => {
+              const item = params.data;
+              if (!item) return "";
+              return `${item.value[0]}<br/>${compactNumber(item.tokens)} Token · ${item.tasks} 个任务`;
+            },
+          },
+          visualMap: {
+            show: false,
+            min: 0,
+            max,
+            inRange: {
+              color: [chartLow, chartMid, chartHigh, chartAccent],
+            },
+          },
+          series: [
+            {
+              type: "heatmap",
+              coordinateSystem: "calendar",
+              data: series,
+            },
+          ],
+        });
+        resizeObserver = new ResizeObserver(() => chart?.resize());
+        resizeObserver.observe(container);
+      })
+      .catch(() => undefined);
     return () => {
-      observer.disconnect();
-      chart.dispose();
+      disposed = true;
+      resizeObserver?.disconnect();
+      chart?.dispose();
     };
   }, [series, themeVersion]);
 
@@ -319,106 +341,126 @@ function TokenBreakdownChart({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const chart = echarts.init(container, undefined, { renderer: "canvas" });
-    const isDark = document.documentElement.classList.contains("dark");
-    const textColor = isDark ? "#a8aaad" : "#696c70";
-    const splitColor = isDark ? "#2c2d2f" : "#edf0f2";
-    const hasUsage = days.some(
-      (day) => day.inputTokens > 0 || day.outputTokens > 0,
-    );
-    chart.setOption({
-      animationDuration: 240,
-      color: ["#8bb7df", "#4f8fca", "#9b8bd9", "#6953bd"],
-      grid: {
-        left: 4,
-        right: 4,
-        top: 38,
-        bottom: 24,
-        outerBoundsMode: "same",
-        outerBoundsContain: "axisLabel",
-      },
-      legend: {
-        top: 0,
-        right: 0,
-        itemWidth: 8,
-        itemHeight: 8,
-        textStyle: { color: textColor, fontSize: 11 },
-        data: ["非缓存输入", "缓存读取", "普通输出", "推理"],
-      },
-      tooltip: {
-        trigger: "axis",
-        axisPointer: { type: "shadow" },
-        backgroundColor: isDark ? "#262728" : "#ffffff",
-        borderColor: isDark ? "#3b3c3e" : "#dfe2e5",
-        textStyle: { color: isDark ? "#f5f5f5" : "#26272a", fontSize: 12 },
-        valueFormatter: (value: number) => `${compactNumber(value)} Token`,
-      },
-      xAxis: {
-        type: "category",
-        data: days.map((day) => day.label),
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: {
-          color: textColor,
-          fontSize: 10,
-          interval: 4,
-        },
-      },
-      yAxis: {
-        type: "value",
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: {
-          show: hasUsage,
-          color: textColor,
-          fontSize: 10,
-          formatter: (value: number) => compactNumber(value),
-        },
-        splitLine: {
-          show: hasUsage,
-          lineStyle: { color: splitColor },
-        },
-      },
-      series: [
-        {
-          name: "非缓存输入",
-          type: "bar",
-          stack: "usage",
-          barMaxWidth: 18,
-          data: days.map((day) =>
-            Math.max(0, day.inputTokens - day.cachedReadTokens),
-          ),
-        },
-        {
-          name: "缓存读取",
-          type: "bar",
-          stack: "usage",
-          barMaxWidth: 18,
-          data: days.map((day) => day.cachedReadTokens),
-        },
-        {
-          name: "普通输出",
-          type: "bar",
-          stack: "usage",
-          barMaxWidth: 18,
-          data: days.map((day) =>
-            Math.max(0, day.outputTokens - day.reasoningTokens),
-          ),
-        },
-        {
-          name: "推理",
-          type: "bar",
-          stack: "usage",
-          barMaxWidth: 18,
-          data: days.map((day) => day.reasoningTokens),
-        },
-      ],
-    });
-    const observer = new ResizeObserver(() => chart.resize());
-    observer.observe(container);
+    let disposed = false;
+    let chart: EChartsType | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    void echartsLoader
+      .then((echarts) => {
+        if (disposed) return;
+        chart = echarts.init(container, undefined, { renderer: "canvas" });
+        const textColor = readThemeColor("--harness-label-caption", "#696c70");
+        const splitColor = readThemeColor("--harness-bg-layer-2", "#edf0f2");
+        const chartTooltip = readThemeColor("--harness-bg-layer-1", "#ffffff");
+        const chartTooltipText = readThemeColor(
+          "--harness-label-primary",
+          "#26272a",
+        );
+        const chartBorder = readThemeColor("--harness-chart-border", "#dfe2e5");
+        const chartColors = [
+          readThemeColor("--harness-chart-1", "#4f8fca"),
+          readThemeColor("--harness-chart-2", "#6b3c8a"),
+          readThemeColor("--harness-chart-3", "#157a45"),
+          readThemeColor("--harness-chart-4", "#8a5316"),
+        ];
+        const hasUsage = days.some(
+          (day) => day.inputTokens > 0 || day.outputTokens > 0,
+        );
+        chart.setOption({
+          animationDuration: 240,
+          color: chartColors,
+          grid: {
+            left: 4,
+            right: 4,
+            top: 38,
+            bottom: 24,
+            outerBoundsMode: "same",
+            outerBoundsContain: "axisLabel",
+          },
+          legend: {
+            top: 0,
+            right: 0,
+            itemWidth: 8,
+            itemHeight: 8,
+            textStyle: { color: textColor, fontSize: 11 },
+            data: ["非缓存输入", "缓存读取", "普通输出", "推理"],
+          },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            backgroundColor: chartTooltip,
+            borderColor: chartBorder,
+            textStyle: { color: chartTooltipText, fontSize: 12 },
+            valueFormatter: (value: number) => `${compactNumber(value)} Token`,
+          },
+          xAxis: {
+            type: "category",
+            data: days.map((day) => day.label),
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: {
+              color: textColor,
+              fontSize: 10,
+              interval: 4,
+            },
+          },
+          yAxis: {
+            type: "value",
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: {
+              show: hasUsage,
+              color: textColor,
+              fontSize: 10,
+              formatter: (value: number) => compactNumber(value),
+            },
+            splitLine: {
+              show: hasUsage,
+              lineStyle: { color: splitColor },
+            },
+          },
+          series: [
+            {
+              name: "非缓存输入",
+              type: "bar",
+              stack: "usage",
+              barMaxWidth: 18,
+              data: days.map((day) =>
+                Math.max(0, day.inputTokens - day.cachedReadTokens),
+              ),
+            },
+            {
+              name: "缓存读取",
+              type: "bar",
+              stack: "usage",
+              barMaxWidth: 18,
+              data: days.map((day) => day.cachedReadTokens),
+            },
+            {
+              name: "普通输出",
+              type: "bar",
+              stack: "usage",
+              barMaxWidth: 18,
+              data: days.map((day) =>
+                Math.max(0, day.outputTokens - day.reasoningTokens),
+              ),
+            },
+            {
+              name: "推理",
+              type: "bar",
+              stack: "usage",
+              barMaxWidth: 18,
+              data: days.map((day) => day.reasoningTokens),
+            },
+          ],
+        });
+        resizeObserver = new ResizeObserver(() => chart?.resize());
+        resizeObserver.observe(container);
+      })
+      .catch(() => undefined);
     return () => {
-      observer.disconnect();
-      chart.dispose();
+      disposed = true;
+      resizeObserver?.disconnect();
+      chart?.dispose();
     };
   }, [days, themeVersion]);
 
@@ -430,31 +472,25 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
     useState<UsageStatistics>(emptyStatistics);
   const [skillCount, setSkillCount] = useState(0);
   const [view, setView] = useState<ActivityView>("day");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
+  const { state: loadState, run: runLoad } = useAsyncOperation();
+  const loading = loadState.phase === "pending";
+  const error = loadState.error;
 
-  const load = async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const [nextStatistics, extensions] = await Promise.all([
-        getUsageStatistics(),
-        listMelodySkills(cwd),
-      ]);
-      setStatistics(nextStatistics);
-      setSkillCount(
-        extensions.filter((extension) => extension.enabled).length,
-      );
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const load = useCallback(() => {
+    void runLoad(
+      () => Promise.all([getUsageStatistics(), listMelodySkills(cwd)]),
+      ([nextStatistics, extensions]) => {
+        setStatistics(nextStatistics);
+        setSkillCount(
+          extensions.filter((extension) => extension.enabled).length,
+        );
+      },
+    ).catch(() => undefined);
+  }, [cwd, runLoad]);
 
   useEffect(() => {
     void load();
-  }, [cwd]);
+  }, [load]);
 
   const topMetrics = [
     {
@@ -502,7 +538,11 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
         </div>
 
         {error ? (
-          <p className="mt-5 rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-sm">
+          <p
+            aria-live="assertive"
+            className="mt-5 rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-sm"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}
@@ -574,7 +614,9 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
                   key={label}
                 >
                   <p className="font-medium text-sm tabular-nums">{value}</p>
-                  <p className="mt-0.5 text-muted-foreground text-xs">{label}</p>
+                  <p className="mt-0.5 text-muted-foreground text-xs">
+                    {label}
+                  </p>
                 </div>
               ))}
             </div>
@@ -590,7 +632,8 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
           </div>
           {statistics.usageIncompleteTasks > 0 ? (
             <p className="mt-2 text-amber-700 text-xs dark:text-amber-300">
-              {statistics.usageIncompleteTasks} 个任务的用量不完整，累计值可能偏低。
+              {statistics.usageIncompleteTasks}{" "}
+              个任务的用量不完整，累计值可能偏低。
             </p>
           ) : null}
         </section>

@@ -1,12 +1,12 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 import type {
   ResearchInbox,
   ResearchNote,
   ResearchPaper,
   ResearchSearchHistoryItem,
-  ResearchSource,
+  ResearchSearchResult,
   ResearchTask,
   ResearchTrackingTopic,
 } from "@/domain/research";
@@ -31,24 +31,35 @@ const EMPTY_PROJECT: ResearchProjectState = {
 
 const UNSCOPED_PROJECT_ID = "__melodyresearch_unscoped__";
 
+const researchStorage = createJSONStorage(() =>
+  typeof window === "undefined"
+    ? {
+        getItem: () => null,
+        removeItem: () => undefined,
+        setItem: () => undefined,
+      }
+    : window.localStorage,
+);
+
 interface ResearchStore extends ResearchProjectState {
   activeProjectId?: string;
   projects: Record<string, ResearchProjectState>;
   setActiveProject: (projectId?: string) => void;
   replaceActiveProject: (project: Partial<ResearchProjectState>) => void;
   addPapers: (papers: ResearchPaper[]) => void;
-  setResearchInbox: (inbox: ResearchInbox) => void;
+  recordSearchResult: (record: {
+    query: string;
+    searchQuery: string;
+    terms: string[];
+    result: ResearchSearchResult;
+  }) => void;
   clearResearchInbox: () => void;
-  addSearchHistory: (
-    query: string,
-    resultCount: number,
-    metadata?: {
-      searchQuery?: string;
-      terms?: string[];
-      sources?: ResearchSource[];
-    },
-  ) => void;
   addTrackingTopic: (title: string, query: string) => void;
+  refreshTrackingTopic: (
+    id: string,
+    papers: ResearchPaper[],
+    checkedAt?: number,
+  ) => void;
   addResearchNote: (
     content: string,
     metadata?: Pick<ResearchNote, "kind" | "linkedPaperIds" | "tags">,
@@ -64,10 +75,6 @@ interface ResearchStore extends ResearchProjectState {
   removeTrackingTopic: (id: string) => void;
   removePaper: (id: string) => void;
   setPaperSaved: (id: string, saved: boolean) => void;
-  updateTrackingTopic: (
-    id: string,
-    patch: Partial<ResearchTrackingTopic>,
-  ) => void;
 }
 
 const cloneProjectState = (state?: Partial<ResearchProjectState>) => ({
@@ -101,6 +108,32 @@ const updateActiveProject = (
       ...state.projects,
       [projectId]: nextProject,
     },
+  };
+};
+
+const mergeProjectPapers = (
+  state: Pick<ResearchProjectState, "papers" | "inbox">,
+  papers: ResearchPaper[],
+) => {
+  const byId = new Map(state.papers.map((paper) => [paper.id, paper]));
+  for (const paper of papers) {
+    const current = byId.get(paper.id);
+    byId.set(paper.id, {
+      ...current,
+      ...paper,
+      saved: current?.saved || paper.saved,
+    });
+  }
+  return {
+    papers: Array.from(byId.values()),
+    inbox: state.inbox
+      ? {
+          ...state.inbox,
+          papers: state.inbox.papers.map(
+            (paper) => byId.get(paper.id) ?? paper,
+          ),
+        }
+      : undefined,
   };
 };
 
@@ -159,60 +192,41 @@ export const useResearchStore = create<ResearchStore>()(
           }),
         ),
       addPapers: (papers) =>
-        set((state) => {
-          const byId = new Map(state.papers.map((paper) => [paper.id, paper]));
-          for (const paper of papers) {
-            const current = byId.get(paper.id);
-            byId.set(paper.id, {
-              ...current,
-              ...paper,
-              saved: current?.saved || paper.saved,
-            });
-          }
-          return updateActiveProject(state, {
-            papers: Array.from(byId.values()),
-            inbox: state.inbox
-              ? {
-                  ...state.inbox,
-                  papers: state.inbox.papers.map(
-                    (paper) => byId.get(paper.id) ?? paper,
-                  ),
-                }
-              : undefined,
-          });
-        }),
-      setResearchInbox: (inbox) =>
+        set((state) =>
+          updateActiveProject(state, mergeProjectPapers(state, papers)),
+        ),
+      recordSearchResult: ({ query, searchQuery, terms, result }) =>
         set((state) => {
           const library = new Map(
             state.papers.map((paper) => [paper.id, paper]),
           );
           return updateActiveProject(state, {
             inbox: {
-              ...inbox,
-              papers: inbox.papers.map((paper) => ({
+              query,
+              searchQuery,
+              createdAt: Date.now(),
+              papers: result.papers.map((paper) => ({
                 ...paper,
                 saved: library.get(paper.id)?.saved || paper.saved,
               })),
+              sourceRuns: result.sourceRuns,
             },
-          });
-        }),
-      clearResearchInbox: () =>
-        set((state) => updateActiveProject(state, { inbox: undefined })),
-      addSearchHistory: (query, resultCount, metadata) =>
-        set((state) =>
-          updateActiveProject(state, {
             searchHistory: [
               {
                 id: crypto.randomUUID(),
                 query,
+                searchQuery,
+                terms,
+                sources: result.sources,
                 createdAt: Date.now(),
-                resultCount,
-                ...metadata,
+                resultCount: result.papers.length,
               },
               ...state.searchHistory,
             ].slice(0, 30),
-          }),
-        ),
+          });
+        }),
+      clearResearchInbox: () =>
+        set((state) => updateActiveProject(state, { inbox: undefined })),
       addTrackingTopic: (title, query) =>
         set((state) =>
           updateActiveProject(state, {
@@ -228,6 +242,23 @@ export const useResearchStore = create<ResearchStore>()(
             ],
           }),
         ),
+      refreshTrackingTopic: (id, papers, checkedAt = Date.now()) =>
+        set((state) => {
+          const merged = mergeProjectPapers(state, papers);
+          return updateActiveProject(state, {
+            ...merged,
+            trackingTopics: state.trackingTopics.map((topic) =>
+              topic.id === id
+                ? {
+                    ...topic,
+                    lastCheckedAt: checkedAt,
+                    latestCount: papers.length,
+                    paperIds: papers.map((paper) => paper.id),
+                  }
+                : topic,
+            ),
+          });
+        }),
       addResearchNote: (content, metadata) =>
         set((state) =>
           updateActiveProject(state, {
@@ -334,19 +365,12 @@ export const useResearchStore = create<ResearchStore>()(
               : undefined,
           }),
         ),
-      updateTrackingTopic: (id, patch) =>
-        set((state) =>
-          updateActiveProject(state, {
-            trackingTopics: state.trackingTopics.map((topic) =>
-              topic.id === id ? { ...topic, ...patch } : topic,
-            ),
-          }),
-        ),
     }),
     {
       // Keep the existing storage key so v2 libraries can be migrated instead
       // of silently disappearing after the project-scoping change.
       name: "melodyresearch.library.v2",
+      storage: researchStorage,
       version: 4,
       partialize: ({
         activeProjectId,

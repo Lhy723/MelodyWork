@@ -12,6 +12,203 @@ use uuid::Uuid;
 
 use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
+const DATABASE_SCHEMA_VERSION: i64 = 4;
+const MAX_TIMELINE_JSON_BYTES: usize = 2 * 1024 * 1024;
+
+fn validate_timeline_json(value: &str) -> Result<(), String> {
+    if value.len() > MAX_TIMELINE_JSON_BYTES {
+        return Err(format!(
+            "Timeline snapshot exceeds the {} MiB limit",
+            MAX_TIMELINE_JSON_BYTES / (1024 * 1024)
+        ));
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(value)
+        .map_err(|_| "Timeline snapshot is not valid JSON".to_string())?;
+    if !parsed.is_array() {
+        return Err("Timeline snapshot must be a JSON array".to_string());
+    }
+    Ok(())
+}
+
+fn validate_timeline_archive_entry(entry: &TimelineArchiveEntry) -> Result<(), String> {
+    if entry.ordinal < 0 {
+        return Err("Timeline archive ordinal must be non-negative".to_string());
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(&entry.entry_json)
+        .map_err(|_| "Timeline archive entry is not valid JSON".to_string())?;
+    if !parsed.is_object() {
+        return Err("Timeline archive entry must be a JSON object".to_string());
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct UnsupportedDatabaseSchemaVersion {
+    found: i64,
+    supported: i64,
+}
+
+impl std::fmt::Display for UnsupportedDatabaseSchemaVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Database schema version {} is newer than the supported version {}",
+            self.found, self.supported
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedDatabaseSchemaVersion {}
+
+fn schema_version(connection: &Connection) -> rusqlite::Result<i64> {
+    connection.query_row("PRAGMA user_version", [], |row| row.get(0))
+}
+
+fn session_columns(connection: &Connection) -> rusqlite::Result<HashSet<String>> {
+    let mut statement = connection.prepare("PRAGMA table_info(sessions)")?;
+    statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect()
+}
+
+fn ensure_session_column(
+    connection: &Connection,
+    columns: &mut HashSet<String>,
+    name: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    if columns.insert(name.to_string()) {
+        connection.execute(
+            &format!("ALTER TABLE sessions ADD COLUMN {name} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_timeline_archive_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS session_timeline_entries (
+            session_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            entry_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY(session_id, ordinal),
+            FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS session_timeline_entries_order
+            ON session_timeline_entries(session_id, ordinal);
+        ",
+    )
+}
+
+fn backfill_timeline_archive(connection: &Connection) -> rusqlite::Result<()> {
+    let mut statement = connection.prepare("SELECT id, timeline_json, updated_at FROM sessions")?;
+    let sessions = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for (session_id, timeline_json, updated_at) in sessions {
+        let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&timeline_json) else {
+            continue;
+        };
+        for (ordinal, entry) in entries.into_iter().enumerate() {
+            let entry_json =
+                serde_json::to_string(&entry).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            connection.execute(
+                "INSERT OR IGNORE INTO session_timeline_entries
+                    (session_id, ordinal, entry_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![session_id, ordinal as i64, entry_json, updated_at],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_schema(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    let version = schema_version(connection)?;
+    if version > DATABASE_SCHEMA_VERSION {
+        return Err(Box::new(UnsupportedDatabaseSchemaVersion {
+            found: version,
+            supported: DATABASE_SCHEMA_VERSION,
+        }));
+    }
+
+    // v2 added the ACP replay cursor; v3 added the projection version; v4
+    // added the unbounded timeline archive. The column/table checks also
+    // repair an interrupted/partially migrated database whose user_version
+    // was not advanced before the process exited.
+    let mut columns = session_columns(connection)?;
+    if version < 2 || !columns.contains("acp_cursor") {
+        ensure_session_column(connection, &mut columns, "acp_cursor", "TEXT")?;
+    }
+    if version < 3 || !columns.contains("timeline_version") {
+        ensure_session_column(
+            connection,
+            &mut columns,
+            "timeline_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    ensure_timeline_archive_schema(connection)?;
+    if version < 4 {
+        backfill_timeline_archive(connection)?;
+    }
+
+    connection.pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+fn initialize_schema(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            last_opened_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            acp_session_id TEXT,
+            timeline_json TEXT NOT NULL DEFAULT '[]',
+            acp_cursor TEXT,
+            timeline_version INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS sessions_project_updated
+            ON sessions(project_id, updated_at DESC);
+        CREATE TABLE IF NOT EXISTS permission_rules (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            tool_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            command TEXT NOT NULL,
+            decision TEXT NOT NULL CHECK(decision IN ('allow', 'deny')),
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            UNIQUE(project_id, tool_key)
+        );
+        CREATE INDEX IF NOT EXISTS permission_rules_project
+            ON permission_rules(project_id, created_at DESC);
+        ",
+    )?;
+    migrate_schema(connection)
+}
+
 #[derive(Debug)]
 pub struct AppDatabase {
     connection: Mutex<Connection>,
@@ -450,8 +647,16 @@ pub struct UpdateSessionRequest {
     title: Option<String>,
     acp_session_id: Option<String>,
     timeline_json: Option<String>,
+    timeline_entries: Option<Vec<TimelineArchiveEntry>>,
     acp_cursor: Option<Option<String>>,
     timeline_version: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineArchiveEntry {
+    ordinal: i64,
+    entry_json: String,
 }
 
 fn current_timestamp(connection: &Connection) -> Result<i64, String> {
@@ -509,62 +714,8 @@ impl AppDatabase {
         let app_data_dir = app.path().app_data_dir()?;
         fs::create_dir_all(&app_data_dir)?;
         let connection = Connection::open(app_data_dir.join("melody-work.sqlite3"))?;
-        connection.execute_batch(
-            "
-            PRAGMA foreign_keys = ON;
-            PRAGMA journal_mode = WAL;
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                path TEXT NOT NULL UNIQUE,
-                last_opened_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                cwd TEXT NOT NULL,
-                acp_session_id TEXT,
-                timeline_json TEXT NOT NULL DEFAULT '[]',
-                acp_cursor TEXT,
-                timeline_version INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS sessions_project_updated
-                ON sessions(project_id, updated_at DESC);
-            CREATE TABLE IF NOT EXISTS permission_rules (
-                id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                tool_key TEXT NOT NULL,
-                title TEXT NOT NULL,
-                command TEXT NOT NULL,
-                decision TEXT NOT NULL CHECK(decision IN ('allow', 'deny')),
-                created_at INTEGER NOT NULL,
-                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                UNIQUE(project_id, tool_key)
-            );
-            CREATE INDEX IF NOT EXISTS permission_rules_project
-                ON permission_rules(project_id, created_at DESC);
-            ",
-        )?;
-        let session_columns = connection
-            .prepare("PRAGMA table_info(sessions)")?
-            .query_map([], |row| row.get::<_, String>(1))?
-            .collect::<Result<Vec<_>, _>>()?;
-        if !session_columns.iter().any(|column| column == "acp_cursor") {
-            connection.execute("ALTER TABLE sessions ADD COLUMN acp_cursor TEXT", [])?;
-        }
-        if !session_columns
-            .iter()
-            .any(|column| column == "timeline_version")
-        {
-            connection.execute(
-                "ALTER TABLE sessions ADD COLUMN timeline_version INTEGER NOT NULL DEFAULT 0",
-                [],
-            )?;
-        }
+        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        initialize_schema(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -604,42 +755,9 @@ impl AppDatabase {
     fn in_memory() -> Self {
         let connection = Connection::open_in_memory().expect("in-memory database");
         connection
-            .execute_batch(
-                "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE projects (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    path TEXT NOT NULL UNIQUE,
-                    last_opened_at INTEGER NOT NULL
-                );
-                CREATE TABLE sessions (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    cwd TEXT NOT NULL,
-                    acp_session_id TEXT,
-                    timeline_json TEXT NOT NULL DEFAULT '[]',
-                    acp_cursor TEXT,
-                    timeline_version INTEGER NOT NULL DEFAULT 0,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-                CREATE TABLE permission_rules (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    tool_key TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    command TEXT NOT NULL,
-                    decision TEXT NOT NULL CHECK(decision IN ('allow', 'deny')),
-                    created_at INTEGER NOT NULL,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    UNIQUE(project_id, tool_key)
-                );
-                ",
-            )
-            .expect("schema");
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys");
+        initialize_schema(&connection).expect("schema");
         Self {
             connection: Mutex::new(connection),
         }
@@ -805,12 +923,24 @@ pub fn update_session(
     database: State<'_, AppDatabase>,
     request: UpdateSessionRequest,
 ) -> Result<SessionRecord, String> {
-    let connection = database
+    if let Some(timeline_json) = request.timeline_json.as_deref() {
+        validate_timeline_json(timeline_json)?;
+    }
+    if let Some(entries) = request.timeline_entries.as_deref() {
+        for entry in entries {
+            validate_timeline_archive_entry(entry)?;
+        }
+    }
+    let mut connection = database
         .connection
         .lock()
         .map_err(|_| "Database lock poisoned".to_string())?;
     let now = current_timestamp(&connection)?;
-    connection
+    let timeline_entries = request.timeline_entries.as_deref().unwrap_or(&[]);
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let updated = transaction
         .execute(
             "UPDATE sessions SET
                 title = COALESCE(?2, title),
@@ -832,6 +962,23 @@ pub fn update_session(
             ],
         )
         .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err("Session does not exist".to_string());
+    }
+    for entry in timeline_entries {
+        transaction
+            .execute(
+                "INSERT INTO session_timeline_entries
+                    (session_id, ordinal, entry_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(session_id, ordinal) DO UPDATE SET
+                    entry_json = excluded.entry_json,
+                    updated_at = excluded.updated_at",
+                params![request.id, entry.ordinal, entry.entry_json, now],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
     connection
         .query_row(
             "SELECT id, project_id, title, cwd, acp_session_id, timeline_json,
@@ -841,6 +988,50 @@ pub fn update_session(
             [&request.id],
             session_from_row,
         )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn read_session_timeline(
+    database: State<'_, AppDatabase>,
+    id: String,
+) -> Result<Option<String>, String> {
+    let connection = database
+        .connection
+        .lock()
+        .map_err(|_| "Database lock poisoned".to_string())?;
+    let mut statement = connection
+        .prepare(
+            "SELECT ordinal, entry_json
+             FROM session_timeline_entries
+             WHERE session_id = ?1
+             ORDER BY ordinal ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let entries = statement
+        .query_map([id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    let mut values = Vec::with_capacity(entries.len());
+    for (expected_ordinal, (ordinal, entry)) in entries.into_iter().enumerate() {
+        if ordinal != expected_ordinal as i64 {
+            return Err("Timeline archive has a missing ordinal".to_string());
+        }
+        let value =
+            serde_json::from_str::<serde_json::Value>(&entry).map_err(|error| error.to_string())?;
+        if !value.is_object() {
+            return Err("Timeline archive entry must be a JSON object".to_string());
+        }
+        values.push(value);
+    }
+    serde_json::to_string(&values)
+        .map(Some)
         .map_err(|error| error.to_string())
 }
 
@@ -1035,6 +1226,60 @@ mod tests {
             )
             .unwrap();
         assert_eq!(decision, "allow");
+    }
+
+    #[test]
+    fn migrates_legacy_session_schema_and_records_version() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    cwd TEXT NOT NULL,
+                    acp_session_id TEXT,
+                    timeline_json TEXT NOT NULL DEFAULT '[]',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                PRAGMA user_version = 1;
+                ",
+            )
+            .unwrap();
+
+        migrate_schema(&connection).unwrap();
+
+        let columns = session_columns(&connection).unwrap();
+        assert!(columns.contains("acp_cursor"));
+        assert!(columns.contains("timeline_version"));
+        assert_eq!(
+            schema_version(&connection).unwrap(),
+            DATABASE_SCHEMA_VERSION
+        );
+
+        // A retry after a process interruption must be harmless.
+        migrate_schema(&connection).unwrap();
+        assert_eq!(
+            schema_version(&connection).unwrap(),
+            DATABASE_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn rejects_a_database_created_by_a_newer_build() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION + 1)
+            .unwrap();
+
+        let error = migrate_schema(&connection).expect_err("future schema must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("newer than the supported version")
+        );
     }
 
     #[test]

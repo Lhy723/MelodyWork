@@ -7,7 +7,11 @@ import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
 import type { TurnActivityItem } from "@/domain/timeline-groups";
 import { ToolTaskGroup } from "@/features/chat/tool-task-group";
 import { cn } from "@/lib/utils";
-import { BrainIcon, ChevronDownIcon, LoaderCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  ChevronDownIcon,
+  LoaderCircleIcon,
+} from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 interface TurnActivityGroupProps {
@@ -47,6 +51,7 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
 }: TurnActivityGroupProps) {
   const [open, setOpen] = useState(running);
   const [now, setNow] = useState(() => Date.now());
+  const [completionPulse, setCompletionPulse] = useState(false);
   const wasRunning = useRef(running);
 
   useEffect(() => {
@@ -60,12 +65,21 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
 
   useEffect(() => {
     if (running && !wasRunning.current) {
+      setCompletionPulse(false);
       setOpen(true);
     }
     if (!running && wasRunning.current) {
-      const timer = window.setTimeout(() => setOpen(false), 800);
+      setCompletionPulse(true);
+      const closeTimer = window.setTimeout(() => setOpen(false), 800);
+      const pulseTimer = window.setTimeout(
+        () => setCompletionPulse(false),
+        480,
+      );
       wasRunning.current = running;
-      return () => window.clearTimeout(timer);
+      return () => {
+        window.clearTimeout(closeTimer);
+        window.clearTimeout(pulseTimer);
+      };
     }
     wasRunning.current = running;
   }, [running]);
@@ -82,18 +96,25 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
   return (
     <Task
       className="harness-activity-group w-full"
+      data-completion-pulse={completionPulse ? "true" : undefined}
       onOpenChange={setOpen}
       open={open}
     >
       <TaskTrigger title={title}>
         <button
-          className="harness-activity-trigger group flex min-h-7 w-full items-center gap-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground"
+          className="harness-activity-trigger group flex min-h-7 w-full items-center gap-2 text-left text-sm leading-5 text-muted-foreground transition-colors hover:text-foreground"
           type="button"
         >
           {running ? (
-            <LoaderCircleIcon className="size-4 shrink-0 animate-spin" />
+            <LoaderCircleIcon
+              aria-hidden="true"
+              className="motion-activity-state-icon size-4 shrink-0 animate-spin"
+            />
           ) : (
-            <BrainIcon className="size-4 shrink-0" />
+            <CheckCircle2Icon
+              aria-hidden="true"
+              className="motion-activity-state-icon size-4 shrink-0"
+            />
           )}
           <span className="font-medium">{title}</span>
           <ChevronDownIcon className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
@@ -108,7 +129,7 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
               key={item.id}
             >
               <ReasoningTrigger
-                className="min-h-6 text-[13px]"
+                className="min-h-6 text-sm"
                 getThinkingMessage={(isStreaming, thoughtDuration) =>
                   isStreaming
                     ? "正在思考…"

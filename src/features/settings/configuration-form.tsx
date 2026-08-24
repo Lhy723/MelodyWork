@@ -37,10 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { AgentModelOption, AgentPermissionMode } from "@/domain/acp";
-import type {
-  MelodyConfigScope,
-  MelodyConfigValue,
-} from "@/domain/config";
+import type { MelodyConfigScope, MelodyConfigValue } from "@/domain/config";
 import { requestSystemNotificationPermission } from "@/lib/system-notifications";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agent-store";
@@ -706,8 +703,7 @@ const userSections: SettingSection[] = [
       {
         path: ["compat", "agents", "skills"],
         label: "技能",
-        description:
-          "发现用户 ~/.agents 与当前工作目录 .agents 中的通用技能。",
+        description: "发现用户 ~/.agents 与当前工作目录 .agents 中的通用技能。",
         kind: "agents-skills-source",
         defaultValue: true,
       },
@@ -719,15 +715,13 @@ const userSections: SettingSection[] = [
           ["mcps", "MCP 服务器", "读取 MCP 服务器配置。"],
           ["hooks", "钩子", "读取生命周期钩子配置。"],
           ["sessions", "会话", "允许发现兼容的历史会话。"],
-        ].map(
-          ([feature, label, description]): SettingDefinition => ({
-            path: ["compat", provider, feature],
-            label,
-            description,
-            kind: "boolean",
-            defaultValue: true,
-          }),
-        ),
+        ].map(([feature, label, description]): SettingDefinition => ({
+          path: ["compat", provider, feature],
+          label,
+          description,
+          kind: "boolean",
+          defaultValue: true,
+        })),
       ),
       {
         path: ["compat", "codex", "sessions"],
@@ -763,7 +757,10 @@ const compatibilityGroups = [
   },
 ] as const;
 
-function valueAt(values: ConfigValues, path: string[]): MelodyConfigValue | undefined {
+function valueAt(
+  values: ConfigValues,
+  path: string[],
+): MelodyConfigValue | undefined {
   let current: MelodyConfigValue = values;
   for (const key of path) {
     if (!current || typeof current !== "object" || Array.isArray(current)) {
@@ -806,10 +803,7 @@ function SettingControl({
           const updated = next
             ? preserved
             : [...preserved, "~/.agents", ".agents"];
-          onChange(
-            ["skills", "ignore"],
-            updated.length > 0 ? updated : null,
-          );
+          onChange(["skills", "ignore"], updated.length > 0 ? updated : null);
         }}
       />
     );
@@ -830,8 +824,7 @@ function SettingControl({
     const selectedValue =
       typeof explicit === "string"
         ? explicit
-        : definition.clearValue ??
-          (typeof value === "string" ? value : "");
+        : (definition.clearValue ?? (typeof value === "string" ? value : ""));
     return (
       <Select
         onValueChange={(next) =>
@@ -842,7 +835,7 @@ function SettingControl({
         }
         value={selectedValue}
       >
-        <SelectTrigger className="w-44">
+        <SelectTrigger aria-label={definition.label} className="w-44">
           <SelectValue placeholder="使用默认值" />
         </SelectTrigger>
         <SelectContent>
@@ -860,7 +853,9 @@ function SettingControl({
     const textValue =
       definition.kind === "string-list"
         ? Array.isArray(explicit)
-          ? explicit.filter((item): item is string => typeof item === "string").join("\n")
+          ? explicit
+              .filter((item): item is string => typeof item === "string")
+              .join("\n")
           : ""
         : explicit && typeof explicit === "object" && !Array.isArray(explicit)
           ? Object.entries(explicit)
@@ -869,7 +864,8 @@ function SettingControl({
           : "";
     return (
       <textarea
-        className="min-h-20 w-64 resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground"
+        aria-label={definition.label}
+        className="min-h-20 w-64 resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-xs outline-none transition-[color,background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         onChange={(event) => {
           if (definition.kind === "string-list") {
             const next = event.target.value
@@ -894,10 +890,7 @@ function SettingControl({
               next[key.trim()] = number;
             }
           }
-          onChange(
-            definition.path,
-            Object.keys(next).length > 0 ? next : null,
-          );
+          onChange(definition.path, Object.keys(next).length > 0 ? next : null);
         }}
         placeholder={
           definition.placeholder ??
@@ -910,6 +903,7 @@ function SettingControl({
 
   return (
     <Input
+      aria-label={definition.label}
       className="w-52"
       max={definition.max}
       min={definition.min}
@@ -1064,9 +1058,11 @@ function PreferenceGroup({
 }
 
 function PreferenceSelect<Key extends keyof AppSettings>({
+  label,
   options,
   settingKey,
 }: {
+  label: string;
   options: { label: string; value: AppSettings[Key] & string }[];
   settingKey: Key;
 }) {
@@ -1074,12 +1070,10 @@ function PreferenceSelect<Key extends keyof AppSettings>({
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   return (
     <Select
-      onValueChange={(next) =>
-        setSetting(settingKey, next as AppSettings[Key])
-      }
+      onValueChange={(next) => setSetting(settingKey, next as AppSettings[Key])}
       value={String(value)}
     >
-      <SelectTrigger className="w-36">
+      <SelectTrigger aria-label={label} className="w-36">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1094,14 +1088,17 @@ function PreferenceSelect<Key extends keyof AppSettings>({
 }
 
 function PreferenceSwitch<Key extends keyof AppSettings>({
+  label,
   settingKey,
 }: {
+  label: string;
   settingKey: Key;
 }) {
   const value = useAppSettingsStore((state) => state[settingKey]);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   return (
     <Switch
+      aria-label={label}
       className="data-[state=checked]:bg-blue-500"
       checked={Boolean(value)}
       onCheckedChange={(next) =>
@@ -1116,9 +1113,7 @@ function UnavailableControl({ label = "尚未实现" }: { label?: string }) {
 }
 
 function PermissionModePreference() {
-  const value = useAppSettingsStore(
-    (state) => state.defaultPermissionMode,
-  );
+  const value = useAppSettingsStore((state) => state.defaultPermissionMode);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   return (
     <Select
@@ -1129,7 +1124,7 @@ function PermissionModePreference() {
       }}
       value={value}
     >
-      <SelectTrigger className="w-44">
+      <SelectTrigger aria-label="默认及当前权限模式" className="w-44">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1152,6 +1147,7 @@ function NotificationPreferenceSwitch({
   return (
     <div className="flex flex-col items-end gap-1">
       <Switch
+        aria-label="启用权限通知"
         checked={value}
         onCheckedChange={(checked) => {
           if (!checked) {
@@ -1166,18 +1162,14 @@ function NotificationPreferenceSwitch({
         }}
       />
       {permissionDenied ? (
-        <span className="text-destructive text-[11px]">
-          系统未授予通知权限
-        </span>
+        <span className="text-destructive text-[11px]">系统未授予通知权限</span>
       ) : null}
     </div>
   );
 }
 
 function CompletionNotificationPreference() {
-  const value = useAppSettingsStore(
-    (state) => state.completionNotification,
-  );
+  const value = useAppSettingsStore((state) => state.completionNotification);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   const [permissionDenied, setPermissionDenied] = useState(false);
   return (
@@ -1192,15 +1184,12 @@ function CompletionNotificationPreference() {
           }
           void requestSystemNotificationPermission().then((granted) => {
             setPermissionDenied(!granted);
-            setSetting(
-              "completionNotification",
-              granted ? mode : "never",
-            );
+            setSetting("completionNotification", granted ? mode : "never");
           });
         }}
         value={value}
       >
-        <SelectTrigger className="w-36">
+        <SelectTrigger aria-label="轮次完成通知" className="w-36">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1210,24 +1199,15 @@ function CompletionNotificationPreference() {
         </SelectContent>
       </Select>
       {permissionDenied ? (
-        <span className="text-destructive text-[11px]">
-          系统未授予通知权限
-        </span>
+        <span className="text-destructive text-[11px]">系统未授予通知权限</span>
       ) : null}
     </div>
   );
 }
 
-function ApplicationGeneralSettings({
-  values,
-  onChange,
-}: {
-  values: ConfigValues;
-  onChange: ConfigurationFormProps["onChange"];
-}) {
+function ApplicationGeneralSettings() {
   const importInput = useRef<HTMLInputElement>(null);
   const [actionMessage, setActionMessage] = useState<string>();
-  const autoUpdate = valueAt(values, ["cli", "auto_update"]);
 
   const importSettings = async (file?: File) => {
     if (!file) {
@@ -1238,10 +1218,7 @@ function ApplicationGeneralSettings({
       const current = useAppSettingsStore.getState();
       for (const [key, value] of Object.entries(incoming)) {
         if (key in current && key !== "setSetting") {
-          current.setSetting(
-            key as keyof AppSettings,
-            value as never,
-          );
+          current.setSetting(key as keyof AppSettings, value as never);
         }
       }
       setActionMessage("已导入可识别的 MelodyWork 设置。");
@@ -1263,15 +1240,12 @@ function ApplicationGeneralSettings({
 
       <PreferenceGroup title="常规">
         <PreferenceRow
-          description="启动 Melody 时检查并安装可用更新。"
-          label="自动检查 Melody 更新"
+          description="启动时检查可用的 MelodyWork 更新；发现更新后由你确认安装。"
+          label="自动检查 MelodyWork 更新"
         >
-          <Switch
-            aria-label="自动检查 Melody 更新"
-            checked={typeof autoUpdate === "boolean" ? autoUpdate : true}
-            onCheckedChange={(checked) =>
-              onChange(["cli", "auto_update"], checked)
-            }
+          <PreferenceSwitch
+            label="自动检查 MelodyWork 更新"
+            settingKey="autoCheckForUpdates"
           />
         </PreferenceRow>
         <PreferenceRow
@@ -1341,7 +1315,9 @@ function ApplicationGeneralSettings({
         >
           <Button
             onClick={() =>
-              setActionMessage("开源依赖信息可在 package.json 与 pnpm-lock.yaml 中查看。")
+              setActionMessage(
+                "开源依赖信息可在 package.json 与 pnpm-lock.yaml 中查看。",
+              )
             }
             size="sm"
             variant="secondary"
@@ -1356,13 +1332,17 @@ function ApplicationGeneralSettings({
           description="在输入区显示当前会话的上下文窗口使用情况。"
           label="显示上下文窗口使用情况"
         >
-          <PreferenceSwitch settingKey="showContextUsage" />
+          <PreferenceSwitch
+            label="显示上下文窗口使用情况"
+            settingKey="showContextUsage"
+          />
         </PreferenceRow>
         <PreferenceRow
           description="选择按 Enter 时发送消息还是插入新行。"
           label="发送快捷键"
         >
           <PreferenceSelect
+            label="发送快捷键"
             options={[
               { value: "enter", label: "Enter" },
               { value: "mod-enter", label: "⌘ / Ctrl + Enter" },
@@ -1375,6 +1355,7 @@ function ApplicationGeneralSettings({
           label="跟进行为"
         >
           <PreferenceSelect
+            label="跟进行为"
             options={[
               { value: "queue", label: "排队" },
               { value: "steer", label: "引导" },
@@ -1497,6 +1478,7 @@ function ColorSetting({
         }}
       >
         <input
+          aria-label={label}
           className="size-3 cursor-pointer appearance-none rounded-full border border-current/20"
           onChange={(event) => setSetting(settingKey, event.target.value)}
           type="color"
@@ -1508,11 +1490,7 @@ function ColorSetting({
   );
 }
 
-function AppearanceThemeGroup({
-  dark,
-}: {
-  dark: boolean;
-}) {
+function AppearanceThemeGroup({ dark }: { dark: boolean }) {
   const prefix = dark ? "dark" : "light";
   const uiFont = useAppSettingsStore((state) => state.uiFont);
   const codeFont = useAppSettingsStore((state) => state.codeFont);
@@ -1527,21 +1505,18 @@ function AppearanceThemeGroup({
       <ColorSetting
         label="背景"
         settingKey={
-          `${prefix}Background` as
-            | "lightBackground"
-            | "darkBackground"
+          `${prefix}Background` as "lightBackground" | "darkBackground"
         }
       />
       <ColorSetting
         label="前景"
         settingKey={
-          `${prefix}Foreground` as
-            | "lightForeground"
-            | "darkForeground"
+          `${prefix}Foreground` as "lightForeground" | "darkForeground"
         }
       />
       <PreferenceRow description="" label="UI 字体">
         <Input
+          aria-label="UI 字体"
           className="w-52"
           onChange={(event) => setSetting("uiFont", event.target.value)}
           value={uiFont}
@@ -1549,13 +1524,17 @@ function AppearanceThemeGroup({
       </PreferenceRow>
       <PreferenceRow description="" label="代码字体">
         <Input
+          aria-label="代码字体"
           className="w-52"
           onChange={(event) => setSetting("codeFont", event.target.value)}
           value={codeFont}
         />
       </PreferenceRow>
       <PreferenceRow description="" label="半透明侧边栏">
-        <PreferenceSwitch settingKey="translucentSidebar" />
+        <PreferenceSwitch
+          label="半透明侧边栏"
+          settingKey="translucentSidebar"
+        />
       </PreferenceRow>
     </PreferenceGroup>
   );
@@ -1609,13 +1588,14 @@ function ApplicationAppearanceSettings() {
           description="悬停交互元素时切换为指针光标。"
           label="使用指针光标"
         >
-          <PreferenceSwitch settingKey="pointerCursor" />
+          <PreferenceSwitch label="使用指针光标" settingKey="pointerCursor" />
         </PreferenceRow>
         <PreferenceRow
           description="减少动画效果或匹配系统辅助功能设置。"
           label="减少动态效果"
         >
           <PreferenceSelect
+            label="减少动态效果"
             options={[
               { value: "system", label: "系统" },
               { value: "on", label: "开启" },
@@ -1630,12 +1610,16 @@ function ApplicationAppearanceSettings() {
         >
           <div className="flex items-center gap-2">
             <Input
+              aria-label="UI 字号"
               className="w-20"
               max={18}
-              min={11}
-              onChange={(event) =>
-                setSetting("uiFontSize", Number(event.target.value))
-              }
+              min={14}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isFinite(value)) {
+                  setSetting("uiFontSize", Math.min(18, Math.max(14, value)));
+                }
+              }}
               type="number"
               value={uiFontSize}
             />
@@ -1648,6 +1632,7 @@ function ApplicationAppearanceSettings() {
         >
           <div className="flex items-center gap-2">
             <Input
+              aria-label="代码字体大小"
               className="w-20"
               max={18}
               min={10}
@@ -1670,7 +1655,7 @@ function ApplicationAppearanceSettings() {
           description="在 macOS 上使用原生字体抗锯齿。"
           label="字体平滑"
         >
-          <PreferenceSwitch settingKey="fontSmoothing" />
+          <PreferenceSwitch label="字体平滑" settingKey="fontSmoothing" />
         </PreferenceRow>
       </PreferenceGroup>
     </div>
@@ -1919,7 +1904,10 @@ function DynamicSection({
     <div>
       <div className="mb-4 flex items-end gap-2">
         <div className="min-w-0 flex-1">
-          <label className="mb-1.5 block font-medium text-xs" htmlFor={`${kind}-name`}>
+          <label
+            className="mb-1.5 block font-medium text-xs"
+            htmlFor={`${kind}-name`}
+          >
             {kind === "models" ? "添加自定义模型" : "添加 MCP 服务器"}
           </label>
           <Input
@@ -1930,7 +1918,9 @@ function DynamicSection({
                 add();
               }
             }}
-            placeholder={kind === "models" ? "例如 fast-model" : "例如 filesystem"}
+            placeholder={
+              kind === "models" ? "例如 fast-model" : "例如 filesystem"
+            }
             value={draftName}
           />
         </div>
@@ -2043,6 +2033,7 @@ function ModelOverrideField({
       </div>
       {enabled ? (
         <Input
+          aria-label={definition.label}
           className="w-24"
           max={"max" in definition ? definition.max : undefined}
           min={definition.min}
@@ -2141,8 +2132,7 @@ function ModelEditorDialog({
         .filter((item): item is string => typeof item === "string")
         .join(", ")
     : "";
-  const nameConflict =
-    !editing && existingNames.includes(alias.trim());
+  const nameConflict = !editing && existingNames.includes(alias.trim());
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -2211,9 +2201,7 @@ function ModelEditorDialog({
                 <label className="grid gap-1.5 text-xs">
                   <span className="font-medium">显示名称</span>
                   <Input
-                    onChange={(event) =>
-                      setField("name", event.target.value)
-                    }
+                    onChange={(event) => setField("name", event.target.value)}
                     placeholder="例如 GPT 工作模型"
                     value={stringConfigValue(draft, "name")}
                   />
@@ -2221,9 +2209,7 @@ function ModelEditorDialog({
                 <label className="grid gap-1.5 text-xs sm:col-span-2">
                   <span className="font-medium">模型 ID</span>
                   <Input
-                    onChange={(event) =>
-                      setField("model", event.target.value)
-                    }
+                    onChange={(event) => setField("model", event.target.value)}
                     placeholder="例如 gpt-5.2"
                     value={modelId}
                   />
@@ -2260,9 +2246,7 @@ function ModelEditorDialog({
                 <label className="grid gap-1.5 text-xs">
                   <span className="font-medium">接口类型</span>
                   <Select
-                    onValueChange={(value) =>
-                      setField("api_backend", value)
-                    }
+                    onValueChange={(value) => setField("api_backend", value)}
                     value={
                       stringConfigValue(draft, "api_backend") ||
                       "chat_completions"
@@ -2473,9 +2457,7 @@ function ModelEditorDialog({
                 取消
               </Button>
               <Button
-                disabled={
-                  !alias.trim() || !modelId.trim() || nameConflict
-                }
+                disabled={!alias.trim() || !modelId.trim() || nameConflict}
                 onClick={() => {
                   onSave(alias.trim(), draft);
                   onOpenChange(false);
@@ -2548,9 +2530,7 @@ function CustomModelManager({
                       {displayName}
                     </p>
                     {isDefault ? <Badge>默认</Badge> : null}
-                    <Badge variant="outline">
-                      {modelProviderLabel(model)}
-                    </Badge>
+                    <Badge variant="outline">{modelProviderLabel(model)}</Badge>
                   </div>
                   <p className="mt-0.5 truncate text-muted-foreground text-xs">
                     {modelId}
@@ -2561,9 +2541,7 @@ function CustomModelManager({
                 </div>
                 {!isDefault ? (
                   <Button
-                    onClick={() =>
-                      onChange(["models", "default"], name)
-                    }
+                    onClick={() => onChange(["models", "default"], name)}
                     size="sm"
                     variant="ghost"
                   >
@@ -2608,18 +2586,14 @@ function CustomModelManager({
           key={editingModel ?? "new"}
           modelName={editingModel ?? undefined}
           modelValue={
-            editingModel
-              ? valueAt(values, ["model", editingModel])
-              : undefined
+            editingModel ? valueAt(values, ["model", editingModel]) : undefined
           }
           onOpenChange={(open) => {
             if (!open) {
               setEditingModel(undefined);
             }
           }}
-          onSave={(name, model) =>
-            onChange(["model", name], model)
-          }
+          onSave={(name, model) => onChange(["model", name], model)}
           open
         />
       ) : null}
@@ -2636,7 +2610,8 @@ function CustomModelManager({
           <DialogHeader>
             <DialogTitle>删除模型配置？</DialogTitle>
             <DialogDescription>
-              这会从 Melody 配置中删除“{pendingDelete}”。该操作不会删除提供商上的模型。
+              这会从 Melody 配置中删除“{pendingDelete}
+              ”。该操作不会删除提供商上的模型。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -2693,10 +2668,7 @@ function ModelSettings({
       modelOptions.set(name, name);
     }
   }
-  if (
-    typeof currentDefault === "string" &&
-    !modelOptions.has(currentDefault)
-  ) {
+  if (typeof currentDefault === "string" && !modelOptions.has(currentDefault)) {
     modelOptions.set(currentDefault, `${currentDefault}（当前配置）`);
   }
   const inheritValue = "__melody_inherit_default__";
@@ -2735,9 +2707,7 @@ function ModelSettings({
   );
 }
 
-const configurationSections = (
-  scope: MelodyConfigScope,
-): SettingSection[] =>
+const configurationSections = (scope: MelodyConfigScope): SettingSection[] =>
   scope === "project"
     ? [
         {
@@ -2807,10 +2777,7 @@ export function ConfigurationForm({
         </p>
         <div className="mt-5">
           {active.id === "general" ? (
-            <ApplicationGeneralSettings
-              onChange={onChange}
-              values={values}
-            />
+            <ApplicationGeneralSettings />
           ) : active.id === "appearance" ? (
             <ApplicationAppearanceSettings />
           ) : active.id === "models" ? (

@@ -7,7 +7,7 @@ import {
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { MelodyExtension, SkillDetails } from "@/domain/config";
-import {
-  deleteMelodySkill,
-  getMelodySkillDetails,
-} from "@/lib/melody-bridge";
+import { useAsyncOperation } from "@/hooks/use-async-operation";
+import { deleteMelodySkill, getMelodySkillDetails } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
 interface SkillDetailsViewProps {
@@ -40,40 +38,34 @@ export function SkillDetailsView({
   onDeleted,
 }: SkillDetailsViewProps) {
   const [details, setDetails] = useState<SkillDetails>();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string>();
+  const { state: loadingState, run: runLoad } = useAsyncOperation();
+  const {
+    state: deleteState,
+    reset: resetDelete,
+    run: runDelete,
+  } = useAsyncOperation();
+  const loading = loadingState.phase === "pending";
+  const error = loadingState.error;
+  const deleting = deleteState.phase === "pending";
+  const deleteError = deleteState.error;
 
-  const load = async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      setDetails(await getMelodySkillDetails(cwd, skill));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const load = useCallback(() => {
+    void runLoad(() => getMelodySkillDetails(cwd, skill), setDetails).catch(
+      () => undefined,
+    );
+  }, [cwd, runLoad, skill]);
 
   useEffect(() => {
     void load();
-  }, [cwd, skill.name, skill.path]);
+  }, [load]);
 
-  const remove = async () => {
-    setDeleting(true);
-    setDeleteError(undefined);
-    try {
+  const remove = () => {
+    void runDelete(async () => {
       await deleteMelodySkill(cwd, skill);
       setDeleteOpen(false);
       await onDeleted();
-    } catch (reason) {
-      setDeleteError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setDeleting(false);
-    }
+    }).catch(() => undefined);
   };
 
   return (
@@ -131,7 +123,7 @@ export function SkillDetailsView({
         {skill.deletable ? (
           <Button
             onClick={() => {
-              setDeleteError(undefined);
+              resetDelete();
               setDeleteOpen(true);
             }}
             size="sm"
@@ -144,7 +136,11 @@ export function SkillDetailsView({
       </div>
 
       {error ? (
-        <p className="mt-5 rounded-xl bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        <p
+          aria-live="assertive"
+          className="mt-5 rounded-xl bg-destructive/5 px-4 py-3 text-destructive text-sm"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -248,7 +244,11 @@ export function SkillDetailsView({
             </DialogDescription>
           </DialogHeader>
           {deleteError ? (
-            <p className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs">
+            <p
+              aria-live="assertive"
+              className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+              role="alert"
+            >
               {deleteError}
             </p>
           ) : null}
