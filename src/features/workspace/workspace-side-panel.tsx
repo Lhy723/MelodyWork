@@ -168,7 +168,7 @@ export function WorkspaceSidePanel({
             >
               {activeTabId === tab.id ? (
                 <motion.span
-                  className="absolute inset-0 rounded-md border border-border/80 bg-muted/70 shadow-sm"
+                  className="pointer-events-none absolute inset-0 rounded-md border border-border/80 bg-muted/70 shadow-sm"
                   layoutId="workspace-tab-active"
                   transition={{
                     duration: 0.2,
@@ -189,7 +189,7 @@ export function WorkspaceSidePanel({
               </button>
               <Button
                 aria-label={`关闭 ${tab.label}`}
-                className="mr-1 size-7 shrink-0 opacity-55 hover:opacity-100"
+                className="relative z-10 mr-1 size-7 shrink-0 opacity-55 hover:opacity-100"
                 onClick={() => onCloseTab(tab.id)}
                 size="icon-sm"
                 variant="ghost"
