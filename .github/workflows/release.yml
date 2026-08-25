@@ -17,14 +17,17 @@ jobs:
           - platform: macos-15
             target: aarch64-apple-darwin
             sidecar_ext: ""
+            beta_bundle_args: ""
             tauri_args: "--target aarch64-apple-darwin"
           - platform: macos-15-intel
             target: x86_64-apple-darwin
             sidecar_ext: ""
+            beta_bundle_args: ""
             tauri_args: "--target x86_64-apple-darwin"
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             sidecar_ext: ".exe"
+            beta_bundle_args: "--bundles nsis"
             tauri_args: "--target x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
@@ -118,7 +121,7 @@ jobs:
           releaseBody: "Download the installer for your platform."
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: "${{ matrix.tauri_args }} --config src-tauri/tauri.release.conf.json"
+          args: "${{ matrix.tauri_args }} ${{ contains(github.ref_name, '-') && matrix.beta_bundle_args || '' }} --config src-tauri/tauri.release.conf.json"
 
   publish-release:
     needs: release
