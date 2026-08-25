@@ -4,12 +4,17 @@ This guide covers the GitHub Actions release flow and the configuration required
 
 ## Release Flow
 
-Pushing a version tag starts the GitHub Actions release workflow. It builds the pinned Melody sidecar for Apple Silicon macOS, Intel macOS, and x64 Windows, then produces signed update bundles and `latest.json`.
+MelodyWork uses two long-lived release branches:
 
-- `vX.Y.Z` publishes a **stable** release. Its signed manifest is available from GitHub's `releases/latest` endpoint.
-- `vX.Y.Z-beta.N` publishes a **beta** prerelease. The workflow also replaces the signed manifest in the persistent `update-beta` prerelease, which gives beta-channel clients a stable endpoint without making a beta release the stable latest release.
+- `main` is the **stable** line. It is the source of every formal release.
+- `beta` is the **test** line. Test changes and prerelease versions are prepared here before they are promoted to `main`.
 
-The tag must match the version in `package.json` and `src-tauri/tauri.conf.json`. Use a matching beta version in those files before creating a beta tag.
+Pushing a version tag starts the GitHub Actions release workflow. It builds the pinned Melody sidecar for Apple Silicon macOS, Intel macOS, and x64 Windows, then produces signed update bundles and `latest.json`. The workflow rejects a tag that does not belong to its intended branch.
+
+- On `main`, `vX.Y.Z` publishes a **stable** release. Its signed manifest is available from GitHub's `releases/latest` endpoint.
+- On `beta`, `vX.Y.Z-beta.N` publishes a **beta** prerelease. The workflow also replaces the signed manifest in the persistent `update-beta` prerelease, which gives beta-channel clients a stable endpoint without making a beta release the stable latest release.
+
+The tag must match the version in `package.json` and `src-tauri/tauri.conf.json`. Use a matching beta version in those files before creating a beta tag. When a beta is accepted, merge the tested changes into `main`, replace the prerelease version with the final version, then create the stable tag.
 
 ## Required Configuration
 

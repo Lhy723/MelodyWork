@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4.4.0
 
@@ -40,11 +41,21 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Verify release tag matches package version
+      - name: Verify release tag and source branch
         shell: bash
         run: |
           package_version="$(node -p "require('./package.json').version")"
           test "$GITHUB_REF_NAME" = "v$package_version"
+
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_branch="beta"
+          else
+            release_branch="main"
+          fi
+
+          git fetch --no-tags origin "+refs/heads/$release_branch:refs/remotes/origin/$release_branch"
+          release_commit="$(git rev-list -n 1 "$GITHUB_REF")"
+          git merge-base --is-ancestor "$release_commit" "origin/$release_branch"
 
       - uses: dtolnay/rust-toolchain@master
         with:
