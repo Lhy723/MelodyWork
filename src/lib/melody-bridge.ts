@@ -48,6 +48,22 @@ export interface AppUpdateStatus {
   installed: boolean;
 }
 
+export interface AppReleaseHistoryItem {
+  tagName: string;
+  name: string;
+  body?: string;
+  publishedAt?: string;
+  isPrerelease: boolean;
+  url: string;
+}
+
+export interface EnvironmentCapability {
+  name: string;
+  version?: string;
+  installed: boolean;
+  description: string;
+}
+
 interface ResearchHttpResponse {
   body: string;
   contentType?: string;
@@ -98,6 +114,62 @@ export const openExternalUrl = async (candidate: string): Promise<void> => {
     throw new Error("浏览器阻止了打开外部链接。");
   }
 };
+
+const APP_RELEASES_URL =
+  "https://api.github.com/repos/Lhy723/MelodyWork/releases?per_page=12";
+
+export const getAppReleaseHistory = async (): Promise<
+  AppReleaseHistoryItem[]
+> => {
+  const response = await fetch(APP_RELEASES_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub Releases 请求失败（${response.status}）。`);
+  }
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("GitHub Releases 返回了无法识别的数据。");
+  }
+  return payload.flatMap((item): AppReleaseHistoryItem[] => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const release = item as Record<string, unknown>;
+    const tagName =
+      typeof release.tag_name === "string" ? release.tag_name : "";
+    const htmlUrl =
+      typeof release.html_url === "string" ? release.html_url : "";
+    if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tagName) || !htmlUrl) {
+      return [];
+    }
+    return [
+      {
+        tagName,
+        name:
+          typeof release.name === "string" && release.name.trim()
+            ? release.name
+            : tagName,
+        body: typeof release.body === "string" ? release.body : undefined,
+        publishedAt:
+          typeof release.published_at === "string"
+            ? release.published_at
+            : undefined,
+        isPrerelease: release.prerelease === true,
+        url: htmlUrl,
+      },
+    ];
+  });
+};
+
+export const getEnvironmentCapabilities = async (): Promise<
+  EnvironmentCapability[]
+> =>
+  isTauriRuntime()
+    ? invoke<EnvironmentCapability[]>("get_environment_capabilities")
+    : [];
 
 export const fetchResearchResource = async (
   url: string,

@@ -4,6 +4,7 @@ mod capability_lifecycle;
 mod config_io;
 mod config_runtime;
 mod database;
+mod environment_runtime;
 mod git_runtime;
 mod melody_command;
 mod research_runtime;
@@ -25,6 +26,7 @@ use database::{
     get_usage_statistics, list_permission_rules, list_projects, list_sessions,
     read_session_timeline, update_session, upsert_permission_rule, upsert_project,
 };
+use environment_runtime::get_environment_capabilities;
 use git_runtime::{
     git_branches, git_changes, git_checkout_branch, git_commit, git_create_branch,
     git_create_worktree, git_diff, git_remove_worktree, git_stage, git_unstage, git_worktrees,
@@ -79,6 +81,7 @@ pub fn run() {
             read_session_timeline,
             delete_session,
             get_usage_statistics,
+            get_environment_capabilities,
             workspace_tree,
             pick_workspace_directory,
             read_workspace_binary_file,
