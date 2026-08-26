@@ -18,6 +18,14 @@ import appPackage from "../../../package.json";
 import appIcon from "../../../src-tauri/icons/128x128.png";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { toUserMessage } from "@/domain/app-error";
 import {
   getAppReleaseHistory,
@@ -195,7 +203,11 @@ function GithubMark({ className }: { className?: string }) {
 
 export function AboutPage() {
   const [currentVersion, setCurrentVersion] = useState(appPackage.version);
+  const autoCheckForUpdates = useAppSettingsStore(
+    (state) => state.autoCheckForUpdates,
+  );
   const updateChannel = useAppSettingsStore((state) => state.updateChannel);
+  const setAppSetting = useAppSettingsStore((state) => state.setSetting);
   const [updateState, setUpdateState] = useState<UpdateCheckState>({
     status: "idle",
   });
@@ -411,9 +423,49 @@ export function AboutPage() {
                 </Button>
               </div>
             }
-            description={`当前渠道：${updateChannelLabel[updateChannel]}。可在通用设置中切换。`}
+            description={`当前渠道：${updateChannelLabel[updateChannel]}。自动检查和渠道设置可在此处管理。`}
             title={<span id="about-update-title">软件更新</span>}
           />
+          <div className="divide-y border-b">
+            <div className="flex min-h-14 items-center gap-5 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm">自动检查 MelodyWork 更新</p>
+                <p className="mt-0.5 text-muted-foreground text-xs leading-4">
+                  启动时检查可用更新；发现新版本后由你确认安装。
+                </p>
+              </div>
+              <Switch
+                aria-label="自动检查 MelodyWork 更新"
+                checked={autoCheckForUpdates}
+                className="data-[state=checked]:bg-blue-500"
+                onCheckedChange={(next) =>
+                  setAppSetting("autoCheckForUpdates", next)
+                }
+              />
+            </div>
+            <div className="flex min-h-14 items-center gap-5 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm">检测更新渠道</p>
+                <p className="mt-0.5 text-muted-foreground text-xs leading-4">
+                  正式版更稳定；测试版会更早提供新功能，可能包含未解决的问题。
+                </p>
+              </div>
+              <Select
+                onValueChange={(next) =>
+                  setAppSetting("updateChannel", next as UpdateChannel)
+                }
+                value={updateChannel}
+              >
+                <SelectTrigger aria-label="检测更新渠道" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stable">正式版</SelectItem>
+                  <SelectItem value="beta">测试版</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="p-5">
             {updateState.status === "available" ||
             updateState.status === "installing" ? (

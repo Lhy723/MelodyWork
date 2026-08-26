@@ -1240,28 +1240,6 @@ function ApplicationGeneralSettings() {
 
       <PreferenceGroup title="常规">
         <PreferenceRow
-          description="启动时检查可用的 MelodyWork 更新；发现更新后由你确认安装。"
-          label="自动检查 MelodyWork 更新"
-        >
-          <PreferenceSwitch
-            label="自动检查 MelodyWork 更新"
-            settingKey="autoCheckForUpdates"
-          />
-        </PreferenceRow>
-        <PreferenceRow
-          description="正式版经过完整验证后发布；测试版会更早提供新功能，可能包含未解决的问题。"
-          label="检测更新渠道"
-        >
-          <PreferenceSelect
-            label="检测更新渠道"
-            options={[
-              { label: "正式版", value: "stable" },
-              { label: "测试版", value: "beta" },
-            ]}
-            settingKey="updateChannel"
-          />
-        </PreferenceRow>
-        <PreferenceRow
           description="从消息或工具活动中打开文件时使用的应用。"
           label="默认文件打开目标"
         >
@@ -2735,7 +2713,7 @@ const configurationSections = (scope: MelodyConfigScope): SettingSection[] =>
         {
           id: "general",
           label: "常规",
-          description: "应用权限、更新、编辑器、窗口与通知偏好。",
+          description: "应用权限、编辑器、窗口与通知偏好。",
           icon: Settings2Icon,
           settings: [],
         },
