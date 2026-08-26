@@ -7,6 +7,8 @@ mod database;
 mod environment_runtime;
 mod git_runtime;
 mod melody_command;
+mod menu_bar;
+mod power_runtime;
 mod research_runtime;
 mod update_runtime;
 mod workspace_access;
@@ -26,7 +28,7 @@ use database::{
     get_usage_statistics, list_permission_rules, list_projects, list_sessions,
     read_session_timeline, update_session, upsert_permission_rule, upsert_project,
 };
-use environment_runtime::get_environment_capabilities;
+use environment_runtime::{get_environment_capabilities, get_file_opener_availability};
 use git_runtime::{
     git_branches, git_changes, git_checkout_branch, git_commit, git_create_branch,
     git_create_worktree, git_diff, git_remove_worktree, git_stage, git_unstage, git_worktrees,
@@ -52,11 +54,25 @@ pub fn run() {
         .setup(|app| {
             let database = AppDatabase::open(app.handle())?;
             app.manage(database);
+            #[cfg(desktop)]
+            menu_bar::initialize(app)?;
             Ok(())
         })
         .manage(AgentRuntime::default())
         .manage(WorkspaceRegistry::default())
         .manage(TerminalRuntime::default())
+        .manage(menu_bar::MenuBarState::default())
+        .manage(power_runtime::SystemSleepState::default())
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.app_handle().state::<menu_bar::MenuBarState>();
+                if state.is_enabled() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             agent_status,
             start_agent,
@@ -82,6 +98,9 @@ pub fn run() {
             delete_session,
             get_usage_statistics,
             get_environment_capabilities,
+            get_file_opener_availability,
+            menu_bar::set_menu_bar_visibility,
+            power_runtime::set_system_sleep_prevention,
             workspace_tree,
             pick_workspace_directory,
             read_workspace_binary_file,

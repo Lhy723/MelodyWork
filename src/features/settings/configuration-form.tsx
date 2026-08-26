@@ -9,13 +9,20 @@ import {
   MonitorIcon,
   NetworkIcon,
   PlusIcon,
+  RefreshCwIcon,
   ServerIcon,
   Settings2Icon,
   ShieldIcon,
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,12 +45,14 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { AgentModelOption, AgentPermissionMode } from "@/domain/acp";
 import type { MelodyConfigScope, MelodyConfigValue } from "@/domain/config";
+import { getFileOpenerAvailability } from "@/lib/melody-bridge";
 import { requestSystemNotificationPermission } from "@/lib/system-notifications";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agent-store";
 import {
   useAppSettingsStore,
   type AppSettings,
+  type FileOpener,
 } from "@/stores/app-settings-store";
 
 type ConfigValues = Record<string, MelodyConfigValue>;
@@ -127,6 +136,9 @@ interface ConfigurationFormProps {
   scope: MelodyConfigScope;
   values: ConfigValues;
   onChange: (path: string[], value: MelodyConfigValue) => void;
+  onReload?: () => void;
+  reloadDisabled?: boolean;
+  reloadLoading?: boolean;
 }
 
 export interface ConfigurationNavigationItem {
@@ -316,17 +328,6 @@ const userSections: SettingSection[] = [
         defaultValue: true,
       },
       {
-        path: ["ui", "screen_mode"],
-        label: "屏幕模式",
-        description: "控制 Melody 终端界面的占屏方式。",
-        kind: "select",
-        defaultValue: "fullscreen",
-        options: [
-          { value: "fullscreen", label: "全屏" },
-          { value: "inline", label: "行内" },
-        ],
-      },
-      {
         path: ["ui", "scroll_mode"],
         label: "滚动模式",
         description: "按输入设备优化滚动手感。",
@@ -381,20 +382,6 @@ const userSections: SettingSection[] = [
     description: "可选能力、隐私和索引行为。",
     icon: CircleGaugeIcon,
     settings: [
-      {
-        path: ["features", "telemetry"],
-        label: "遥测",
-        description: "发送匿名使用数据以帮助改进 Melody。",
-        kind: "boolean",
-        defaultValue: false,
-      },
-      {
-        path: ["features", "feedback"],
-        label: "反馈入口",
-        description: "在界面中显示反馈功能。",
-        kind: "boolean",
-        defaultValue: true,
-      },
       {
         path: ["features", "lsp_tools"],
         label: "LSP 工具",
@@ -1024,16 +1011,18 @@ function PreferenceRow({
   label,
 }: {
   children: ReactNode;
-  description: string;
+  description?: string;
   label: string;
 }) {
   return (
     <div className="flex min-h-14 items-center gap-5 border-t px-4 py-2.5 first:border-t-0">
       <div className="min-w-0 flex-1">
         <p className="font-medium text-sm">{label}</p>
-        <p className="mt-0.5 text-muted-foreground text-xs leading-4">
-          {description}
-        </p>
+        {description ? (
+          <p className="mt-0.5 text-muted-foreground text-xs leading-4">
+            {description}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center">{children}</div>
     </div>
@@ -1087,6 +1076,159 @@ function PreferenceSelect<Key extends keyof AppSettings>({
   );
 }
 
+const fileOpenerOptions: {
+  value: FileOpener;
+  label: string;
+}[] = [
+  { value: "system", label: "系统默认" },
+  { value: "vscode", label: "Visual Studio Code" },
+  { value: "cursor", label: "Cursor" },
+];
+
+const defaultFileOpenerAvailability: Record<FileOpener, boolean> = {
+  system: true,
+  vscode: false,
+  cursor: false,
+};
+
+function VisualStudioCodeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="M17.5 2.5 12 7.42 6.5 2.5 2 5.5v13l4.5 3 5.5-4.92 5.5 4.92 4.5-3v-13l-4.5-3Z"
+        fill="#007ACC"
+      />
+      <path
+        d="m6.5 7.57-1.9 1.23v6.4l1.9 1.23 4.4-4.43-4.4-4.43Z"
+        fill="#fff"
+      />
+      <path
+        d="m13.8 8.57 4.4-3.96v14.78l-4.4-3.96 2.2-3.43-2.2-3.43Z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
+function CursorIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <rect fill="currentColor" height="20" rx="5" width="20" x="2" y="2" />
+      <path d="m15.9 6.2-5.8 3.3-3.3 5.8 5.8-3.3 3.3-5.8Z" fill="white" />
+      <path
+        d="m12.6 12.3 4.4 4.4"
+        stroke="white"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function FileOpenerIcon({
+  className,
+  opener,
+}: {
+  className?: string;
+  opener: FileOpener;
+}) {
+  if (opener === "vscode") {
+    return <VisualStudioCodeIcon className={className} />;
+  }
+  if (opener === "cursor") {
+    return <CursorIcon className={className} />;
+  }
+  return <MonitorIcon aria-hidden="true" className={className} />;
+}
+
+function FileOpenerPreference() {
+  const value = useAppSettingsStore((state) => state.defaultFileOpener);
+  const setSetting = useAppSettingsStore((state) => state.setSetting);
+  const [availability, setAvailability] = useState(
+    defaultFileOpenerAvailability,
+  );
+  const [scanState, setScanState] = useState<"checking" | "ready" | "failed">(
+    "checking",
+  );
+
+  const scanFileOpeners = useCallback(async () => {
+    setScanState("checking");
+    try {
+      const detected = await getFileOpenerAvailability();
+      const next = { ...defaultFileOpenerAvailability };
+      for (const item of detected) {
+        next[item.id] = item.installed;
+      }
+      setAvailability(next);
+      const currentValue = useAppSettingsStore.getState().defaultFileOpener;
+      if (currentValue !== "system" && !next[currentValue]) {
+        useAppSettingsStore
+          .getState()
+          .setSetting("defaultFileOpener", "system");
+      }
+      setScanState("ready");
+    } catch {
+      setScanState("failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    void scanFileOpeners();
+  }, [scanFileOpeners]);
+
+  const visibleOptions =
+    scanState === "ready"
+      ? fileOpenerOptions.filter(
+          (option) => option.value === "system" || availability[option.value],
+        )
+      : fileOpenerOptions.filter((option) => option.value === "system");
+  const selectedValue = visibleOptions.some((option) => option.value === value)
+    ? value
+    : "system";
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Select
+        onValueChange={(next) =>
+          setSetting("defaultFileOpener", next as FileOpener)
+        }
+        value={selectedValue}
+      >
+        <SelectTrigger aria-label="默认文件打开目标" className="w-48">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="min-w-52" matchTriggerWidth={false}>
+          {visibleOptions.map((option) => {
+            return (
+              <SelectItem key={option.value} value={option.value}>
+                <span className="flex min-w-0 items-center gap-2">
+                  <FileOpenerIcon
+                    className="size-4 shrink-0"
+                    opener={option.value}
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {option.label}
+                  </span>
+                </span>
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function PreferenceSwitch<Key extends keyof AppSettings>({
   label,
   settingKey,
@@ -1137,9 +1279,11 @@ function PermissionModePreference() {
 }
 
 function NotificationPreferenceSwitch({
+  label,
   settingKey,
 }: {
-  settingKey: "permissionNotifications";
+  label: string;
+  settingKey: "permissionNotifications" | "questionNotifications";
 }) {
   const value = useAppSettingsStore((state) => state[settingKey]);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
@@ -1147,7 +1291,7 @@ function NotificationPreferenceSwitch({
   return (
     <div className="flex flex-col items-end gap-1">
       <Switch
-        aria-label="启用权限通知"
+        aria-label={label}
         checked={value}
         onCheckedChange={(checked) => {
           if (!checked) {
@@ -1239,11 +1383,8 @@ function ApplicationGeneralSettings() {
       </PreferenceGroup>
 
       <PreferenceGroup title="常规">
-        <PreferenceRow
-          description="从消息或工具活动中打开文件时使用的应用。"
-          label="默认文件打开目标"
-        >
-          <UnavailableControl />
+        <PreferenceRow label="默认文件打开目标">
+          <FileOpenerPreference />
         </PreferenceRow>
         <PreferenceRow description="MelodyWork 界面使用的语言。" label="语言">
           <UnavailableControl label="简体中文 · 其他语言尚未实现" />
@@ -1252,31 +1393,16 @@ function ApplicationGeneralSettings() {
           description="关闭主窗口后仍在系统菜单栏中保留 MelodyWork。"
           label="在菜单栏中显示"
         >
-          <UnavailableControl />
-        </PreferenceRow>
-        <PreferenceRow
-          description="在应用底部显示终端和其他面板控件。"
-          label="底部面板"
-        >
-          <UnavailableControl />
-        </PreferenceRow>
-        <PreferenceRow
-          description="选择终端快捷键和环境操作在何处打开终端标签页。"
-          label="默认终端位置"
-        >
-          <UnavailableControl />
+          <PreferenceSwitch label="在菜单栏中显示" settingKey="showInMenuBar" />
         </PreferenceRow>
         <PreferenceRow
           description="代理运行时阻止系统自动休眠。"
           label="运行时防止系统休眠"
         >
-          <UnavailableControl />
-        </PreferenceRow>
-        <PreferenceRow
-          description="搜索项目文件和已连接应用，建议下一步操作。"
-          label="建议提示"
-        >
-          <UnavailableControl />
+          <PreferenceSwitch
+            label="运行时防止系统休眠"
+            settingKey="preventSystemSleep"
+          />
         </PreferenceRow>
         <PreferenceRow
           description="导入其他客户端导出的 JSON 设置。"
@@ -1356,18 +1482,15 @@ function ApplicationGeneralSettings() {
         </PreferenceRow>
       </PreferenceGroup>
 
-      <PreferenceGroup title="弹出窗口">
+      <PreferenceGroup title="新建任务">
         <PreferenceRow
-          description="为弹出输入窗口设置全局快捷键；留空表示禁用。"
-          label="弹出窗口快捷键"
+          description="新建任务默认使用不绑定项目目录的独立聊天。"
+          label="默认使用独立聊天"
         >
-          <UnavailableControl />
-        </PreferenceRow>
-        <PreferenceRow
-          description="无需选择项目即可开始新任务。"
-          label="默认设为无项目任务"
-        >
-          <UnavailableControl />
+          <PreferenceSwitch
+            label="默认使用独立聊天"
+            settingKey="defaultIndependentChat"
+          />
         </PreferenceRow>
       </PreferenceGroup>
 
@@ -1382,13 +1505,19 @@ function ApplicationGeneralSettings() {
           description="在需要授权时显示系统提醒。"
           label="启用权限通知"
         >
-          <NotificationPreferenceSwitch settingKey="permissionNotifications" />
+          <NotificationPreferenceSwitch
+            label="启用权限通知"
+            settingKey="permissionNotifications"
+          />
         </PreferenceRow>
         <PreferenceRow
           description="代理需要你回答问题时显示系统提醒。"
           label="启用问题通知"
         >
-          <UnavailableControl />
+          <NotificationPreferenceSwitch
+            label="启用问题通知"
+            settingKey="questionNotifications"
+          />
         </PreferenceRow>
       </PreferenceGroup>
 
@@ -1635,12 +1764,6 @@ function ApplicationAppearanceSettings() {
             />
             <span className="text-muted-foreground text-xs">px</span>
           </div>
-        </PreferenceRow>
-        <PreferenceRow
-          description="使用颜色或加减号标记文件变更。"
-          label="差异标记"
-        >
-          <UnavailableControl />
         </PreferenceRow>
         <PreferenceRow
           description="在 macOS 上使用原生字体抗锯齿。"
@@ -2746,6 +2869,9 @@ export const getConfigurationNavigation = (
 
 export function ConfigurationForm({
   availableModels,
+  onReload,
+  reloadDisabled = false,
+  reloadLoading = false,
   sectionId,
   scope,
   values,
@@ -2762,10 +2888,30 @@ export function ConfigurationForm({
   return (
     <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
       <div className="mx-auto max-w-3xl">
-        <h3 className="font-semibold text-lg">{active.label}</h3>
-        <p className="mt-1 text-muted-foreground text-sm">
-          {active.description}
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-lg">{active.label}</h3>
+            <p className="mt-1 text-muted-foreground text-sm">
+              {active.description}
+            </p>
+          </div>
+          {scope === "project" && onReload ? (
+            <Button
+              aria-label="重新加载项目配置"
+              disabled={reloadDisabled}
+              onClick={onReload}
+              size="sm"
+              title="重新加载项目配置"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCwIcon
+                className={cn("size-3.5", reloadLoading && "animate-spin")}
+              />
+              重新加载
+            </Button>
+          ) : null}
+        </div>
         <div className="mt-5">
           {active.id === "general" ? (
             <ApplicationGeneralSettings />

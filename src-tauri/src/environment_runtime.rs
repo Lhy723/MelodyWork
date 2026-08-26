@@ -1,3 +1,6 @@
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
+
 use serde::Serialize;
 use tokio::process::Command;
 
@@ -8,6 +11,13 @@ pub struct EnvironmentCapability {
     pub version: Option<String>,
     pub installed: bool,
     pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOpenerAvailability {
+    pub id: String,
+    pub installed: bool,
 }
 
 #[tauri::command]
@@ -28,6 +38,103 @@ pub async fn get_environment_capabilities() -> Vec<EnvironmentCapability> {
         )
         .await,
     ]
+}
+
+#[tauri::command]
+pub async fn get_file_opener_availability() -> Vec<FileOpenerAvailability> {
+    vec![
+        FileOpenerAvailability {
+            id: "system".to_string(),
+            installed: true,
+        },
+        FileOpenerAvailability {
+            id: "vscode".to_string(),
+            installed: detect_editor("vscode").await,
+        },
+        FileOpenerAvailability {
+            id: "cursor".to_string(),
+            installed: detect_editor("cursor").await,
+        },
+    ]
+}
+
+async fn detect_editor(id: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let app_name = match id {
+            "vscode" => "Visual Studio Code",
+            "cursor" => "Cursor",
+            _ => return false,
+        };
+        if command_succeeds("/usr/bin/open", &["-Ra", app_name]).await {
+            return true;
+        }
+    }
+
+    let binary = match id {
+        "vscode" => "code",
+        "cursor" => "cursor",
+        _ => return false,
+    };
+    if command_succeeds(binary, &["--version"]).await {
+        return true;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return windows_editor_paths(id).iter().any(|path| path.is_file());
+    }
+
+    false
+}
+
+async fn command_succeeds(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_editor_paths(id: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(PathBuf::from(local_app_data));
+    }
+    if let Some(program_files) = std::env::var_os("PROGRAMFILES") {
+        roots.push(PathBuf::from(program_files));
+    }
+    if let Some(program_files_x86) = std::env::var_os("PROGRAMFILES(X86)") {
+        roots.push(PathBuf::from(program_files_x86));
+    }
+
+    match id {
+        "vscode" => roots
+            .into_iter()
+            .flat_map(|root| {
+                [
+                    root.join("Programs/Microsoft VS Code/Code.exe"),
+                    root.join("Microsoft VS Code/Code.exe"),
+                    root.join("Programs/Microsoft VS Code/bin/code.cmd"),
+                    root.join("Microsoft VS Code/bin/code.cmd"),
+                ]
+            })
+            .collect(),
+        "cursor" => roots
+            .into_iter()
+            .flat_map(|root| {
+                [
+                    root.join("Programs/Cursor/Cursor.exe"),
+                    root.join("Cursor/Cursor.exe"),
+                    root.join("Programs/Cursor/resources/app/bin/cursor.cmd"),
+                    root.join("Cursor/resources/app/bin/cursor.cmd"),
+                ]
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 async fn probe(

@@ -210,7 +210,6 @@ const settingsSidebarItemState = (selected: boolean) =>
 export function SettingsWorkspace({
   cwd,
   projectId,
-  projectName: selectedProjectName,
   initialPage = "configuration",
   macSafeArea = false,
   onClose,
@@ -482,12 +481,6 @@ export function SettingsWorkspace({
     return () => window.clearTimeout(timer);
   }, [configPatches, cwd, scope]);
 
-  const mcpServers = useMemo(() => {
-    const servers = configValues.mcp_servers;
-    return servers && typeof servers === "object" && !Array.isArray(servers)
-      ? Object.keys(servers)
-      : [];
-  }, [configValues]);
   const configNavigation = useMemo(
     () => getConfigurationNavigation(scope),
     [scope],
@@ -502,23 +495,10 @@ export function SettingsWorkspace({
     configNavigation.find((item) => item.id === configSection)?.id ??
     configNavigation[0]?.id ??
     "general";
-  const projectName = useMemo(() => {
-    if (selectedProjectName) {
-      return selectedProjectName;
-    }
-    const normalizedCwd = cwd.replaceAll("\\", "/").replace(/\/+$/, "");
-    return normalizedCwd.split("/").at(-1) || "当前项目";
-  }, [cwd, selectedProjectName]);
   const scopeDescription =
     scope === "user"
       ? "影响此设备上的所有任务"
       : "仅显示可写入当前项目的配置项";
-  const configPath = document?.path ?? ".melody/config.toml";
-  const saveStatus = saving
-    ? "正在保存…"
-    : Object.keys(configPatches).length > 0
-      ? "等待保存…"
-      : "已自动保存";
   const scopeLocked = saving || Object.keys(configPatches).length > 0;
   const changeScope = (nextScope: MelodyConfigScope) => {
     if (!scopeLocked && nextScope !== scope) {
@@ -823,42 +803,6 @@ export function SettingsWorkspace({
               </Suspense>
             ) : page === "configuration" ? (
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-                  <div className="min-w-0 flex-1 px-2">
-                    <p className="font-medium text-sm">
-                      {scope === "user"
-                        ? "应用设置"
-                        : `当前项目：${projectName}`}
-                    </p>
-                    <p
-                      className="truncate text-muted-foreground text-xs"
-                      title={scope === "project" ? configPath : undefined}
-                    >
-                      {scope === "user" ? "影响此设备上的所有任务" : configPath}
-                    </p>
-                  </div>
-                  {scope === "project" && mcpServers.length > 0 ? (
-                    <Badge variant="outline">
-                      {mcpServers.length} MCP 个服务器
-                    </Badge>
-                  ) : null}
-                  {scope === "project" ? (
-                    <Button
-                      aria-label="重新加载项目配置"
-                      disabled={loading || scopeLocked}
-                      onClick={() => void loadConfig()}
-                      size="sm"
-                      title="重新加载项目配置"
-                      variant="ghost"
-                    >
-                      <RefreshCwIcon
-                        className={cn(loading && "animate-spin")}
-                      />
-                      重新加载
-                    </Button>
-                  ) : null}
-                  <Badge variant="secondary">{saveStatus}</Badge>
-                </div>
                 {document?.parseError ? (
                   <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
                     <p className="font-medium text-destructive text-sm">
@@ -879,6 +823,9 @@ export function SettingsWorkspace({
                   <ConfigurationForm
                     availableModels={availableModels}
                     onChange={changeConfig}
+                    onReload={() => loadConfig()}
+                    reloadDisabled={loading || scopeLocked}
+                    reloadLoading={loading}
                     sectionId={activeConfigSection}
                     scope={scope}
                     values={configValues}

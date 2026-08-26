@@ -1,4 +1,8 @@
-import type { AgentToolActivity, TimelineEntry } from "./acp";
+import type {
+  AgentQuestionRequest,
+  AgentToolActivity,
+  TimelineEntry,
+} from "./acp";
 
 /**
  * A persisted projection is a recovery hint, not an archive of every byte
@@ -18,6 +22,9 @@ const MAX_ACTIVITY_HUNK_CHARS = 2_000;
 const MAX_ACTIVITY_FILES = 16;
 const MAX_ACTIVITY_HUNKS = 24;
 const MAX_ATTACHMENT_URL_CHARS = 32_000;
+const MAX_QUESTION_CHARS = 4_000;
+const MAX_QUESTION_OPTIONS = 24;
+const MAX_QUESTION_COUNT = 12;
 
 const truncate = (
   value: string | undefined,
@@ -49,6 +56,27 @@ const compactActivity = (
         newText: truncate(hunk.newText, MAX_ACTIVITY_HUNK_CHARS) ?? "",
         contextBefore: truncate(hunk.contextBefore, MAX_ACTIVITY_HUNK_CHARS),
         contextAfter: truncate(hunk.contextAfter, MAX_ACTIVITY_HUNK_CHARS),
+      })),
+    })),
+  };
+};
+
+const compactQuestion = (
+  question: AgentQuestionRequest | undefined,
+): AgentQuestionRequest | undefined => {
+  if (!question) {
+    return undefined;
+  }
+  return {
+    ...question,
+    questions: question.questions.slice(0, MAX_QUESTION_COUNT).map((item) => ({
+      ...item,
+      question: truncate(item.question, MAX_QUESTION_CHARS) ?? "",
+      options: item.options.slice(0, MAX_QUESTION_OPTIONS).map((option) => ({
+        ...option,
+        label: truncate(option.label, MAX_QUESTION_CHARS) ?? "",
+        description: truncate(option.description, MAX_QUESTION_CHARS) ?? "",
+        preview: truncate(option.preview, MAX_QUESTION_CHARS),
       })),
     })),
   };
@@ -92,6 +120,7 @@ const compactEntry = (entry: TimelineEntry): TimelineEntry => {
     command: truncate(entry.command, MAX_TOOL_COMMAND_CHARS) ?? "",
     output: truncate(entry.output, MAX_TOOL_OUTPUT_CHARS) ?? "",
     activity: compactActivity(entry.activity),
+    question: compactQuestion(entry.question),
   };
 };
 

@@ -9,6 +9,8 @@ import type {
   AgentPlanDecision,
   AgentPermissionMode,
   AgentPromptAttachment,
+  AgentQuestionRequest,
+  AgentQuestionResponse,
   AgentReasoningEffortOption,
   AgentSessionModeOption,
   AgentStatus,
@@ -37,6 +39,10 @@ import {
   sessionModeIdFromUpdate,
   sessionModeState,
 } from "@/domain/session-mode";
+import {
+  isUserQuestionMethod,
+  parseUserQuestionRequest,
+} from "@/domain/user-question";
 import {
   markPromptStarted,
   markPromptResponseReceived,
@@ -243,6 +249,10 @@ interface AgentStore {
   selectSessionMode: (modeId: string) => Promise<void>;
   selectPermissionMode: (mode: AgentPermissionMode) => Promise<void>;
   resolvePermission: (entryId: string, optionId: string) => Promise<void>;
+  resolveQuestion: (
+    entryId: string,
+    response: AgentQuestionResponse,
+  ) => Promise<void>;
   resolvePlan: (
     entryId: string,
     outcome: AgentPlanDecision,
@@ -339,6 +349,113 @@ const parsePermissionOptions = (value: unknown): PermissionOption[] =>
         return optionId && name && kind ? [{ optionId, name, kind }] : [];
       })
     : [];
+
+const questionResponseText = (response: AgentQuestionResponse) => {
+  switch (response.outcome) {
+    case "accepted":
+      return "已提交回答，Melody 将继续处理。";
+    case "chat_about_this":
+      return "已请求进一步讨论这些问题。";
+    case "skip_interview":
+      return "已跳过提问，Melody 将继续制定计划。";
+    case "cancelled":
+      return "已取消回答。";
+  }
+};
+
+const questionEntryForRequest = (
+  timeline: TimelineEntry[],
+  request: AgentQuestionRequest,
+): TimelineEntry[] => {
+  const index = timeline.findIndex(
+    (entry) =>
+      entry.kind === "tool" &&
+      (entry.toolCallId === request.toolCallId ||
+        entry.question?.requestId === request.requestId),
+  );
+  const existing = index >= 0 ? timeline[index] : undefined;
+  const existingQuestion =
+    existing?.kind === "tool" ? existing.question : undefined;
+  const keepAnsweredRequest =
+    existingQuestion?.requestId === request.requestId &&
+    existingQuestion.outcome !== "pending";
+  const next: TimelineEntry = {
+    id:
+      existing?.id ??
+      `question-${request.toolCallId}-${String(request.requestId)}`,
+    kind: "tool",
+    toolCallId: request.toolCallId,
+    title:
+      existing?.kind === "tool" && existing.title.trim()
+        ? existing.title
+        : "询问用户",
+    command:
+      existing?.kind === "tool" && existing.command.trim()
+        ? existing.command
+        : "ask_user_question",
+    output:
+      existing?.kind === "tool" && existing.output
+        ? existing.output
+        : "正在等待你的回答。",
+    startedAt: existing?.kind === "tool" ? existing.startedAt : Date.now(),
+    activity: existing?.kind === "tool" ? existing.activity : undefined,
+    status: keepAnsweredRequest
+      ? existing?.kind === "tool"
+        ? existing.status
+        : "completed"
+      : "pending",
+    permission: existing?.kind === "tool" ? existing.permission : undefined,
+    permissionRequestId:
+      existing?.kind === "tool" ? existing.permissionRequestId : undefined,
+    permissionOptions:
+      existing?.kind === "tool" ? existing.permissionOptions : undefined,
+    question: keepAnsweredRequest ? existingQuestion : request,
+  };
+  if (index < 0) {
+    return [...timeline, next];
+  }
+  return timeline.map((entry, entryIndex) =>
+    entryIndex === index ? next : entry,
+  );
+};
+
+const updateQuestionEntry = (
+  timeline: TimelineEntry[],
+  entryId: string,
+  response: AgentQuestionResponse,
+): TimelineEntry[] =>
+  timeline.map((entry) => {
+    if (entry.id !== entryId || entry.kind !== "tool" || !entry.question) {
+      return entry;
+    }
+    const question = entry.question;
+    return {
+      ...entry,
+      output: questionResponseText(response),
+      question: {
+        ...question,
+        outcome: response.outcome,
+        ...(response.outcome === "accepted"
+          ? {
+              answers: response.answers,
+              annotations: response.annotations,
+              partialAnswers: undefined,
+            }
+          : response.outcome === "chat_about_this" ||
+              response.outcome === "skip_interview"
+            ? {
+                partialAnswers: response.partialAnswers,
+                answers: undefined,
+                annotations: undefined,
+              }
+            : {
+                answers: undefined,
+                annotations: undefined,
+                partialAnswers: undefined,
+              }),
+      },
+    };
+  });
 
 const errorMessage = (message: AcpEnvelope, fallback: string) =>
   stringValue(objectValue(message.error?.data)?.message) ??
@@ -1032,6 +1149,33 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   receiveAcp: async (message) => {
     pruneTransientState();
     try {
+      if (isUserQuestionMethod(message.method) && message.id !== undefined) {
+        const request = parseUserQuestionRequest(message, get().acpSessionId);
+        if (!request) {
+          return;
+        }
+        markPromptActivity(request.sessionId);
+        const currentAcpSessionId = get().acpSessionId;
+        if (currentAcpSessionId && request.sessionId !== currentAcpSessionId) {
+          set((state) => ({
+            backgroundTimelines: {
+              ...state.backgroundTimelines,
+              [request.sessionId]: questionEntryForRequest(
+                state.backgroundTimelines[request.sessionId] ?? [],
+                request,
+              ),
+            },
+          }));
+        } else {
+          set((state) => ({
+            timeline: questionEntryForRequest(state.timeline, request),
+            acpPhase: "prompting",
+            chatStatus: "streaming",
+          }));
+        }
+        return;
+      }
+
       if (message.id === INITIALIZE_REQUEST_ID) {
         if (message.error) {
           set({
@@ -2194,5 +2338,66 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         },
       },
     });
+  },
+  resolveQuestion: async (entryId, response) => {
+    const state = get();
+    let entry = state.timeline.find((item) => item.id === entryId);
+    let backgroundSessionId: string | undefined;
+    if (!entry) {
+      for (const [sessionId, timeline] of Object.entries(
+        state.backgroundTimelines,
+      )) {
+        const candidate = timeline.find((item) => item.id === entryId);
+        if (candidate) {
+          entry = candidate;
+          backgroundSessionId = sessionId;
+          break;
+        }
+      }
+    }
+    if (
+      entry?.kind !== "tool" ||
+      !entry.question ||
+      entry.question.outcome !== "pending"
+    ) {
+      return;
+    }
+    const requestId = entry.question.requestId;
+    const wireResponse =
+      response.outcome === "chat_about_this" ||
+      response.outcome === "skip_interview"
+        ? {
+            outcome: response.outcome,
+            partial_answers: response.partialAnswers,
+          }
+        : response;
+    try {
+      await sendAcp({
+        jsonrpc: "2.0",
+        id: requestId,
+        result: wireResponse,
+      });
+    } catch (reason) {
+      set({
+        status: { ...get().status, message: reasonMessage(reason) },
+      });
+      throw reason;
+    }
+    set((current) =>
+      backgroundSessionId
+        ? {
+            backgroundTimelines: {
+              ...current.backgroundTimelines,
+              [backgroundSessionId]: updateQuestionEntry(
+                current.backgroundTimelines[backgroundSessionId] ?? [],
+                entryId,
+                response,
+              ),
+            },
+          }
+        : {
+            timeline: updateQuestionEntry(current.timeline, entryId, response),
+          },
+    );
   },
 }));

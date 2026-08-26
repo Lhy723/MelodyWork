@@ -342,6 +342,7 @@ pub(crate) fn inspect_server_response(
                 Err("Plan response outcome is invalid".to_string())
             }
         }
+        "x.ai/ask_user_question" | "_x.ai/ask_user_question" => inspect_question_response(object),
         method => Err(format!(
             "Responses to ACP method {method} are not supported"
         )),
@@ -358,9 +359,83 @@ fn value_bool(object: Option<&serde_json::Map<String, Value>>, names: &[&str]) -
 }
 
 fn session_id(params: Option<&serde_json::Map<String, Value>>) -> Option<&str> {
+    let params = params?;
     params
-        .and_then(|params| params.get("sessionId").or_else(|| params.get("session_id")))
+        .get("sessionId")
+        .or_else(|| params.get("session_id"))
         .and_then(Value::as_str)
+        .or_else(|| {
+            params
+                .get("params")
+                .and_then(Value::as_object)
+                .and_then(|nested| nested.get("sessionId").or_else(|| nested.get("session_id")))
+                .and_then(Value::as_str)
+        })
+}
+
+fn inspect_question_response(
+    object: &serde_json::Map<String, Value>,
+) -> Result<ServerResponseAction, String> {
+    if object.contains_key("error") {
+        return Ok(ServerResponseAction::None);
+    }
+    let result = object
+        .get("result")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Question response result is invalid".to_string())?;
+    let outcome = result
+        .get("outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Question response outcome is missing".to_string())?;
+    match outcome {
+        "accepted" => {
+            let answers = result
+                .get("answers")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "Question response answers are missing".to_string())?;
+            for answer in answers.values() {
+                let valid = answer.as_str().is_some()
+                    || answer
+                        .as_array()
+                        .is_some_and(|values| values.iter().all(Value::is_string));
+                if !valid {
+                    return Err("Question response answers must be strings".to_string());
+                }
+            }
+            if let Some(annotations) = result.get("annotations") {
+                let Some(annotations) = annotations.as_object() else {
+                    return Err("Question response annotations are invalid".to_string());
+                };
+                for annotation in annotations.values() {
+                    let Some(annotation) = annotation.as_object() else {
+                        return Err("Question response annotation is invalid".to_string());
+                    };
+                    for key in ["preview", "notes"] {
+                        if let Some(value) = annotation.get(key)
+                            && !value.is_string()
+                        {
+                            return Err("Question response annotation text is invalid".to_string());
+                        }
+                    }
+                }
+            }
+            Ok(ServerResponseAction::None)
+        }
+        "chat_about_this" | "skip_interview" => {
+            if let Some(partial_answers) = result
+                .get("partial_answers")
+                .or_else(|| result.get("partialAnswers"))
+                && !partial_answers
+                    .as_object()
+                    .is_some_and(|answers| answers.values().all(Value::is_string))
+            {
+                return Err("Question response partial answers are invalid".to_string());
+            }
+            Ok(ServerResponseAction::None)
+        }
+        "cancelled" => Ok(ServerResponseAction::None),
+        _ => Err("Question response outcome is invalid".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -380,6 +455,23 @@ mod tests {
                     { "optionId": "allow-once", "kind": "allow_once" },
                     { "optionId": "reject-once", "kind": "reject_once" }
                 ]
+            }
+        })
+    }
+
+    fn question_request(id: usize, method: &str) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": {
+                "sessionId": "session-1",
+                "toolCallId": "question-1",
+                "questions": [{
+                    "question": "Which database?",
+                    "options": [{ "label": "SQLite", "description": "Local" }]
+                }],
+                "mode": "default"
             }
         })
     }
@@ -463,6 +555,84 @@ mod tests {
                 &request,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn validates_user_question_responses() {
+        let mut pending = PendingServerRequests::default();
+        pending.remember(&question_request(2, "x.ai/ask_user_question"));
+        let request = pending.take(&json!(2)).unwrap();
+
+        assert_eq!(
+            inspect_server_response(
+                &json!({
+                    "result": {
+                        "outcome": "accepted",
+                        "answers": { "Which database?": ["SQLite"] },
+                        "annotations": { "Which database?": { "notes": "local" } }
+                    }
+                }),
+                &request,
+            )
+            .unwrap(),
+            ServerResponseAction::None
+        );
+        assert!(
+            inspect_server_response(
+                &json!({
+                    "result": { "outcome": "accepted", "answers": { "Which database?": [1] } }
+                }),
+                &request,
+            )
+            .is_err()
+        );
+        assert!(
+            inspect_server_response(
+                &json!({
+                    "result": {
+                        "outcome": "accepted",
+                        "answers": { "Which database?": ["SQLite"] },
+                        "annotations": { "Which database?": { "notes": 1 } }
+                    }
+                }),
+                &request,
+            )
+            .is_err()
+        );
+        assert!(
+            inspect_server_response(
+                &json!({
+                    "result": { "outcome": "chat_about_this", "partial_answers": {} }
+                }),
+                &request,
+            )
+            .is_ok()
+        );
+        assert!(
+            inspect_server_response(&json!({ "result": { "outcome": "unknown" } }), &request,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn remembers_wrapped_question_session_id() {
+        let mut pending = PendingServerRequests::default();
+        pending.remember(&json!({
+            "id": "wrapped-1",
+            "method": "_x.ai/ask_user_question",
+            "params": {
+                "method": "x.ai/ask_user_question",
+                "params": {
+                    "sessionId": "session-wrapped",
+                    "toolCallId": "question-wrapped",
+                    "questions": [{ "question": "Continue?", "options": [] }]
+                }
+            }
+        }));
+        assert_eq!(
+            pending.take(&json!("wrapped-1")).unwrap().session_id(),
+            Some("session-wrapped")
         );
     }
 

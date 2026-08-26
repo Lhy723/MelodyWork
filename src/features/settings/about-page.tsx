@@ -227,6 +227,10 @@ export function AboutPage() {
 
   const isBusy =
     updateState.status === "checking" || updateState.status === "installing";
+  const updateCheckDescription =
+    updateChannel === "beta"
+      ? "优先检查测试版；没有更高测试版时也会检查正式版的签名更新。"
+      : "检查正式版渠道的签名更新。";
 
   const refreshReleaseHistory = useCallback(async () => {
     setReleaseHistoryState("loading");
@@ -521,7 +525,7 @@ export function AboutPage() {
               <p className="text-muted-foreground text-xs">
                 {updateState.status === "checking"
                   ? "正在读取更新清单…"
-                  : `MelodyWork 会检查${updateChannelLabel[updateChannel]}渠道的签名更新。`}
+                  : `MelodyWork ${updateCheckDescription}`}
               </p>
             ) : null}
           </div>

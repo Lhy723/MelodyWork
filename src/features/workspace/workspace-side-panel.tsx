@@ -403,6 +403,7 @@ export function WorkspaceSidePanel({
                   <SubagentConversation
                     active={activeTabId === tab.id}
                     cwd={cwd}
+                    onOpenFile={onOpenFile}
                     onOpenProjectReference={onOpenProjectReference}
                     projectRoot={root}
                     subagent={subagents[tab.subagentId]}
