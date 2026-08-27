@@ -39,8 +39,8 @@ use update_runtime::check_app_update;
 use workspace_access::WorkspaceRegistry;
 use workspace_runtime::{
     TerminalRuntime, close_terminal_session, create_terminal_session, pick_workspace_directory,
-    read_workspace_binary_file, read_workspace_file, workspace_tree, write_terminal_input,
-    write_workspace_file,
+    read_workspace_binary_file, read_workspace_file, resize_terminal_session, workspace_tree,
+    write_terminal_input, write_workspace_file,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -108,6 +108,7 @@ pub fn run() {
             write_workspace_file,
             create_terminal_session,
             write_terminal_input,
+            resize_terminal_session,
             close_terminal_session,
             read_melody_config,
             update_melody_config,

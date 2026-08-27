@@ -195,7 +195,7 @@ export function ChangeReview({
 
         <section className="min-w-0 flex-1 overflow-auto bg-muted/20">
           {selectedPath ? (
-            <div className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur">
+            <div className="sticky top-0 z-10 border-b bg-background/84 px-4 py-3 backdrop-blur">
               <p className="truncate font-medium text-sm">{selectedPath}</p>
             </div>
           ) : null}

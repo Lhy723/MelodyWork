@@ -869,6 +869,16 @@ export const writeTerminalInput = async (
   }
 };
 
+export const resizeTerminalSession = async (
+  terminalId: string,
+  cols: number,
+  rows: number,
+): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("resize_terminal_session", { terminalId, cols, rows });
+  }
+};
+
 export const closeTerminalSession = async (
   terminalId: string,
 ): Promise<void> => {

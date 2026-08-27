@@ -76,7 +76,7 @@ export function SubagentTray({
       <Popover>
         <PopoverTrigger asChild>
           <Button
-            className="gap-1.5 rounded-full bg-background/90 shadow-sm backdrop-blur"
+            className="gap-1.5 rounded-full bg-background/78 shadow-sm backdrop-blur"
             size="sm"
             variant="outline"
           >

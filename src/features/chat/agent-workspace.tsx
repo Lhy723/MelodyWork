@@ -1378,10 +1378,6 @@ export function AgentWorkspace() {
                             </div>
                             <div className="harness-session-info-body harness-session-info-body--ledger">
                               <section className="harness-session-info-section">
-                                <div className="harness-session-info-section-title">
-                                  <span>Subagents</span>
-                                  <span>{visibleSubagents.length}</span>
-                                </div>
                                 <SubagentTray
                                   className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
                                   onOpenSubagent={openSubagent}
@@ -1389,9 +1385,6 @@ export function AgentWorkspace() {
                                 />
                               </section>
                               <section className="harness-session-info-section">
-                                <div className="harness-session-info-section-title">
-                                  <span>运行统计</span>
-                                </div>
                                 <SessionStatsLine
                                   contextUsage={contextUsage}
                                   entries={timeline}

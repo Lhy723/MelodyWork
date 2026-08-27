@@ -7,6 +7,7 @@ import {
   closeTerminalSession,
   createTerminalSession,
   isTauriRuntime,
+  resizeTerminalSession,
   subscribeToTerminal,
   writeTerminalInput,
 } from "@/lib/melody-bridge";
@@ -101,6 +102,13 @@ export function TerminalPanel({
           }
           lastTerminalSize = { cols, rows };
           terminal.resize(cols, rows);
+          const terminalId = terminalIdRef.current;
+          if (terminalId && isTauriRuntime()) {
+            void resizeTerminalSession(terminalId, cols, rows).catch(() => {
+              // The shell may exit between layout measurement and the resize
+              // request; its exit event will clean up the session.
+            });
+          }
         });
       };
       fit();
@@ -131,8 +139,9 @@ export function TerminalPanel({
           return;
         }
         terminalIdRef.current = terminalId;
-        terminal.write(`MelodyWork 终端\r\n${cwd}\r\n\r\n${PROMPT}`);
         setPhase("ready");
+        lastTerminalSize = { cols: 0, rows: 0 };
+        fit();
         terminal.focus();
       } catch (reason) {
         terminal.write(
@@ -142,6 +151,21 @@ export function TerminalPanel({
       }
 
       dataDisposable = terminal.onData((data) => {
+        const terminalId = terminalIdRef.current;
+        if (isTauriRuntime()) {
+          if (!terminalId) {
+            terminal.write("\r\n[终端尚未就绪]\r\n");
+            return;
+          }
+          void writeTerminalInput(terminalId, data).catch((reason) => {
+            terminal.write(
+              `\r\n${toUserMessage(reason, "终端写入失败，请稍后重试。")}`,
+            );
+            setPhase("error");
+          });
+          return;
+        }
+
         for (const character of data) {
           if (character === "\r" || character === "\n") {
             const command = lineBufferRef.current;
