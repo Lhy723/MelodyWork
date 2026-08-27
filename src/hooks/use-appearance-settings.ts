@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { isMacOSRuntime, isTauriRuntime } from "@/lib/melody-bridge";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 const CJK_SANS_FALLBACK =
@@ -20,6 +21,9 @@ export function useAppearanceSettings() {
     const root = document.documentElement;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const supportsNativeVibrancy = isTauriRuntime() && isMacOSRuntime();
+    const nativeVibrancyEnabled =
+      supportsNativeVibrancy && settings.translucentSidebar;
 
     const apply = () => {
       const dark =
@@ -34,7 +38,11 @@ export function useAppearanceSettings() {
       root.classList.toggle("app-pointer-cursor", settings.pointerCursor);
       root.classList.toggle(
         "app-translucent-sidebar",
-        settings.translucentSidebar,
+        nativeVibrancyEnabled,
+      );
+      root.classList.toggle(
+        "app-native-vibrancy-window",
+        nativeVibrancyEnabled,
       );
       root.classList.toggle("app-font-smoothing", settings.fontSmoothing);
 

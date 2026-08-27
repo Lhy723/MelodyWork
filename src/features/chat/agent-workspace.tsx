@@ -41,6 +41,7 @@ import {
   type WorkspaceTab,
 } from "@/features/workspace/workspace-side-panel";
 import type { ProjectReference } from "@/domain/message-citations";
+import { isIndependentProject } from "@/domain/workspace";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
 import { useAgentNotifications } from "@/hooks/use-agent-notifications";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
@@ -52,7 +53,12 @@ import { useResearchStore } from "@/features/research/research-store";
 import { buildResearchSkillContext } from "@/features/research/research-capability-store";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { checkAppUpdate, type AppUpdateStatus } from "@/lib/melody-bridge";
+import {
+  checkAppUpdate,
+  isTauriRuntime,
+  openFileWithPreferredApp,
+  type AppUpdateStatus,
+} from "@/lib/melody-bridge";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +93,22 @@ const SESSION_INFO_MOTION_MS = 220;
 const isMacOS =
   typeof navigator !== "undefined" &&
   /Macintosh|Mac OS X/.test(navigator.userAgent);
+
+const isAbsoluteWorkspacePath = (path: string) =>
+  path.startsWith("/") || /^\\\\/u.test(path) || /^[A-Za-z]:[\\/]/u.test(path);
+
+const resolveWorkspacePath = (root: string, path: string) => {
+  if (isAbsoluteWorkspacePath(path) || root === ".") {
+    return path;
+  }
+  const separator = root.includes("\\") ? "\\" : "/";
+  const normalizedRoot = root.replace(/[\\/]+$/u, "");
+  const normalizedPath = path
+    .replaceAll("\\", "/")
+    .replace(/^\.\//u, "")
+    .replaceAll("/", separator);
+  return `${normalizedRoot}${separator}${normalizedPath}`;
+};
 
 const storedSidebarWidth = () => {
   if (typeof window === "undefined") {
@@ -224,6 +246,15 @@ export function AgentWorkspace() {
     (state) => state.autoCheckForUpdates,
   );
   const updateChannel = useAppSettingsStore((state) => state.updateChannel);
+  const defaultFileOpener = useAppSettingsStore(
+    (state) => state.defaultFileOpener,
+  );
+  const defaultIndependentChat = useAppSettingsStore(
+    (state) => state.defaultIndependentChat,
+  );
+  const translucentSidebar = useAppSettingsStore(
+    (state) => state.translucentSidebar,
+  );
   const selectedModelId = useAgentStore((state) => state.selectedModelId);
   const pendingModelId = useAgentStore((state) => state.pendingModelId);
   const selectedReasoningEffort = useAgentStore(
@@ -255,6 +286,7 @@ export function AgentWorkspace() {
     (state) => state.selectPermissionMode,
   );
   const resolvePermission = useAgentStore((state) => state.resolvePermission);
+  const resolveQuestion = useAgentStore((state) => state.resolveQuestion);
   const resolvePlan = useAgentStore((state) => state.resolvePlan);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([]);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
@@ -567,32 +599,42 @@ export function AgentWorkspace() {
   const openGit = () =>
     openWorkspaceTab({ id: "review", kind: "review", label: "审阅" });
 
+  const openFileTarget = useCallback(
+    (absolutePath: string, displayPath: string) => {
+      void openFileWithPreferredApp(absolutePath, defaultFileOpener).then(
+        (opened) => {
+          if (opened) {
+            return;
+          }
+          openWorkspaceTab({
+            id: `file:${displayPath}`,
+            kind: "file",
+            label: displayPath.split("/").at(-1) ?? displayPath,
+            path: displayPath,
+          });
+        },
+      );
+    },
+    [defaultFileOpener, openWorkspaceTab],
+  );
+
   const openProjectReference = useCallback(
     (reference: ProjectReference) => {
       if (reference.kind === "folder") {
         openWorkspaceTab({ id: "files", kind: "files", label: "文件" });
         return;
       }
-      const path = reference.displayPath;
-      openWorkspaceTab({
-        id: `file:${path}`,
-        kind: "file",
-        label: path.split("/").at(-1) ?? path,
-        path,
-      });
+      openFileTarget(reference.absolutePath, reference.displayPath);
     },
-    [openWorkspaceTab],
+    [openFileTarget, openWorkspaceTab],
   );
 
   const openFilePreview = useCallback(
-    (path: string) =>
-      openWorkspaceTab({
-        id: `file:${path}`,
-        kind: "file",
-        label: path.split("/").at(-1) ?? path,
-        path,
-      }),
-    [openWorkspaceTab],
+    (path: string) => {
+      const root = activeProject?.path ?? cwd;
+      openFileTarget(resolveWorkspacePath(root, path), path);
+    },
+    [activeProject?.path, cwd, openFileTarget],
   );
 
   const openSubagent = useCallback(
@@ -890,9 +932,12 @@ export function AgentWorkspace() {
 
   const canGoBack = nextHistoryIndex(-1) !== undefined;
   const canGoForward = nextHistoryIndex(1) !== undefined;
+  const independentProject = projects.find(isIndependentProject);
   const newTaskProject =
     projects.find((project) => project.id === newTaskProjectId) ??
-    activeProject;
+    (defaultIndependentChat
+      ? (independentProject ?? activeProject)
+      : activeProject);
 
   const createTaskFromPrompt = async (
     content: string,
@@ -957,9 +1002,16 @@ export function AgentWorkspace() {
         researchSection !== "skills"
       ? "research"
       : "conversation";
+  const nativeVibrancyEnabled =
+    isMacOS && isTauriRuntime() && translucentSidebar;
 
   return (
-    <main className="relative flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
+    <main
+      className={cn(
+        "relative flex h-svh min-h-0 overflow-hidden text-foreground",
+        nativeVibrancyEnabled ? "bg-transparent" : "bg-background",
+      )}
+    >
       {!settingsOpen ? (
         <WindowNavigationControls
           canGoBack={canGoBack}
@@ -993,7 +1045,12 @@ export function AgentWorkspace() {
             returnToConversation();
             setResearchMainOpen(false);
             setWorkspacePanelOpen(false);
-            setNewTaskProjectId(project?.id ?? activeProject?.id);
+            const initialProject =
+              project ??
+              (defaultIndependentChat
+                ? (independentProject ?? activeProject)
+                : activeProject);
+            setNewTaskProjectId(initialProject?.id);
             setNewTaskOpen(true);
           }}
           onOpenExtensions={() => openSettings("skills")}
@@ -1023,7 +1080,10 @@ export function AgentWorkspace() {
           workspaceMode={workspaceMode}
         />
       </div>
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <section
+        className="workspace-stage relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+        data-settings-open={settingsOpen ? "true" : "false"}
+      >
         <AnimatePresence initial={false} mode="wait">
           {settingsOpen ? (
             <MotionPage
@@ -1263,24 +1323,29 @@ export function AgentWorkspace() {
                         )}
                       </Presence>
 
-                      <div className="harness-chat-layout">
+                      <div
+                        className="harness-chat-layout"
+                        data-session-info-layout-open={sessionInfoLayoutOpen}
+                        style={
+                          {
+                            "--harness-chat-dock-space": `${chatDockSpace}px`,
+                          } as CSSProperties
+                        }
+                      >
                         <div
                           aria-labelledby={`session-view-tab-${conversationView}`}
                           className="relative flex min-w-0 flex-1 flex-col"
                           id="session-view-panel"
                           role="tabpanel"
-                          style={
-                            {
-                              "--harness-chat-dock-space": `${chatDockSpace}px`,
-                            } as CSSProperties
-                          }
                         >
                           {conversationView === "chat" ? (
                             <AgentTimeline
                               cwd={cwd}
                               entries={timeline}
                               onPermission={resolvePermission}
+                              onQuestion={resolveQuestion}
                               onPlanDecision={resolvePlan}
+                              onOpenFile={openFilePreview}
                               onOpenProjectReference={openProjectReference}
                               projectRoot={activeProject?.path ?? cwd}
                               turnRunning={
@@ -1297,12 +1362,6 @@ export function AgentWorkspace() {
                               }
                             />
                           )}
-                          <div
-                            className="harness-chat-bottom-dock"
-                            ref={chatDockRef}
-                          >
-                            {renderComposer(submitPrompt)}
-                          </div>
                         </div>
                         <aside
                           aria-hidden={!sessionInfoOpen}
@@ -1320,10 +1379,6 @@ export function AgentWorkspace() {
                             </div>
                             <div className="harness-session-info-body harness-session-info-body--ledger">
                               <section className="harness-session-info-section">
-                                <div className="harness-session-info-section-title">
-                                  <span>Subagents</span>
-                                  <span>{visibleSubagents.length}</span>
-                                </div>
                                 <SubagentTray
                                   className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
                                   onOpenSubagent={openSubagent}
@@ -1331,9 +1386,6 @@ export function AgentWorkspace() {
                                 />
                               </section>
                               <section className="harness-session-info-section">
-                                <div className="harness-session-info-section-title">
-                                  <span>运行统计</span>
-                                </div>
                                 <SessionStatsLine
                                   contextUsage={contextUsage}
                                   entries={timeline}
@@ -1347,6 +1399,12 @@ export function AgentWorkspace() {
                             </div>
                           </div>
                         </aside>
+                        <div
+                          className="harness-chat-bottom-dock"
+                          ref={chatDockRef}
+                        >
+                          {renderComposer(submitPrompt)}
+                        </div>
                       </div>
                     </div>
                     <div

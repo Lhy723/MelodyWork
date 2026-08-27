@@ -14,6 +14,8 @@ use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
 const DATABASE_SCHEMA_VERSION: i64 = 4;
 const MAX_TIMELINE_JSON_BYTES: usize = 2 * 1024 * 1024;
+pub const INDEPENDENT_PROJECT_ID: &str = "__melody_independent__";
+const INDEPENDENT_PROJECT_DIRECTORY: &str = "independent-chat";
 
 fn validate_timeline_json(value: &str) -> Result<(), String> {
     if value.len() > MAX_TIMELINE_JSON_BYTES {
@@ -221,6 +223,7 @@ pub struct ProjectRecord {
     name: String,
     path: String,
     last_opened_at: i64,
+    is_independent: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -674,8 +677,10 @@ fn project_name(path: &Path) -> String {
 }
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRecord> {
+    let id: String = row.get(0)?;
     Ok(ProjectRecord {
-        id: row.get(0)?,
+        is_independent: id == INDEPENDENT_PROJECT_ID,
+        id,
         name: row.get(1)?,
         path: row.get(2)?,
         last_opened_at: row.get(3)?,
@@ -713,9 +718,22 @@ impl AppDatabase {
     pub fn open(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         let app_data_dir = app.path().app_data_dir()?;
         fs::create_dir_all(&app_data_dir)?;
+        let independent_directory = app_data_dir.join(INDEPENDENT_PROJECT_DIRECTORY);
+        fs::create_dir_all(&independent_directory)?;
+        let independent_path = independent_directory.canonicalize()?;
         let connection = Connection::open(app_data_dir.join("melody-work.sqlite3"))?;
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         initialize_schema(&connection)?;
+        let independent_path = independent_path.to_string_lossy().into_owned();
+        connection.execute(
+            "INSERT OR IGNORE INTO projects (id, name, path, last_opened_at)
+             VALUES (?1, ?2, ?3, 0)",
+            params![INDEPENDENT_PROJECT_ID, "独立聊天", independent_path],
+        )?;
+        connection.execute(
+            "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
+            params!["独立聊天", independent_path, INDEPENDENT_PROJECT_ID],
+        )?;
         Ok(Self {
             connection: Mutex::new(connection),
         })

@@ -1,7 +1,11 @@
 import { create } from "zustand";
 
 import { toUserMessage } from "@/domain/app-error";
-import type { ProjectRecord, SessionRecord } from "@/domain/workspace";
+import {
+  isIndependentProject,
+  type ProjectRecord,
+  type SessionRecord,
+} from "@/domain/workspace";
 import {
   createStoredSession,
   deleteStoredSession,
@@ -10,6 +14,7 @@ import {
   pickWorkspaceDirectory,
   upsertProject,
 } from "@/lib/melody-bridge";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 interface WorkspaceStore {
   projects: ProjectRecord[];
@@ -45,12 +50,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ initialized: true, loading: true, error: undefined });
     try {
       let projects = await listProjects();
-      if (projects.length === 0) {
+      const defaultIndependentChat =
+        useAppSettingsStore.getState().defaultIndependentChat;
+      let regularProjects = projects.filter(
+        (project) => !isIndependentProject(project),
+      );
+      if (regularProjects.length === 0 && !defaultIndependentChat) {
         const path = await pickWorkspaceDirectory();
         if (!path) {
           throw new Error("请选择一个工作区后再继续。");
         }
-        projects = [await upsertProject(path)];
+        const project = await upsertProject(path);
+        projects = [
+          ...projects.filter((item) => isIndependentProject(item)),
+          project,
+        ];
+        regularProjects = [project];
+      } else if (projects.length === 0) {
+        const path = await pickWorkspaceDirectory();
+        if (!path) {
+          throw new Error("请选择一个工作区后再继续。");
+        }
+        const project = await upsertProject(path);
+        projects = [project];
+        regularProjects = [project];
       }
       const sessionEntries = await Promise.all(
         projects.map(
@@ -62,7 +85,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         projects,
         sessionsByProject: Object.fromEntries(sessionEntries),
       });
-      await get().selectProject(projects[0]);
+      const independentProject = projects.find(isIndependentProject);
+      const initialProject = defaultIndependentChat
+        ? (independentProject ?? regularProjects[0])
+        : (regularProjects[0] ?? independentProject);
+      if (!initialProject) {
+        throw new Error("请选择一个工作区后再继续。");
+      }
+      await get().selectProject(initialProject);
     } catch (reason) {
       set({ error: toUserMessage(reason), loading: false });
     }

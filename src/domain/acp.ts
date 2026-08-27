@@ -150,6 +150,60 @@ export interface AgentToolActivity {
 
 export type JsonRpcId = number | string;
 
+export type AgentQuestionMode = "default" | "plan";
+
+export interface AgentQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+  id?: string;
+}
+
+export interface AgentQuestion {
+  question: string;
+  options: AgentQuestionOption[];
+  multiSelect?: boolean;
+  id?: string;
+}
+
+export interface AgentQuestionAnnotation {
+  preview?: string;
+  notes?: string;
+}
+
+export type AgentQuestionOutcome =
+  | "pending"
+  | "accepted"
+  | "chat_about_this"
+  | "skip_interview"
+  | "cancelled";
+
+export interface AgentQuestionRequest {
+  requestId: JsonRpcId;
+  sessionId: string;
+  toolCallId: string;
+  questions: AgentQuestion[];
+  mode: AgentQuestionMode;
+  outcome: AgentQuestionOutcome;
+  answers?: Record<string, string[]>;
+  annotations?: Record<string, AgentQuestionAnnotation>;
+  partialAnswers?: Record<string, string>;
+}
+
+export type AgentQuestionResponse =
+  | {
+      outcome: "accepted";
+      answers: Record<string, string[]>;
+      annotations?: Record<string, AgentQuestionAnnotation>;
+    }
+  | {
+      outcome: "chat_about_this" | "skip_interview";
+      partialAnswers: Record<string, string>;
+    }
+  | {
+      outcome: "cancelled";
+    };
+
 export interface AcpEnvelope {
   jsonrpc?: "2.0";
   id?: JsonRpcId;
@@ -228,4 +282,5 @@ export type TimelineEntry =
       permission?: "pending" | "allowed" | "denied";
       permissionRequestId?: JsonRpcId;
       permissionOptions?: PermissionOption[];
+      question?: AgentQuestionRequest;
     };

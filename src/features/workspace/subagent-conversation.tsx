@@ -14,6 +14,7 @@ import { useAgentStore } from "@/stores/agent-store";
 interface SubagentConversationProps {
   active: boolean;
   cwd: string;
+  onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   projectRoot: string;
   subagent: AgentSubagent;
@@ -43,16 +44,17 @@ const statusContent = (subagent: AgentSubagent) => {
 export function SubagentConversation({
   active,
   cwd,
+  onOpenFile,
   onOpenProjectReference,
   projectRoot,
   subagent,
 }: SubagentConversationProps) {
-  const timeline = useAgentStore(
-    (state) =>
-      active
-        ? (state.backgroundTimelines[subagent.childSessionId] ?? EMPTY_TIMELINE)
-        : EMPTY_TIMELINE,
+  const timeline = useAgentStore((state) =>
+    active
+      ? (state.backgroundTimelines[subagent.childSessionId] ?? EMPTY_TIMELINE)
+      : EMPTY_TIMELINE,
   );
+  const resolveQuestion = useAgentStore((state) => state.resolveQuestion);
   const status = statusContent(subagent);
   return (
     <section className="flex size-full min-h-0 flex-col bg-background">
@@ -91,8 +93,10 @@ export function SubagentConversation({
         <AgentTimeline
           cwd={cwd}
           entries={timeline}
+          onOpenFile={onOpenFile}
           onOpenProjectReference={onOpenProjectReference}
           onPermission={() => undefined}
+          onQuestion={resolveQuestion}
           onPlanDecision={() => undefined}
           projectRoot={projectRoot}
           turnRunning={subagent.status === "running"}

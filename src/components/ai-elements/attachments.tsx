@@ -293,7 +293,7 @@ export const AttachmentRemove = ({
       className={cn(
         variant === "grid" && [
           "absolute top-2 right-2 size-6 rounded-full p-0",
-          "bg-background/80 backdrop-blur-sm",
+          "bg-background/68 backdrop-blur-sm",
           "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
           "hover:bg-background [&>svg]:size-3",
         ],

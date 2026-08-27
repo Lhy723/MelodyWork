@@ -4,6 +4,7 @@ import {
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
 import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
+import type { AgentQuestionResponse } from "@/domain/acp";
 import type { TurnActivityItem } from "@/domain/timeline-groups";
 import { ToolTaskGroup } from "@/features/chat/tool-task-group";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,11 @@ interface TurnActivityGroupProps {
   endedAt?: number;
   items: TurnActivityItem[];
   onPermission: (entryId: string, optionId: string) => void;
+  onQuestion: (
+    entryId: string,
+    response: AgentQuestionResponse,
+  ) => void | Promise<void>;
+  onOpenFile: (path: string) => void;
   projectRoot: string;
   running: boolean;
   startedAt?: number;
@@ -45,6 +51,8 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
   endedAt,
   items,
   onPermission,
+  onQuestion,
+  onOpenFile,
   projectRoot,
   running,
   startedAt,
@@ -147,6 +155,8 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
               cwd={cwd}
               key={item.id}
               onPermission={onPermission}
+              onQuestion={onQuestion}
+              onOpenFile={onOpenFile}
               projectRoot={projectRoot}
               turnRunning={running}
               tools={item.tools}

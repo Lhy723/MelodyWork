@@ -10,6 +10,7 @@ import {
   InboxIcon,
   LayoutDashboardIcon,
   LibraryIcon,
+  MessageCircleIcon,
   MoreHorizontalIcon,
   RadarIcon,
   SearchIcon,
@@ -43,7 +44,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ProjectRecord, SessionRecord } from "@/domain/workspace";
+import {
+  isIndependentProject,
+  type ProjectRecord,
+  type SessionRecord,
+} from "@/domain/workspace";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
 
@@ -383,6 +388,7 @@ export function AppSidebar({
         >
           {visibleProjects.map(({ project, sessions }, projectIndex) => {
             const active = project.id === activeProject?.id;
+            const independent = isIndependentProject(project);
             const expanded =
               Boolean(normalizedQuery) || expandedProjectIds.has(project.id);
             return (
@@ -426,7 +432,11 @@ export function AppSidebar({
                           expanded && "rotate-90",
                         )}
                       />
-                      <FolderOpenIcon className="size-4 shrink-0" />
+                      {independent ? (
+                        <MessageCircleIcon className="size-4 shrink-0" />
+                      ) : (
+                        <FolderOpenIcon className="size-4 shrink-0" />
+                      )}
                       <span className="truncate">{project.name}</span>
                     </button>
                   </CollapsibleTrigger>
@@ -445,28 +455,38 @@ export function AppSidebar({
                       <DropdownMenuItem
                         onSelect={() => onSelectProject(project)}
                       >
-                        <FolderOpenIcon />
-                        切换到项目
+                        {independent ? <MessageCircleIcon /> : <FolderOpenIcon />}
+                        {independent ? "切换到独立聊天" : "切换到项目"}
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => onNewSession(project)}>
                         <SquarePenIcon />
-                        {workspaceMode === "research"
+                        {independent
+                          ? workspaceMode === "research"
+                            ? "在独立聊天中新建研究任务"
+                            : "在独立聊天中新建任务"
+                          : workspaceMode === "research"
                           ? "在此项目新建研究任务"
                           : "在此项目新建任务"}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
-                    aria-label={`在 ${project.name} 中新建${
-                      workspaceMode === "research" ? "研究任务" : "任务"
-                    }`}
+                    aria-label={
+                      independent
+                        ? `在独立聊天中新建${workspaceMode === "research" ? "研究任务" : "任务"}`
+                        : `在 ${project.name} 中新建${workspaceMode === "research" ? "研究任务" : "任务"}`
+                    }
                     disabled={loading}
                     onClick={() => onNewSession(project)}
                     size="icon-sm"
                     title={
-                      workspaceMode === "research"
-                        ? "在此项目新建研究任务"
-                        : "在此项目新建任务"
+                      independent
+                        ? workspaceMode === "research"
+                          ? "在独立聊天中新建研究任务"
+                          : "在独立聊天中新建任务"
+                        : workspaceMode === "research"
+                          ? "在此项目新建研究任务"
+                          : "在此项目新建任务"
                     }
                     variant="ghost"
                   >
@@ -550,7 +570,7 @@ export function AppSidebar({
         </nav>
       </div>
 
-      <div className="border-t px-1 pt-1.5">
+      <div className="app-sidebar-footer border-t px-1 pt-1.5">
         <Button
           className={cn(
             "h-9 w-full justify-start rounded-lg px-2 text-sidebar-foreground hover:text-sidebar-foreground",

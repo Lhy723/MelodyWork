@@ -167,6 +167,29 @@ const buildActivitySeries = (
   });
 };
 
+const ACTIVITY_CALENDAR_WEEK_COUNT = 53;
+const ACTIVITY_CALENDAR_DAY_COUNT = 7;
+const ACTIVITY_CALENDAR_HORIZONTAL_INSET = 20;
+const ACTIVITY_CALENDAR_VERTICAL_INSET = 34;
+
+const activityCalendarCellSize = (container: HTMLElement) => {
+  const availableWidth = Math.max(
+    1,
+    container.clientWidth - ACTIVITY_CALENDAR_HORIZONTAL_INSET,
+  );
+  const availableHeight = Math.max(
+    1,
+    container.clientHeight - ACTIVITY_CALENDAR_VERTICAL_INSET,
+  );
+  return Math.max(
+    1,
+    Math.min(
+      availableWidth / ACTIVITY_CALENDAR_WEEK_COUNT,
+      availableHeight / ACTIVITY_CALENDAR_DAY_COUNT,
+    ),
+  );
+};
+
 function ActivityHeatmap({
   activity,
   view,
@@ -203,8 +226,39 @@ function ActivityHeatmap({
       .then((echarts) => {
         if (disposed) return;
         chart = echarts.init(container, undefined, { renderer: "canvas" });
+        const initialCellSize = activityCalendarCellSize(container);
+        const initialCellRadius = Math.min(3, initialCellSize * 0.2);
+        const heatmapData = (cellRadius: number) =>
+          series.map((item) => ({
+            ...item,
+            itemStyle: {
+              borderRadius: cellRadius,
+            },
+          }));
+        const updateCalendarLayout = () => {
+          if (!chart) return;
+          const cellSize = activityCalendarCellSize(container);
+          const cellRadius = Math.min(3, cellSize * 0.2);
+          chart.setOption({
+            calendar: {
+              cellSize: [cellSize, cellSize],
+              itemStyle: {
+                borderRadius: cellRadius,
+              },
+            },
+            series: [
+              {
+                data: heatmapData(cellRadius),
+                itemStyle: {
+                  borderRadius: cellRadius,
+                },
+              },
+            ],
+          });
+          chart.resize();
+        };
         const chartBorder = readThemeColor("--harness-chart-border", "#dfe2e5");
-        const chartSurface = readThemeColor("--harness-bg-layer-3", "#edf0f2");
+        const chartBackground = readThemeColor("--harness-bg-base", "#ffffff");
         const chartText = readThemeColor("--harness-label-caption", "#707276");
         const chartTooltip = readThemeColor("--harness-bg-layer-1", "#ffffff");
         const chartTooltipText = readThemeColor(
@@ -230,13 +284,13 @@ function ActivityHeatmap({
             right: 10,
             top: 4,
             bottom: 30,
-            cellSize: ["auto", 15],
+            cellSize: [initialCellSize, initialCellSize],
             splitLine: { show: false },
             itemStyle: {
-              borderColor: chartTooltip,
+              borderColor: chartBackground,
               borderWidth: 3,
-              borderRadius: 3,
-              color: chartSurface,
+              borderRadius: initialCellRadius,
+              color: chartBackground,
             },
             yearLabel: { show: false },
             dayLabel: { show: false },
@@ -280,11 +334,14 @@ function ActivityHeatmap({
             {
               type: "heatmap",
               coordinateSystem: "calendar",
-              data: series,
+              data: heatmapData(initialCellRadius),
+              itemStyle: {
+                borderRadius: initialCellRadius,
+              },
             },
           ],
         });
-        resizeObserver = new ResizeObserver(() => chart?.resize());
+        resizeObserver = new ResizeObserver(updateCalendarLayout);
         resizeObserver.observe(container);
       })
       .catch(() => undefined);
@@ -521,7 +578,7 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
       <div className="mx-auto max-w-5xl px-8 py-7">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-xl">统计</h3>
+            <h3 className="font-semibold text-3xl">统计</h3>
             <p className="mt-1 text-muted-foreground text-sm">
               了解你的任务活跃度、Token 使用和 Melody 扩展使用情况。
             </p>

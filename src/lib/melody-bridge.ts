@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AcpEnvelope, AgentStatus } from "@/domain/acp";
 import type {
@@ -17,14 +17,15 @@ import type {
 import type { GitBranch, GitChange, GitDiff, GitWorktree } from "@/domain/git";
 import type { PermissionDecision, PermissionRule } from "@/domain/permission";
 import type { UsageStatistics } from "@/domain/statistics";
-import type { UpdateChannel } from "@/stores/app-settings-store";
-import type {
-  ProjectRecord,
-  SessionRecord,
-  TerminalExitEvent,
-  TerminalOutputEvent,
-  UpdateSessionRequest,
-  WorkspaceEntry,
+import type { FileOpener, UpdateChannel } from "@/stores/app-settings-store";
+import {
+  INDEPENDENT_PROJECT_ID,
+  type ProjectRecord,
+  type SessionRecord,
+  type TerminalExitEvent,
+  type TerminalOutputEvent,
+  type UpdateSessionRequest,
+  type WorkspaceEntry,
 } from "@/domain/workspace";
 import {
   PREVIEW_AGENT_MESSAGE,
@@ -48,6 +49,27 @@ export interface AppUpdateStatus {
   installed: boolean;
 }
 
+export interface AppReleaseHistoryItem {
+  tagName: string;
+  name: string;
+  body?: string;
+  publishedAt?: string;
+  isPrerelease: boolean;
+  url: string;
+}
+
+export interface EnvironmentCapability {
+  name: string;
+  version?: string;
+  installed: boolean;
+  description: string;
+}
+
+export interface FileOpenerAvailability {
+  id: FileOpener;
+  installed: boolean;
+}
+
 interface ResearchHttpResponse {
   body: string;
   contentType?: string;
@@ -55,6 +77,10 @@ interface ResearchHttpResponse {
 
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export const isMacOSRuntime = () =>
+  typeof navigator !== "undefined" &&
+  /Macintosh|Mac OS X/u.test(navigator.userAgent);
 
 export const getUsageStatistics = async (): Promise<UsageStatistics> => {
   if (!isTauriRuntime()) {
@@ -96,6 +122,152 @@ export const openExternalUrl = async (candidate: string): Promise<void> => {
   const externalWindow = window.open(url, "_blank", "noopener,noreferrer");
   if (!externalWindow) {
     throw new Error("浏览器阻止了打开外部链接。");
+  }
+};
+
+const preferredEditorCommand = (target: FileOpener) => {
+  if (target === "system") {
+    return undefined;
+  }
+  const macOS = isMacOSRuntime();
+  if (target === "vscode") {
+    return macOS ? "Visual Studio Code" : "code";
+  }
+  return macOS ? "Cursor" : "cursor";
+};
+
+/**
+ * Opens a local file with the configured desktop application.
+ *
+ * The browser preview cannot access local paths, and a missing editor should
+ * not prevent the caller from falling back to MelodyWork's own file preview.
+ */
+export const openFileWithPreferredApp = async (
+  path: string,
+  target: FileOpener,
+): Promise<boolean> => {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  try {
+    const application = preferredEditorCommand(target);
+    if (application) {
+      await openPath(path, application);
+    } else {
+      await openPath(path);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const APP_RELEASES_URL =
+  "https://api.github.com/repos/Lhy723/MelodyWork/releases?per_page=12";
+
+export const getAppReleaseHistory = async (): Promise<
+  AppReleaseHistoryItem[]
+> => {
+  const response = await fetch(APP_RELEASES_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub Releases 请求失败（${response.status}）。`);
+  }
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("GitHub Releases 返回了无法识别的数据。");
+  }
+  return payload.flatMap((item): AppReleaseHistoryItem[] => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const release = item as Record<string, unknown>;
+    const tagName =
+      typeof release.tag_name === "string" ? release.tag_name : "";
+    const htmlUrl =
+      typeof release.html_url === "string" ? release.html_url : "";
+    if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tagName) || !htmlUrl) {
+      return [];
+    }
+    return [
+      {
+        tagName,
+        name:
+          typeof release.name === "string" && release.name.trim()
+            ? release.name
+            : tagName,
+        body: typeof release.body === "string" ? release.body : undefined,
+        publishedAt:
+          typeof release.published_at === "string"
+            ? release.published_at
+            : undefined,
+        isPrerelease: release.prerelease === true,
+        url: htmlUrl,
+      },
+    ];
+  });
+};
+
+export const getEnvironmentCapabilities = async (): Promise<
+  EnvironmentCapability[]
+> =>
+  isTauriRuntime()
+    ? invoke<EnvironmentCapability[]>("get_environment_capabilities")
+    : [];
+
+export const getFileOpenerAvailability = async (): Promise<
+  FileOpenerAvailability[]
+> => {
+  if (!isTauriRuntime()) {
+    return [
+      { id: "system", installed: true },
+      { id: "vscode", installed: false },
+      { id: "cursor", installed: false },
+    ];
+  }
+  const payload = await invoke<unknown>("get_file_opener_availability");
+  if (!Array.isArray(payload)) {
+    throw new Error("文件打开应用检测返回了无法识别的数据。");
+  }
+  const validIds: FileOpener[] = ["system", "vscode", "cursor"];
+  const byId = new Map<FileOpener, FileOpenerAvailability>();
+  for (const item of payload) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const candidate = item as Record<string, unknown>;
+    const id = candidate.id;
+    if (
+      typeof id !== "string" ||
+      !validIds.includes(id as FileOpener) ||
+      typeof candidate.installed !== "boolean"
+    ) {
+      continue;
+    }
+    byId.set(id as FileOpener, {
+      id: id as FileOpener,
+      installed: candidate.installed,
+    });
+  }
+  return validIds.map(
+    (id) => byId.get(id) ?? { id, installed: id === "system" },
+  );
+};
+
+export const setMenuBarVisibility = async (visible: boolean): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("set_menu_bar_visibility", { visible });
+  }
+};
+
+export const setSystemSleepPrevention = async (
+  enabled: boolean,
+): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("set_system_sleep_prevention", { enabled });
   }
 };
 
@@ -459,6 +631,15 @@ const previewProject: ProjectRecord = {
   name: "MelodyWork",
   path: ".",
   lastOpenedAt: Math.floor(Date.now() / 1000),
+  isIndependent: false,
+};
+
+const previewIndependentProject: ProjectRecord = {
+  id: INDEPENDENT_PROJECT_ID,
+  name: "独立聊天",
+  path: ".",
+  lastOpenedAt: 0,
+  isIndependent: true,
 };
 
 const previewSessions: SessionRecord[] = [
@@ -498,7 +679,7 @@ const previewTimelineArchives = new Map<string, Map<number, string>>();
 export const listProjects = async (): Promise<ProjectRecord[]> =>
   isTauriRuntime()
     ? invoke<ProjectRecord[]>("list_projects")
-    : [previewProject];
+    : [previewProject, previewIndependentProject];
 
 export const upsertProject = async (path: string): Promise<ProjectRecord> =>
   isTauriRuntime()
@@ -685,6 +866,16 @@ export const writeTerminalInput = async (
 ): Promise<void> => {
   if (isTauriRuntime()) {
     await invoke("write_terminal_input", { terminalId, data });
+  }
+};
+
+export const resizeTerminalSession = async (
+  terminalId: string,
+  cols: number,
+  rows: number,
+): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("resize_terminal_session", { terminalId, cols, rows });
   }
 };
 

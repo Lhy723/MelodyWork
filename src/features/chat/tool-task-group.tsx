@@ -11,8 +11,10 @@ import type {
   AgentToolDiffHunk,
   AgentToolFileChange,
   AgentToolOperation,
+  AgentQuestionResponse,
 } from "@/domain/acp";
 import type { ToolTimelineEntry } from "@/domain/timeline-groups";
+import { QuestionPrompt } from "@/features/chat/question-prompt";
 import { cn } from "@/lib/utils";
 import {
   BookOpenIcon,
@@ -22,6 +24,7 @@ import {
   CircleXIcon,
   CopyIcon,
   LoaderCircleIcon,
+  MessageCircleQuestionIcon,
   PencilIcon,
   SearchIcon,
   TerminalIcon,
@@ -32,6 +35,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 interface ToolTaskGroupProps {
   cwd: string;
   onPermission: (entryId: string, optionId: string) => void;
+  onQuestion: (
+    entryId: string,
+    response: AgentQuestionResponse,
+  ) => void | Promise<void>;
+  onOpenFile: (path: string) => void;
   projectRoot: string;
   turnRunning: boolean;
   tools: ToolTimelineEntry[];
@@ -268,6 +276,12 @@ const operationIcon = (operation: AgentToolOperation) => {
 };
 
 const groupTitle = (tools: ToolTimelineEntry[]) => {
+  const question = tools.find((tool) => tool.question);
+  if (question) {
+    return question.question?.outcome === "pending"
+      ? "等待你的回答"
+      : "已收到你的回答";
+  }
   const active = tools.find(isRunning);
   if (active) {
     const operation = active.activity?.operation ?? "other";
@@ -395,11 +409,13 @@ const FileChangeRow = ({
   cwd,
   projectRoot,
   running,
+  onOpenFile,
 }: {
   change: AgentToolFileChange;
   cwd: string;
   projectRoot: string;
   running: boolean;
+  onOpenFile: (path: string) => void;
 }) => {
   const [open, setOpen] = useState(false);
   const path = displayPath(change.path, projectRoot, cwd);
@@ -412,12 +428,15 @@ const FileChangeRow = ({
         >
           {activityLabel(change.operation, running)}
         </span>
-        <span
-          className="min-w-0 truncate underline decoration-muted-foreground/55 underline-offset-2"
+        <button
+          aria-label={`打开 ${path}`}
+          className="min-w-0 truncate text-left underline decoration-muted-foreground/55 underline-offset-2 hover:text-foreground"
+          onClick={() => onOpenFile(change.path)}
           title={path}
+          type="button"
         >
           {shortPath(path)}
-        </span>
+        </button>
         <span className="shrink-0 text-emerald-600">+{change.additions}</span>
         <span className="shrink-0 text-red-600">-{change.deletions}</span>
         {running ? (
@@ -446,11 +465,13 @@ const FileChangeRow = ({
 
 const ToolRow = ({
   cwd,
+  onOpenFile,
   pathOverride,
   projectRoot,
   tool,
 }: {
   cwd: string;
+  onOpenFile: (path: string) => void;
   pathOverride?: string;
   projectRoot: string;
   tool: ToolTimelineEntry;
@@ -459,10 +480,8 @@ const ToolRow = ({
   const operation = activity?.operation ?? "other";
   const Icon = operationIcon(operation);
   const running = isRunning(tool);
-  const path =
-    (pathOverride ?? activity?.path)
-      ? displayPath(pathOverride ?? activity?.path ?? "", projectRoot, cwd)
-      : undefined;
+  const rawPath = pathOverride ?? activity?.path;
+  const path = rawPath ? displayPath(rawPath, projectRoot, cwd) : undefined;
   const detail =
     operation === "search"
       ? (path ?? activity?.glob)
@@ -493,16 +512,21 @@ const ToolRow = ({
       ) : detail ? (
         <>
           <span className="shrink-0">{activityLabel(operation, running)}</span>
-          <span
-            className={cn(
-              "min-w-0 truncate",
-              path &&
-                "underline decoration-muted-foreground/55 underline-offset-2",
-            )}
-            title={detail}
-          >
-            {path ? shortPath(detail) : detail}
-          </span>
+          {path && operation !== "search" ? (
+            <button
+              aria-label={`打开 ${path}`}
+              className="min-w-0 truncate text-left underline decoration-muted-foreground/55 underline-offset-2 hover:text-foreground"
+              onClick={() => onOpenFile(rawPath!)}
+              title={detail}
+              type="button"
+            >
+              {shortPath(detail)}
+            </button>
+          ) : (
+            <span className="min-w-0 truncate" title={detail}>
+              {path ? shortPath(detail) : detail}
+            </span>
+          )}
         </>
       ) : (
         <>
@@ -517,6 +541,8 @@ const ToolRow = ({
 export function ToolTaskGroup({
   cwd,
   onPermission,
+  onQuestion,
+  onOpenFile,
   projectRoot,
   turnRunning,
   tools,
@@ -546,7 +572,9 @@ export function ToolTaskGroup({
     )?.activity?.operation ??
     tools[0]?.activity?.operation ??
     "other";
-  const HeaderIcon = operationIcon(headerOperation);
+  const HeaderIcon = tools.some((tool) => tool.question)
+    ? MessageCircleQuestionIcon
+    : operationIcon(headerOperation);
 
   return (
     <Task
@@ -571,6 +599,15 @@ export function ToolTaskGroup({
       </TaskTrigger>
       <TaskContent className="harness-tool-content [&>div]:mt-1 [&>div]:space-y-0.5 [&>div]:border-l-0 [&>div]:pl-5 [&>div]:text-sm [&>div]:leading-5">
         {tools.flatMap((tool) => {
+          if (tool.question) {
+            return [
+              <QuestionPrompt
+                entry={tool}
+                key={`${tool.id}-question`}
+                onResolve={onQuestion}
+              />,
+            ];
+          }
           const changes = tool.activity?.files ?? [];
           const changePaths = new Set(changes.map((change) => change.path));
           const extraPaths = (tool.activity?.paths ?? []).filter(
@@ -582,6 +619,7 @@ export function ToolTaskGroup({
                 change={change}
                 cwd={cwd}
                 key={`${tool.id}-${change.path}`}
+                onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
                 running={isRunning(tool)}
               />
@@ -590,6 +628,7 @@ export function ToolTaskGroup({
               <ToolRow
                 cwd={cwd}
                 key={`${tool.id}-${path}`}
+                onOpenFile={onOpenFile}
                 pathOverride={path}
                 projectRoot={projectRoot}
                 tool={tool}
@@ -601,6 +640,7 @@ export function ToolTaskGroup({
               <ToolRow
                 cwd={cwd}
                 key={tool.id}
+                onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
                 tool={tool}
               />,

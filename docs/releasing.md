@@ -9,6 +9,12 @@ MelodyWork uses two long-lived release branches:
 - `main` is the **stable** line. It is the source of every formal release.
 - `beta` is the **test** line. Test changes and prerelease versions are prepared here before they are promoted to `main`.
 
+### Required development order
+
+1. Start every product change on `beta`, then publish and verify a beta build there.
+2. Do not merge or sync `beta` into `main` unless a formal release has been explicitly requested.
+3. A beta version is `X.Y.Z-beta.N`; when it is promoted, publish `X.Y.Z` from `main`. The base version must remain the same: for example, `0.3.1-beta.2` promotes to `0.3.1`.
+
 Pushing a version tag starts the GitHub Actions release workflow. It builds the pinned Melody sidecar for Apple Silicon macOS, Intel macOS, and x64 Windows, then produces signed update bundles and `latest.json`. The workflow rejects a tag that does not belong to its intended branch.
 
 - On `main`, `vX.Y.Z` publishes a **stable** release. Its signed manifest is available from GitHub's `releases/latest` endpoint.

@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -11,16 +11,14 @@ use std::{
 };
 
 use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use portable_pty::{
+    Child as PtyChild, CommandBuilder, ExitStatus as PtyExitStatus, MasterPty, PtySize,
+    native_pty_system,
+};
 use serde::Serialize;
-use std::io::Write;
 use tauri::{AppHandle, Emitter, State, ipc::Response};
 use tauri_plugin_dialog::DialogExt;
-use tokio::sync::oneshot;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::{Child, ChildStdin, Command},
-    sync::Mutex,
-};
+use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
 const MAX_TREE_ENTRIES: usize = 2_000;
@@ -30,8 +28,9 @@ const MAX_PREVIEW_FILE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 
 struct TerminalSession {
-    child: Arc<Mutex<Child>>,
-    stdin: Mutex<Option<ChildStdin>>,
+    child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    writer: Mutex<Box<dyn Write + Send>>,
 }
 
 #[derive(Clone, Default)]
@@ -326,18 +325,18 @@ impl OutputBudget {
     }
 }
 
-async fn forward_terminal_stream<R>(
+fn forward_terminal_stream<R>(
     app: AppHandle,
     terminal_id: String,
     stream: &'static str,
     mut reader: R,
     budget: Arc<OutputBudget>,
 ) where
-    R: tokio::io::AsyncRead + Unpin,
+    R: Read,
 {
     let mut buffer = [0_u8; 4_096];
     loop {
-        match reader.read(&mut buffer).await {
+        match reader.read(&mut buffer) {
             Ok(0) | Err(_) => break,
             Ok(count) => {
                 let allowed = budget.reserve(count);
@@ -367,24 +366,18 @@ async fn forward_terminal_stream<R>(
     }
 }
 
-fn persistent_shell(cwd: &Path) -> Command {
-    let mut process = if cfg!(windows) {
-        Command::new("cmd")
-    } else {
-        Command::new(std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string()))
-    };
-    process
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    process
+fn terminal_command(cwd: &Path) -> CommandBuilder {
+    let mut command = CommandBuilder::new_default_prog();
+    command.cwd(cwd);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "MelodyWork");
+    command
 }
 
 async fn wait_for_terminal_exit(
-    child: Arc<Mutex<Child>>,
-) -> Result<std::process::ExitStatus, std::io::Error> {
+    child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>>,
+) -> Result<PtyExitStatus, io::Error> {
     loop {
         let status = {
             let mut child = child.lock().await;
@@ -407,31 +400,28 @@ pub async fn create_terminal_session(
     cwd: String,
 ) -> Result<String, String> {
     let cwd = registry.authorize(&cwd)?;
-    confirm_action(
-        &app,
-        "确认打开终端",
-        format!("允许在以下工作区启动交互式终端吗？\n{}", cwd.display()),
-    )
-    .await?;
     let terminal_id = Uuid::new_v4().to_string();
-    let mut child = persistent_shell(&cwd)
-        .spawn()
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .map_err(|error| format!("Failed to create terminal: {error}"))?;
+    let child = pair
+        .slave
+        .spawn_command(terminal_command(&cwd))
         .map_err(|error| format!("Failed to start terminal: {error}"))?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "Terminal stdin was not piped".to_string())?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Terminal stdout was not piped".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Terminal stderr was not piped".to_string())?;
+    drop(pair.slave);
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("Failed to read terminal output: {error}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("Failed to open terminal input: {error}"))?;
     let session = Arc::new(TerminalSession {
         child: Arc::new(Mutex::new(child)),
-        stdin: Mutex::new(Some(stdin)),
+        master: Arc::new(Mutex::new(pair.master)),
+        writer: Mutex::new(writer),
     });
     runtime
         .sessions
@@ -439,26 +429,30 @@ pub async fn create_terminal_session(
         .await
         .insert(terminal_id.clone(), session.clone());
 
-    let stdout_app = app.clone();
-    let stdout_id = terminal_id.clone();
-    let stderr_app = app.clone();
-    let stderr_id = terminal_id.clone();
+    let output_app = app.clone();
+    let output_id = terminal_id.clone();
+    let output_budget = Arc::new(OutputBudget::default());
+    let output_thread_name = format!("melody-terminal-{terminal_id}");
+    let _ = std::thread::Builder::new()
+        .name(output_thread_name)
+        .spawn(move || {
+            forward_terminal_stream(output_app, output_id, "stdout", reader, output_budget);
+        });
+
     let exit_id = terminal_id.clone();
     let sessions = runtime.sessions.clone();
-    let budget = Arc::new(OutputBudget::default());
     let stdout_session = session.clone();
     tauri::async_runtime::spawn(async move {
-        let stdout_task =
-            forward_terminal_stream(stdout_app, stdout_id, "stdout", stdout, budget.clone());
-        let stderr_task = forward_terminal_stream(stderr_app, stderr_id, "stderr", stderr, budget);
         let wait_task = wait_for_terminal_exit(stdout_session.child.clone());
-        let (status, _, _) = tokio::join!(wait_task, stdout_task, stderr_task);
+        let status = wait_task.await;
         sessions.lock().await.remove(&exit_id);
         let _ = app.emit(
             "melody://terminal-exit",
             TerminalExit {
                 terminal_id: exit_id,
-                code: status.ok().and_then(|status| status.code()),
+                code: status
+                    .ok()
+                    .and_then(|status| i32::try_from(status.exit_code()).ok()),
             },
         );
     });
@@ -479,18 +473,41 @@ pub async fn write_terminal_input(
         .get(&terminal_id)
         .cloned()
         .ok_or_else(|| "Terminal session is no longer running".to_string())?;
-    let mut input = session.stdin.lock().await;
-    let input = input
-        .as_mut()
-        .ok_or_else(|| "Terminal session is no longer running".to_string())?;
+    let mut input = session.writer.lock().await;
     input
         .write_all(data.as_bytes())
-        .await
         .map_err(|error| format!("Failed to write to terminal: {error}"))?;
     input
         .flush()
-        .await
         .map_err(|error| format!("Failed to flush terminal input: {error}"))
+}
+
+#[tauri::command]
+pub async fn resize_terminal_session(
+    runtime: State<'_, TerminalRuntime>,
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let session = runtime
+        .sessions
+        .lock()
+        .await
+        .get(&terminal_id)
+        .cloned()
+        .ok_or_else(|| "Terminal session is no longer running".to_string())?;
+    let size = PtySize {
+        cols: cols.clamp(2, 512),
+        rows: rows.clamp(2, 512),
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+    session
+        .master
+        .lock()
+        .await
+        .resize(size)
+        .map_err(|error| format!("Failed to resize terminal: {error}"))
 }
 
 #[tauri::command]
@@ -502,7 +519,6 @@ pub async fn close_terminal_session(
     let Some(session) = session else {
         return Ok(());
     };
-    session.stdin.lock().await.take();
     let mut child = session.child.lock().await;
     if child
         .try_wait()
@@ -511,9 +527,8 @@ pub async fn close_terminal_session(
     {
         child
             .kill()
-            .await
             .map_err(|error| format!("Failed to stop terminal process: {error}"))?;
-        let _ = child.wait().await;
+        let _ = child.wait();
     }
     Ok(())
 }
@@ -521,7 +536,6 @@ pub async fn close_terminal_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn ignores_large_generated_directories() {
@@ -628,52 +642,72 @@ mod tests {
         fs::remove_dir_all(outside).expect("outside fixture should be removed");
     }
 
-    #[tokio::test]
-    async fn persistent_shell_accepts_input_and_returns_output() {
+    #[test]
+    fn terminal_pty_accepts_input_and_returns_output() {
         let cwd = std::env::current_dir().expect("current directory should be available");
-        let mut child = persistent_shell(&cwd)
-            .spawn()
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                cols: 80,
+                rows: 24,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("pty should open");
+        let mut child = pair
+            .slave
+            .spawn_command(terminal_command(&cwd))
             .expect("persistent shell should start");
-        let mut stdin = child.stdin.take().expect("stdin should be piped");
-        let mut stdout = child.stdout.take().expect("stdout should be piped");
+        drop(pair.slave);
+        let mut writer = pair
+            .master
+            .take_writer()
+            .expect("pty writer should be available");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("pty reader should be available");
 
         #[cfg(windows)]
         let input = "echo melody-terminal-ok\r\nexit\r\n";
         #[cfg(not(windows))]
         let input = "printf 'melody-terminal-ok\\n'\nexit\n";
 
-        stdin
+        writer
             .write_all(input.as_bytes())
-            .await
             .expect("terminal input should be writable");
-        stdin.flush().await.expect("terminal input should flush");
-        drop(stdin);
+        writer.flush().expect("terminal input should flush");
+        drop(writer);
 
-        let mut output = String::new();
-        stdout
-            .read_to_string(&mut output)
-            .await
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
             .expect("terminal output should be readable");
-        let status = child.wait().await.expect("shell should exit");
+        let status = child.wait().expect("shell should exit");
 
         assert!(status.success());
-        assert!(output.contains("melody-terminal-ok"));
+        assert!(String::from_utf8_lossy(&output).contains("melody-terminal-ok"));
     }
 
     #[tokio::test]
     async fn terminal_wait_does_not_block_shutdown() {
         let cwd = std::env::current_dir().expect("current directory should be available");
-        let child = Arc::new(Mutex::new(
-            persistent_shell(&cwd)
-                .spawn()
-                .expect("persistent shell should start"),
-        ));
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize::default())
+            .expect("pty should open");
+        let child = pair
+            .slave
+            .spawn_command(terminal_command(&cwd))
+            .expect("persistent shell should start");
+        drop(pair.slave);
+        let child = Arc::new(Mutex::new(child));
         let waiter = tokio::spawn(wait_for_terminal_exit(child.clone()));
 
         let mut child_guard = tokio::time::timeout(Duration::from_secs(1), child.lock())
             .await
             .expect("waiter must not hold the child lock");
-        child_guard.kill().await.expect("shell should be killable");
+        child_guard.kill().expect("shell should be killable");
         drop(child_guard);
 
         assert!(waiter.await.expect("waiter task should finish").is_ok());

@@ -309,6 +309,7 @@ const upsertTool = (
       existing?.kind === "tool" ? existing.permissionRequestId : undefined,
     permissionOptions:
       existing?.kind === "tool" ? existing.permissionOptions : undefined,
+    question: existing?.kind === "tool" ? existing.question : undefined,
   };
 
   if (index < 0) {
@@ -546,10 +547,32 @@ const isTimelineEntry = (value: unknown): value is TimelineEntry => {
     );
   }
   if (entry.kind === "tool") {
-    return (
+    const validTool =
       typeof entry.title === "string" &&
       typeof entry.command === "string" &&
-      typeof entry.output === "string"
+      typeof entry.output === "string";
+    if (!validTool) {
+      return false;
+    }
+    const question = objectValue(entry.question);
+    if (!question) {
+      return true;
+    }
+    return (
+      (typeof question.requestId === "string" ||
+        typeof question.requestId === "number") &&
+      typeof question.sessionId === "string" &&
+      typeof question.toolCallId === "string" &&
+      Array.isArray(question.questions) &&
+      question.questions.length > 0 &&
+      (question.mode === "default" || question.mode === "plan") &&
+      [
+        "pending",
+        "accepted",
+        "chat_about_this",
+        "skip_interview",
+        "cancelled",
+      ].includes(question.outcome as string)
     );
   }
   return false;
