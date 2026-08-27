@@ -2887,10 +2887,10 @@ export function ConfigurationForm({
 
   return (
     <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto w-full max-w-5xl">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="font-semibold text-lg">{active.label}</h3>
+            <h3 className="font-semibold text-xl">{active.label}</h3>
             <p className="mt-1 text-muted-foreground text-sm">
               {active.description}
             </p>
