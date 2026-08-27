@@ -1325,6 +1325,7 @@ export function AgentWorkspace() {
 
                       <div
                         className="harness-chat-layout"
+                        data-session-info-layout-open={sessionInfoLayoutOpen}
                         style={
                           {
                             "--harness-chat-dock-space": `${chatDockSpace}px`,

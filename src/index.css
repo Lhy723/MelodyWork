@@ -1050,6 +1050,15 @@ body {
     /* The dock floats above the viewport, so keep the final message out of
        its hit area while preserving the overlay/underlay relationship. */
     padding-bottom: var(--harness-chat-dock-space) !important;
+    transition: padding-inline-end var(--motion-duration-base)
+      var(--motion-ease-drawer);
+  }
+
+  .harness-chat-layout[data-session-info-layout-open="true"]
+    .harness-chat-scroll-viewport {
+    /* Keep the scroll viewport full width so its scrollbar stays at the far
+       edge, while reserving the floating session panel's gutter for messages. */
+    padding-inline-end: calc(var(--harness-session-info-width) + 32px);
   }
 
   .harness-chat-bottom-dock {
@@ -1068,6 +1077,7 @@ body {
   }
 
   .harness-chat-layout {
+    --harness-session-info-width: clamp(260px, 30%, 21rem);
     display: flex;
     min-width: 0;
     min-height: 0;
@@ -1080,7 +1090,7 @@ body {
   .harness-session-info-panel {
     display: flex;
     height: fit-content;
-    width: min(21rem, 30%);
+    width: var(--harness-session-info-width);
     max-height: calc(
       100% - var(--harness-chat-dock-space, 0px) - 12px
     );
@@ -2061,6 +2071,13 @@ body {
 
   .harness-chat-content {
     padding-top: 18px;
+  }
+
+  .harness-chat-layout[data-session-info-layout-open="true"]
+    .harness-chat-scroll-viewport {
+    /* The session panel covers the transcript on small screens instead of
+       taking a permanent column, so do not reserve a desktop gutter here. */
+    padding-inline-end: 0;
   }
 
   .harness-chat-message.is-user .harness-chat-message-content {
