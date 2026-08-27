@@ -407,12 +407,6 @@ pub async fn create_terminal_session(
     cwd: String,
 ) -> Result<String, String> {
     let cwd = registry.authorize(&cwd)?;
-    confirm_action(
-        &app,
-        "确认打开终端",
-        format!("允许在以下工作区启动交互式终端吗？\n{}", cwd.display()),
-    )
-    .await?;
     let terminal_id = Uuid::new_v4().to_string();
     let mut child = persistent_shell(&cwd)
         .spawn()

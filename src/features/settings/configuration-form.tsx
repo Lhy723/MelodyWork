@@ -12,7 +12,6 @@ import {
   RefreshCwIcon,
   ServerIcon,
   Settings2Icon,
-  ShieldIcon,
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react";
@@ -45,7 +44,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { AgentModelOption, AgentPermissionMode } from "@/domain/acp";
 import type { MelodyConfigScope, MelodyConfigValue } from "@/domain/config";
-import { getFileOpenerAvailability } from "@/lib/melody-bridge";
+import {
+  getFileOpenerAvailability,
+  isMacOSRuntime,
+  isTauriRuntime,
+} from "@/lib/melody-bridge";
 import { requestSystemNotificationPermission } from "@/lib/system-notifications";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agent-store";
@@ -627,57 +630,6 @@ const userSections: SettingSection[] = [
         label: "停用的技能",
         description: "每行一个明确停用的技能名称。",
         kind: "string-list",
-      },
-    ],
-  },
-  {
-    id: "auth",
-    label: "认证",
-    description: "外部凭据提供器和 OIDC 登录。",
-    icon: ShieldIcon,
-    settings: [
-      {
-        path: ["auth", "auth_provider_command"],
-        label: "凭据提供命令",
-        description: "运行后返回认证令牌的本地命令。",
-        kind: "string",
-      },
-      {
-        path: ["auth", "auth_provider_label"],
-        label: "凭据提供器名称",
-        description: "登录界面中显示的提供器名称。",
-        kind: "string",
-      },
-      {
-        path: ["auth", "auth_token_ttl"],
-        label: "令牌缓存时间",
-        description: "凭据提供命令结果的缓存秒数。",
-        kind: "number",
-        min: 0,
-      },
-      {
-        path: ["grok_com_config", "oidc", "issuer"],
-        label: "OIDC Issuer",
-        description: "OpenID Connect 发行方地址。",
-        kind: "string",
-      },
-      {
-        path: ["grok_com_config", "oidc", "client_id"],
-        label: "OIDC Client ID",
-        description: "应用在 OIDC 提供器中的客户端标识。",
-        kind: "string",
-      },
-      {
-        path: ["grok_com_config", "oidc", "scopes"],
-        label: "OIDC Scopes",
-        description: "每行一个需要请求的 OIDC scope。",
-        kind: "string-list",
-      },
-      {
-        path: ["grok_com_config", "oidc", "audience"],
-        label: "OIDC Audience",
-        description: "令牌预期的 audience。",
-        kind: "string",
       },
     ],
   },
@@ -1615,6 +1567,7 @@ function AppearanceThemeGroup({ dark }: { dark: boolean }) {
   const uiFont = useAppSettingsStore((state) => state.uiFont);
   const codeFont = useAppSettingsStore((state) => state.codeFont);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
+  const showTranslucentSidebar = isTauriRuntime() && isMacOSRuntime();
 
   return (
     <PreferenceGroup title={dark ? "深色主题" : "浅色主题"}>
@@ -1650,12 +1603,14 @@ function AppearanceThemeGroup({ dark }: { dark: boolean }) {
           value={codeFont}
         />
       </PreferenceRow>
-      <PreferenceRow description="" label="半透明侧边栏">
-        <PreferenceSwitch
-          label="半透明侧边栏"
-          settingKey="translucentSidebar"
-        />
-      </PreferenceRow>
+      {showTranslucentSidebar ? (
+        <PreferenceRow description="" label="macOS 磨砂侧边栏">
+          <PreferenceSwitch
+            label="macOS 磨砂侧边栏"
+            settingKey="translucentSidebar"
+          />
+        </PreferenceRow>
+      ) : null}
     </PreferenceGroup>
   );
 }
@@ -2890,7 +2845,7 @@ export function ConfigurationForm({
       <div className="mx-auto w-full max-w-5xl">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="font-semibold text-xl">{active.label}</h3>
+            <h3 className="font-semibold text-3xl">{active.label}</h3>
             <p className="mt-1 text-muted-foreground text-sm">
               {active.description}
             </p>

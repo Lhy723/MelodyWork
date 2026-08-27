@@ -521,7 +521,7 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
       <div className="mx-auto max-w-5xl px-8 py-7">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-xl">统计</h3>
+            <h3 className="font-semibold text-3xl">统计</h3>
             <p className="mt-1 text-muted-foreground text-sm">
               了解你的任务活跃度、Token 使用和 Melody 扩展使用情况。
             </p>

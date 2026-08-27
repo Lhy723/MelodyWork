@@ -570,7 +570,7 @@ export function AppSidebar({
         </nav>
       </div>
 
-      <div className="border-t px-1 pt-1.5">
+      <div className="app-sidebar-footer border-t px-1 pt-1.5">
         <Button
           className={cn(
             "h-9 w-full justify-start rounded-lg px-2 text-sidebar-foreground hover:text-sidebar-foreground",

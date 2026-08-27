@@ -78,6 +78,10 @@ interface ResearchHttpResponse {
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+export const isMacOSRuntime = () =>
+  typeof navigator !== "undefined" &&
+  /Macintosh|Mac OS X/u.test(navigator.userAgent);
+
 export const getUsageStatistics = async (): Promise<UsageStatistics> => {
   if (!isTauriRuntime()) {
     const today = new Date();
@@ -125,9 +129,7 @@ const preferredEditorCommand = (target: FileOpener) => {
   if (target === "system") {
     return undefined;
   }
-  const macOS =
-    typeof navigator !== "undefined" &&
-    /Macintosh|Mac OS X/u.test(navigator.userAgent);
+  const macOS = isMacOSRuntime();
   if (target === "vscode") {
     return macOS ? "Visual Studio Code" : "code";
   }

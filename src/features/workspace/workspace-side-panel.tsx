@@ -198,7 +198,7 @@ export function WorkspaceSidePanel({
   return (
     <aside
       aria-label="右侧工作区"
-      className="motion-workspace-panel relative flex size-full min-h-0 shrink-0 flex-col border-l bg-background"
+      className="motion-workspace-panel workspace-panel-shell relative flex size-full min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width: "var(--workspace-panel-width, 35rem)" }}
     >
       <div
@@ -314,7 +314,7 @@ export function WorkspaceSidePanel({
         </DropdownMenu>
       </header>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="workspace-panel-content relative min-h-0 flex-1">
         {tabs.length === 0 ? (
           <div className="grid size-full place-items-center p-6">
             <div className="w-full max-w-xs">

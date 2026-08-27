@@ -55,6 +55,7 @@ import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
+  isTauriRuntime,
   openFileWithPreferredApp,
   type AppUpdateStatus,
 } from "@/lib/melody-bridge";
@@ -250,6 +251,9 @@ export function AgentWorkspace() {
   );
   const defaultIndependentChat = useAppSettingsStore(
     (state) => state.defaultIndependentChat,
+  );
+  const translucentSidebar = useAppSettingsStore(
+    (state) => state.translucentSidebar,
   );
   const selectedModelId = useAgentStore((state) => state.selectedModelId);
   const pendingModelId = useAgentStore((state) => state.pendingModelId);
@@ -931,7 +935,9 @@ export function AgentWorkspace() {
   const independentProject = projects.find(isIndependentProject);
   const newTaskProject =
     projects.find((project) => project.id === newTaskProjectId) ??
-    (defaultIndependentChat ? (independentProject ?? activeProject) : activeProject);
+    (defaultIndependentChat
+      ? (independentProject ?? activeProject)
+      : activeProject);
 
   const createTaskFromPrompt = async (
     content: string,
@@ -996,9 +1002,16 @@ export function AgentWorkspace() {
         researchSection !== "skills"
       ? "research"
       : "conversation";
+  const nativeVibrancyEnabled =
+    isMacOS && isTauriRuntime() && translucentSidebar;
 
   return (
-    <main className="relative flex h-svh min-h-0 overflow-hidden bg-background text-foreground">
+    <main
+      className={cn(
+        "relative flex h-svh min-h-0 overflow-hidden text-foreground",
+        nativeVibrancyEnabled ? "bg-transparent" : "bg-background",
+      )}
+    >
       {!settingsOpen ? (
         <WindowNavigationControls
           canGoBack={canGoBack}
@@ -1067,7 +1080,10 @@ export function AgentWorkspace() {
           workspaceMode={workspaceMode}
         />
       </div>
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <section
+        className="workspace-stage relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background"
+        data-settings-open={settingsOpen ? "true" : "false"}
+      >
         <AnimatePresence initial={false} mode="wait">
           {settingsOpen ? (
             <MotionPage
@@ -1307,17 +1323,19 @@ export function AgentWorkspace() {
                         )}
                       </Presence>
 
-                      <div className="harness-chat-layout">
+                      <div
+                        className="harness-chat-layout"
+                        style={
+                          {
+                            "--harness-chat-dock-space": `${chatDockSpace}px`,
+                          } as CSSProperties
+                        }
+                      >
                         <div
                           aria-labelledby={`session-view-tab-${conversationView}`}
                           className="relative flex min-w-0 flex-1 flex-col"
                           id="session-view-panel"
                           role="tabpanel"
-                          style={
-                            {
-                              "--harness-chat-dock-space": `${chatDockSpace}px`,
-                            } as CSSProperties
-                          }
                         >
                           {conversationView === "chat" ? (
                             <AgentTimeline
@@ -1343,12 +1361,6 @@ export function AgentWorkspace() {
                               }
                             />
                           )}
-                          <div
-                            className="harness-chat-bottom-dock"
-                            ref={chatDockRef}
-                          >
-                            {renderComposer(submitPrompt)}
-                          </div>
                         </div>
                         <aside
                           aria-hidden={!sessionInfoOpen}
@@ -1393,6 +1405,12 @@ export function AgentWorkspace() {
                             </div>
                           </div>
                         </aside>
+                        <div
+                          className="harness-chat-bottom-dock"
+                          ref={chatDockRef}
+                        >
+                          {renderComposer(submitPrompt)}
+                        </div>
                       </div>
                     </div>
                     <div

@@ -862,7 +862,7 @@ export function SettingsWorkspace({
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <ExtensionIcon className="size-5 text-muted-foreground" />
-                              <h3 className="font-semibold text-lg">
+                              <h3 className="font-semibold text-2xl">
                                 {kindLabel[extensionKind]}
                               </h3>
                               <Badge variant="secondary">
@@ -1095,7 +1095,7 @@ export function SettingsWorkspace({
                   <div className="mx-auto max-w-4xl">
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-lg">项目权限规则</h3>
+                        <h3 className="font-semibold text-2xl">项目权限规则</h3>
                         <p className="mt-1 text-muted-foreground text-sm">
                           已为此项目允许或拒绝的精确工具调用会自动应用。
                         </p>
