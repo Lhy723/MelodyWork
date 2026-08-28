@@ -273,8 +273,14 @@ body {
   border-top-color: transparent;
 }
 
-.app-native-vibrancy-window .harness-chat-layout {
+.app-native-vibrancy-window .harness-session-surface {
   border-radius: var(--app-native-workspace-radius);
+  background: var(--background);
+  overflow: hidden;
+}
+
+.app-native-vibrancy-window .harness-chat-layout {
+  border-radius: 0;
   background: var(--background);
 }
 
@@ -953,7 +959,7 @@ body {
   }
 
   .harness-session-header {
-    min-height: calc(var(--harness-window-titlebar-height) + 34px);
+    min-height: var(--harness-window-titlebar-height);
     background: var(--harness-bg-base);
     color: var(--harness-label-primary);
   }
@@ -1002,6 +1008,16 @@ body {
     height: 34px;
     align-items: end;
     padding-left: 8px;
+  }
+
+  .harness-session-surface {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--harness-bg-base);
   }
 
   .harness-session-tab {
@@ -1091,9 +1107,7 @@ body {
     display: flex;
     height: fit-content;
     width: var(--harness-session-info-width);
-    max-height: calc(
-      100% - var(--harness-chat-dock-space, 0px) - 12px
-    );
+    max-height: calc(100% - var(--harness-chat-dock-space, 0px) - 12px);
     min-width: 260px;
     position: absolute;
     inset-block-start: 12px;
@@ -2059,6 +2073,11 @@ body {
   .harness-session-header {
     padding-right: 12px !important;
     padding-left: 72px !important;
+  }
+
+  .harness-session-surface .sidebar-aware-tabs {
+    padding-right: 12px;
+    padding-left: 80px !important;
   }
 
   .harness-session-title-row {

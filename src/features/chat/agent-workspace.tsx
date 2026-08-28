@@ -1151,7 +1151,7 @@ export function AgentWorkspace() {
                     <div className="relative flex min-w-0 flex-1 flex-col">
                       <header
                         className={cn(
-                          "harness-session-header sidebar-aware-header flex shrink-0 flex-col items-stretch border-b pr-6",
+                          "harness-session-header sidebar-aware-header flex shrink-0 flex-col items-stretch pr-6",
                           sidebarCollapsed
                             ? isMacOS
                               ? "pl-52"
@@ -1268,10 +1268,19 @@ export function AgentWorkspace() {
                             </Button>
                           </div>
                         </div>
+                      </header>
+                      <div className="harness-session-surface">
                         <nav
                           aria-label="会话视图"
                           aria-orientation="horizontal"
-                          className="harness-session-tabs"
+                          className={cn(
+                            "harness-session-tabs sidebar-aware-tabs",
+                            sidebarCollapsed
+                              ? isMacOS
+                                ? "pl-[216px]"
+                                : "pl-[136px]"
+                              : "pl-8",
+                          )}
                           role="tablist"
                         >
                           <button
@@ -1309,101 +1318,101 @@ export function AgentWorkspace() {
                             轨迹
                           </button>
                         </nav>
-                      </header>
-                      <Presence present={Boolean(visibleError)}>
-                        {(motionState) => (
-                          <div
-                            aria-live="polite"
-                            className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-                            data-motion-state={motionState}
-                            role="alert"
-                          >
-                            {visibleError}
-                          </div>
-                        )}
-                      </Presence>
-
-                      <div
-                        className="harness-chat-layout"
-                        data-session-info-layout-open={sessionInfoLayoutOpen}
-                        style={
-                          {
-                            "--harness-chat-dock-space": `${chatDockSpace}px`,
-                          } as CSSProperties
-                        }
-                      >
-                        <div
-                          aria-labelledby={`session-view-tab-${conversationView}`}
-                          className="relative flex min-w-0 flex-1 flex-col"
-                          id="session-view-panel"
-                          role="tabpanel"
-                        >
-                          {conversationView === "chat" ? (
-                            <AgentTimeline
-                              cwd={cwd}
-                              entries={timeline}
-                              onPermission={resolvePermission}
-                              onQuestion={resolveQuestion}
-                              onPlanDecision={resolvePlan}
-                              onOpenFile={openFilePreview}
-                              onOpenProjectReference={openProjectReference}
-                              projectRoot={activeProject?.path ?? cwd}
-                              turnRunning={
-                                chatStatus === "submitted" ||
-                                chatStatus === "streaming"
-                              }
-                            />
-                          ) : (
-                            <TrajectoryView
-                              entries={timeline}
-                              running={
-                                chatStatus === "submitted" ||
-                                chatStatus === "streaming"
-                              }
-                            />
+                        <Presence present={Boolean(visibleError)}>
+                          {(motionState) => (
+                            <div
+                              aria-live="polite"
+                              className="motion-banner border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+                              data-motion-state={motionState}
+                              role="alert"
+                            >
+                              {visibleError}
+                            </div>
                           )}
-                        </div>
-                        <aside
-                          aria-hidden={!sessionInfoOpen}
-                          aria-label="会话信息"
-                          className="harness-session-info-panel"
-                          data-layout-open={sessionInfoLayoutOpen}
-                          inert={!sessionInfoOpen}
+                        </Presence>
+
+                        <div
+                          className="harness-chat-layout"
+                          data-session-info-layout-open={sessionInfoLayoutOpen}
+                          style={
+                            {
+                              "--harness-chat-dock-space": `${chatDockSpace}px`,
+                            } as CSSProperties
+                          }
                         >
                           <div
-                            className="harness-session-info-surface"
-                            data-open={sessionInfoSurfaceOpen}
+                            aria-labelledby={`session-view-tab-${conversationView}`}
+                            className="relative flex min-w-0 flex-1 flex-col"
+                            id="session-view-panel"
+                            role="tabpanel"
                           >
-                            <div className="harness-session-info-header">
-                              <span>会话信息</span>
-                            </div>
-                            <div className="harness-session-info-body harness-session-info-body--ledger">
-                              <section className="harness-session-info-section">
-                                <SubagentTray
-                                  className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
-                                  onOpenSubagent={openSubagent}
-                                  subagents={visibleSubagents}
-                                />
-                              </section>
-                              <section className="harness-session-info-section">
-                                <SessionStatsLine
-                                  contextUsage={contextUsage}
-                                  entries={timeline}
-                                  modelName={
-                                    availableModels.find(
-                                      (model) => model.id === selectedModelId,
-                                    )?.name
-                                  }
-                                />
-                              </section>
-                            </div>
+                            {conversationView === "chat" ? (
+                              <AgentTimeline
+                                cwd={cwd}
+                                entries={timeline}
+                                onPermission={resolvePermission}
+                                onQuestion={resolveQuestion}
+                                onPlanDecision={resolvePlan}
+                                onOpenFile={openFilePreview}
+                                onOpenProjectReference={openProjectReference}
+                                projectRoot={activeProject?.path ?? cwd}
+                                turnRunning={
+                                  chatStatus === "submitted" ||
+                                  chatStatus === "streaming"
+                                }
+                              />
+                            ) : (
+                              <TrajectoryView
+                                entries={timeline}
+                                running={
+                                  chatStatus === "submitted" ||
+                                  chatStatus === "streaming"
+                                }
+                              />
+                            )}
                           </div>
-                        </aside>
-                        <div
-                          className="harness-chat-bottom-dock"
-                          ref={chatDockRef}
-                        >
-                          {renderComposer(submitPrompt)}
+                          <aside
+                            aria-hidden={!sessionInfoOpen}
+                            aria-label="会话信息"
+                            className="harness-session-info-panel"
+                            data-layout-open={sessionInfoLayoutOpen}
+                            inert={!sessionInfoOpen}
+                          >
+                            <div
+                              className="harness-session-info-surface"
+                              data-open={sessionInfoSurfaceOpen}
+                            >
+                              <div className="harness-session-info-header">
+                                <span>会话信息</span>
+                              </div>
+                              <div className="harness-session-info-body harness-session-info-body--ledger">
+                                <section className="harness-session-info-section">
+                                  <SubagentTray
+                                    className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
+                                    onOpenSubagent={openSubagent}
+                                    subagents={visibleSubagents}
+                                  />
+                                </section>
+                                <section className="harness-session-info-section">
+                                  <SessionStatsLine
+                                    contextUsage={contextUsage}
+                                    entries={timeline}
+                                    modelName={
+                                      availableModels.find(
+                                        (model) => model.id === selectedModelId,
+                                      )?.name
+                                    }
+                                  />
+                                </section>
+                              </div>
+                            </div>
+                          </aside>
+                          <div
+                            className="harness-chat-bottom-dock"
+                            ref={chatDockRef}
+                          >
+                            {renderComposer(submitPrompt)}
+                          </div>
                         </div>
                       </div>
                     </div>
