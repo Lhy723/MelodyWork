@@ -241,6 +241,10 @@ body {
   background: transparent !important;
 }
 
+.app-native-vibrancy-window .workspace-stage[data-settings-open="true"] {
+  background: transparent !important;
+}
+
 .app-native-vibrancy-window [data-app-sidebar] {
   background: transparent;
 }
@@ -271,6 +275,14 @@ body {
 
 .app-native-vibrancy-window [data-app-sidebar] .app-sidebar-footer {
   border-top-color: transparent;
+}
+
+.app-native-vibrancy-window .settings-workspace {
+  background: transparent !important;
+}
+
+.app-native-vibrancy-window .settings-workspace-content {
+  background: var(--background);
 }
 
 .app-native-vibrancy-window .harness-session-surface {

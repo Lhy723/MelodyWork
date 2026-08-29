@@ -1436,11 +1436,11 @@ function ApplicationGeneralSettings() {
 
       <PreferenceGroup title="新建任务">
         <PreferenceRow
-          description="新建任务默认使用不绑定项目目录的独立聊天。"
-          label="默认使用独立聊天"
+          description="新建任务默认使用不绑定项目目录的任务空间。"
+          label="默认使用任务"
         >
           <PreferenceSwitch
-            label="默认使用独立聊天"
+            label="默认使用任务"
             settingKey="defaultIndependentChat"
           />
         </PreferenceRow>

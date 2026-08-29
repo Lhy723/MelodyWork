@@ -728,11 +728,11 @@ impl AppDatabase {
         connection.execute(
             "INSERT OR IGNORE INTO projects (id, name, path, last_opened_at)
              VALUES (?1, ?2, ?3, 0)",
-            params![INDEPENDENT_PROJECT_ID, "独立聊天", independent_path],
+            params![INDEPENDENT_PROJECT_ID, "任务", independent_path],
         )?;
         connection.execute(
             "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
-            params!["独立聊天", independent_path, INDEPENDENT_PROJECT_ID],
+            params!["任务", independent_path, INDEPENDENT_PROJECT_ID],
         )?;
         Ok(Self {
             connection: Mutex::new(connection),

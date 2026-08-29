@@ -566,7 +566,7 @@ export function SettingsWorkspace({
       : page;
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-background">
+    <section className="settings-workspace flex min-h-0 flex-1 flex-col bg-background">
       {visibleError ? (
         <p
           aria-live="assertive"
@@ -578,7 +578,10 @@ export function SettingsWorkspace({
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-56 shrink-0 flex-col overflow-y-auto border-r">
+        <aside
+          className="flex w-56 shrink-0 flex-col overflow-y-auto border-r"
+          data-app-sidebar
+        >
           <div
             className="harness-window-titlebar shrink-0"
             data-tauri-drag-region
@@ -776,7 +779,7 @@ export function SettingsWorkspace({
           </div>
         </aside>
 
-        <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="settings-workspace-content relative min-h-0 min-w-0 flex-1">
           <div
             aria-hidden="true"
             className="absolute inset-x-0 top-0 z-20 h-5 min-h-5"

@@ -227,10 +227,10 @@ export function AboutPage() {
 
   const isBusy =
     updateState.status === "checking" || updateState.status === "installing";
-  const updateCheckDescription =
-    updateChannel === "beta"
-      ? "优先检查测试版；没有更高测试版时也会检查正式版的签名更新。"
-      : "检查正式版渠道的签名更新。";
+  const hasUpdateDetails =
+    updateState.status === "available" ||
+    updateState.status === "installing" ||
+    updateState.status === "error";
 
   const refreshReleaseHistory = useCallback(async () => {
     setReleaseHistoryState("loading");
@@ -249,7 +249,10 @@ export function AboutPage() {
   const refreshEnvironmentCapabilities = useCallback(async () => {
     setEnvironmentState("loading");
     try {
-      setEnvironmentCapabilities(await getEnvironmentCapabilities());
+      const capabilities = await getEnvironmentCapabilities();
+      setEnvironmentCapabilities(
+        capabilities.filter((capability) => capability.installed),
+      );
       setEnvironmentState("ready");
     } catch {
       setEnvironmentCapabilities([]);
@@ -421,9 +424,7 @@ export function AboutPage() {
                   variant="secondary"
                 >
                   <RefreshCwIcon className={cn(isBusy && "animate-spin")} />
-                  {updateState.status === "checking"
-                    ? "检查中…"
-                    : `检查${updateChannelLabel[updateChannel]}更新`}
+                  {updateState.status === "checking" ? "检查中…" : "检查更新"}
                 </Button>
               </div>
             }
@@ -470,65 +471,53 @@ export function AboutPage() {
               </Select>
             </div>
           </div>
-          <div className="p-5">
-            {updateState.status === "available" ||
-            updateState.status === "installing" ? (
-              <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 p-4">
-                <div className="flex items-center gap-2">
-                  <InfoIcon className="size-4 text-blue-500" />
-                  <p className="font-medium text-sm">
-                    发现{updateChannelLabel[updateState.channel]}新版本 v
-                    {updateState.status === "available"
-                      ? updateState.version
-                      : ""}
-                  </p>
+          {hasUpdateDetails ? (
+            <div className="p-5">
+              {updateState.status === "available" ||
+              updateState.status === "installing" ? (
+                <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 p-4">
+                  <div className="flex items-center gap-2">
+                    <InfoIcon className="size-4 text-blue-500" />
+                    <p className="font-medium text-sm">
+                      发现{updateChannelLabel[updateState.channel]}新版本 v
+                      {updateState.status === "available"
+                        ? updateState.version
+                        : ""}
+                    </p>
+                  </div>
+                  {updateState.status === "available" && updateState.notes ? (
+                    <p className="mt-2 whitespace-pre-wrap text-muted-foreground text-xs">
+                      {updateState.notes}
+                    </p>
+                  ) : null}
+                  <Button
+                    className="mt-3"
+                    disabled={updateState.status === "installing"}
+                    onClick={() => void installUpdate()}
+                    size="sm"
+                  >
+                    {updateState.status === "installing" ? (
+                      <>
+                        <RefreshCwIcon className="animate-spin" />
+                        正在下载并安装…
+                      </>
+                    ) : (
+                      "安装更新并重启"
+                    )}
+                  </Button>
                 </div>
-                {updateState.status === "available" && updateState.notes ? (
-                  <p className="mt-2 whitespace-pre-wrap text-muted-foreground text-xs">
-                    {updateState.notes}
-                  </p>
-                ) : null}
-                <Button
-                  className="mt-3"
-                  disabled={updateState.status === "installing"}
-                  onClick={() => void installUpdate()}
-                  size="sm"
+              ) : null}
+              {updateState.status === "error" ? (
+                <div
+                  aria-live="assertive"
+                  className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm"
+                  role="alert"
                 >
-                  {updateState.status === "installing" ? (
-                    <>
-                      <RefreshCwIcon className="animate-spin" />
-                      正在下载并安装…
-                    </>
-                  ) : (
-                    "安装更新并重启"
-                  )}
-                </Button>
-              </div>
-            ) : null}
-            {updateState.status === "error" ? (
-              <div
-                aria-live="assertive"
-                className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm"
-                role="alert"
-              >
-                检查更新失败：{updateState.message}
-              </div>
-            ) : null}
-            {updateState.status === "not-configured" ? (
-              <p className="text-muted-foreground text-xs">
-                更新服务未配置，开发环境下不支持自动更新。
-              </p>
-            ) : null}
-            {updateState.status === "idle" ||
-            updateState.status === "checking" ||
-            updateState.status === "up-to-date" ? (
-              <p className="text-muted-foreground text-xs">
-                {updateState.status === "checking"
-                  ? "正在读取更新清单…"
-                  : `MelodyWork ${updateCheckDescription}`}
-              </p>
-            ) : null}
-          </div>
+                  检查更新失败：{updateState.message}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {repositoryError ? (
             <p
               aria-live="assertive"
@@ -627,26 +616,11 @@ export function AboutPage() {
           className="overflow-hidden rounded-xl border bg-card"
         >
           <PanelHeader
-            action={
-              <Button
-                disabled={environmentState === "loading"}
-                onClick={() => void refreshEnvironmentCapabilities()}
-                size="sm"
-                variant="secondary"
-              >
-                <RefreshCwIcon
-                  className={cn(
-                    environmentState === "loading" && "animate-spin",
-                  )}
-                />
-                重新检查
-              </Button>
-            }
-            description="基础 Agent 无需 Node.js 或 Git；按需安装后可启用 MCP、Git 变更视图等能力。"
+            description="检测桌面端 Node.js 和 Git 的安装状态，供 MCP、Git 变更视图等功能使用。"
             title={
               <>
                 <MonitorIcon className="size-4 text-muted-foreground" />
-                <span id="about-environment-title">可选环境能力</span>
+                <span id="about-environment-title">环境检测</span>
               </>
             }
           />
@@ -669,12 +643,12 @@ export function AboutPage() {
             environmentState === "ready" &&
             environmentCapabilities.length === 0 ? (
               <p className="sm:col-span-2 text-muted-foreground text-xs">
-                暂未检测到可选环境能力。
+                暂未检测到 Node.js 或 Git。
               </p>
             ) : null}
             {environmentState === "error" ? (
               <p className="sm:col-span-2 text-destructive text-xs">
-                环境检查失败，请点击“重新检查”再试。
+                环境检查失败，请稍后重试。
               </p>
             ) : null}
           </div>

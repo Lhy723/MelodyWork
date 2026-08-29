@@ -636,7 +636,7 @@ const previewProject: ProjectRecord = {
 
 const previewIndependentProject: ProjectRecord = {
   id: INDEPENDENT_PROJECT_ID,
-  name: "独立聊天",
+  name: "任务",
   path: ".",
   lastOpenedAt: 0,
   isIndependent: true,

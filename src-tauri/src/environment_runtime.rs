@@ -27,14 +27,14 @@ pub async fn get_environment_capabilities() -> Vec<EnvironmentCapability> {
             "Node.js",
             "node",
             &["--version"],
-            "可选 · 仅 npx / npm 型 MCP 服务器需要（推荐 22 LTS）",
+            "仅 npx / npm 型 MCP 服务器需要（推荐 22 LTS）",
         )
         .await,
         probe(
             "Git",
             "git",
             &["--version"],
-            "可选 · 用于 Git 变更、分支和工作树操作",
+            "用于 Git 变更、分支和工作树操作",
         )
         .await,
     ]
