@@ -24,9 +24,10 @@ use config_runtime::{
     update_melody_plugin,
 };
 use database::{
-    AppDatabase, create_session, delete_permission_rule, delete_session, find_permission_rule,
-    get_usage_statistics, list_permission_rules, list_projects, list_sessions,
-    read_session_timeline, update_session, upsert_permission_rule, upsert_project,
+    AppDatabase, archive_project, create_session, delete_permission_rule, delete_project,
+    delete_session, find_permission_rule, get_usage_statistics, list_permission_rules,
+    list_projects, list_sessions, read_session_timeline, restore_project, update_session,
+    upsert_permission_rule, upsert_project,
 };
 use environment_runtime::{get_environment_capabilities, get_file_opener_availability};
 use git_runtime::{
@@ -91,6 +92,9 @@ pub fn run() {
             git_remove_worktree,
             list_projects,
             upsert_project,
+            archive_project,
+            restore_project,
+            delete_project,
             list_sessions,
             create_session,
             update_session,

@@ -237,6 +237,7 @@ interface AgentStore {
     acpCursor?: string,
     timelineVersion?: number,
     archivedTimelineJson?: string,
+    forceInitialize?: boolean,
   ) => Promise<void>;
   receiveAcp: (message: AcpEnvelope) => Promise<void>;
   submitPrompt: (
@@ -457,10 +458,23 @@ const updateQuestionEntry = (
     };
   });
 
-const errorMessage = (message: AcpEnvelope, fallback: string) =>
-  stringValue(objectValue(message.error?.data)?.message) ??
-  message.error?.message ??
-  fallback;
+const errorMessage = (message: AcpEnvelope, fallback: string) => {
+  const base = message.error?.message?.trim();
+  const data = message.error?.data;
+  const dataObject = objectValue(data);
+  const detail =
+    (typeof data === "string" ? data.trim() : undefined) ||
+    stringValue(dataObject?.message)?.trim() ||
+    stringValue(dataObject?.detail)?.trim() ||
+    stringValue(dataObject?.reason)?.trim() ||
+    stringValue(dataObject?.error)?.trim() ||
+    stringValue(dataObject?.code)?.trim();
+
+  if (base && detail && base !== detail) {
+    return `${base}：${detail}`;
+  }
+  return detail || base || fallback;
+};
 
 const parseDataUrl = (url: string) => {
   const match = /^data:([^;,]*)(;base64)?,([\s\S]*)$/.exec(url);
@@ -950,6 +964,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     acpCursor,
     timelineVersion,
     archivedTimelineJson,
+    forceInitialize = false,
   ) => {
     const projectionTimelineJson = archivedTimelineJson ?? timelineJson;
     // The archive can restore the display independently. A cursor is only
@@ -1093,11 +1108,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       availableSessionModes: [],
       selectedSessionModeId: undefined,
       pendingSessionModeId: undefined,
-      acpPhase: state.acpPhase === "idle" ? "initializing" : "creating",
+      acpPhase:
+        forceInitialize ||
+        state.acpPhase === "idle" ||
+        state.acpPhase === "error" ||
+        state.acpPhase === "initializing"
+          ? "initializing"
+          : "creating",
       chatStatus: "submitted",
     });
     try {
-      if (state.acpPhase !== "idle") {
+      const protocolReady =
+        !forceInitialize &&
+        state.acpPhase !== "idle" &&
+        state.acpPhase !== "error" &&
+        state.acpPhase !== "initializing";
+      if (protocolReady) {
         await sendSessionOpen(
           localSessionId,
           cwd,

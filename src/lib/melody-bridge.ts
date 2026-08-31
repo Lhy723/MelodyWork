@@ -631,6 +631,7 @@ const previewProject: ProjectRecord = {
   name: "MelodyWork",
   path: ".",
   lastOpenedAt: Math.floor(Date.now() / 1000),
+  archived: false,
   isIndependent: false,
 };
 
@@ -639,6 +640,7 @@ const previewIndependentProject: ProjectRecord = {
   name: "任务",
   path: ".",
   lastOpenedAt: 0,
+  archived: false,
   isIndependent: true,
 };
 
@@ -675,16 +677,59 @@ const previewSessions: SessionRecord[] = [
   },
 ];
 const previewTimelineArchives = new Map<string, Map<number, string>>();
+const previewProjects: ProjectRecord[] = [
+  previewProject,
+  previewIndependentProject,
+];
+
+const findPreviewProject = (id: string) =>
+  previewProjects.find((project) => project.id === id);
 
 export const listProjects = async (): Promise<ProjectRecord[]> =>
   isTauriRuntime()
     ? invoke<ProjectRecord[]>("list_projects")
-    : [previewProject, previewIndependentProject];
+    : previewProjects.map((project) => ({ ...project }));
 
 export const upsertProject = async (path: string): Promise<ProjectRecord> =>
   isTauriRuntime()
     ? invoke<ProjectRecord>("upsert_project", { path })
-    : previewProject;
+    : { ...previewProject, archived: false };
+
+export const archiveProject = async (id: string): Promise<ProjectRecord> => {
+  if (isTauriRuntime()) {
+    return invoke<ProjectRecord>("archive_project", { id });
+  }
+  const project = findPreviewProject(id);
+  if (!project || project.isIndependent) {
+    throw new Error("该项目不能归档。");
+  }
+  project.archived = true;
+  return { ...project };
+};
+
+export const restoreProject = async (id: string): Promise<ProjectRecord> => {
+  if (isTauriRuntime()) {
+    return invoke<ProjectRecord>("restore_project", { id });
+  }
+  const project = findPreviewProject(id);
+  if (!project || project.isIndependent) {
+    throw new Error("该项目不能恢复。");
+  }
+  project.archived = false;
+  return { ...project };
+};
+
+export const deleteProject = async (id: string): Promise<void> => {
+  if (isTauriRuntime()) {
+    await invoke("delete_project", { id });
+    return;
+  }
+  const index = previewProjects.findIndex((project) => project.id === id);
+  if (index < 0 || previewProjects[index]?.isIndependent) {
+    throw new Error("该项目不能删除。");
+  }
+  previewProjects.splice(index, 1);
+};
 
 export const pickWorkspaceDirectory = async (): Promise<string | undefined> => {
   if (!isTauriRuntime()) {

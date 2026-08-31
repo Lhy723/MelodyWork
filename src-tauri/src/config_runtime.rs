@@ -332,12 +332,19 @@ pub async fn update_melody_config(
     patches: Vec<MelodyConfigPatch>,
 ) -> Result<MelodyConfigDocument, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    confirm_action(
-        &app,
-        "确认修改 Melody 配置",
-        format!("允许修改 {} 范围的 Melody 配置吗？", scope),
-    )
-    .await?;
+    let path = config_path(&scope, &cwd)?;
+    if !registry.config_write_approved(&path)? {
+        confirm_action(
+            &app,
+            "确认修改 Melody 配置",
+            format!(
+                "允许修改 {} 范围的 Melody 配置吗？本次确认后，当前运行期间后续设置修改将不再重复询问。",
+                scope
+            ),
+        )
+        .await?;
+        registry.approve_config_write(path)?;
+    }
     update_melody_config_inner(scope, cwd, patches)
 }
 
@@ -981,12 +988,8 @@ pub async fn scan_marketplace_plugins(
 ) -> Result<Vec<MarketplacePlugin>, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     if refresh {
-        confirm_action(
-            &app,
-            "确认刷新 Marketplace",
-            format!("允许 Melody 在 {} 更新 Marketplace 索引吗？", cwd),
-        )
-        .await?;
+        // Refreshing the catalog only reads the configured sources and
+        // updates their local index; it is a routine settings action.
         run_plugin_command(&app, &cwd, &["plugin", "marketplace", "update"]).await?;
     }
     let output =

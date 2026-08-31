@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 #[derive(Clone, Default)]
 pub struct WorkspaceRegistry {
     roots: Arc<RwLock<HashSet<PathBuf>>>,
+    approved_config_paths: Arc<RwLock<HashSet<PathBuf>>>,
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
@@ -67,9 +68,29 @@ impl WorkspaceRegistry {
         )
     }
 
+    /// Check whether settings writes to a config file have already been
+    /// approved during this application run.
+    pub fn config_write_approved(&self, path: &Path) -> Result<bool, String> {
+        self.approved_config_paths
+            .read()
+            .map_err(|_| "Config approval registry lock poisoned".to_string())
+            .map(|paths| paths.contains(path))
+    }
+
+    /// Remember an approved config file so subsequent setting changes do not
+    /// interrupt the user with another native confirmation dialog.
+    pub fn approve_config_write(&self, path: PathBuf) -> Result<(), String> {
+        self.approved_config_paths
+            .write()
+            .map_err(|_| "Config approval registry lock poisoned".to_string())?
+            .insert(path);
+        Ok(())
+    }
+
     #[cfg(test)]
     fn clear(&self) {
         self.roots.write().unwrap().clear();
+        self.approved_config_paths.write().unwrap().clear();
     }
 }
 
@@ -125,5 +146,17 @@ mod tests {
         assert!(registry.authorize("/").is_err());
         registry.clear();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn config_write_approval_is_scoped_to_each_path() {
+        let registry = WorkspaceRegistry::default();
+        let user_config = PathBuf::from("/tmp/melody-user-config.toml");
+        let project_config = PathBuf::from("/tmp/melody-project-config.toml");
+
+        assert!(!registry.config_write_approved(&user_config).unwrap());
+        registry.approve_config_write(user_config.clone()).unwrap();
+        assert!(registry.config_write_approved(&user_config).unwrap());
+        assert!(!registry.config_write_approved(&project_config).unwrap());
     }
 }

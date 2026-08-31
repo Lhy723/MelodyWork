@@ -41,7 +41,7 @@ export function NewTaskWorkspace({
   const researchMode = mode === "research";
   const independentChat = isIndependentProject(selectedProject);
   const projectOptions = projects.filter(
-    (project) => !isIndependentProject(project),
+    (project) => !isIndependentProject(project) && !project.archived,
   );
   const taskOption = projects.find(isIndependentProject);
 

@@ -1,7 +1,7 @@
 {
   "name": "melody-work",
   "private": true,
-  "version": "0.3.2-beta.1",
+  "version": "0.3.2-beta.2",
   "type": "module",
   "engines": {
     "node": ">=22 <25",

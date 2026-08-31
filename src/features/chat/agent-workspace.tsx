@@ -222,9 +222,12 @@ export function AgentWorkspace() {
   const workspaceLoading = useWorkspaceStore((state) => state.loading);
   const workspaceError = useWorkspaceStore((state) => state.error);
   const addProject = useWorkspaceStore((state) => state.addProject);
+  const archiveProject = useWorkspaceStore((state) => state.archiveProject);
   const selectProject = useWorkspaceStore((state) => state.selectProject);
   const createSession = useWorkspaceStore((state) => state.createSession);
   const deleteSession = useWorkspaceStore((state) => state.deleteSession);
+  const deleteProject = useWorkspaceStore((state) => state.deleteProject);
+  const restoreProject = useWorkspaceStore((state) => state.restoreProject);
   const selectSession = useWorkspaceStore((state) => state.selectSession);
   const setResearchActiveProject = useResearchStore(
     (state) => state.setActiveProject,
@@ -933,11 +936,20 @@ export function AgentWorkspace() {
   const canGoBack = nextHistoryIndex(-1) !== undefined;
   const canGoForward = nextHistoryIndex(1) !== undefined;
   const independentProject = projects.find(isIndependentProject);
+  const usableActiveProject =
+    activeProject &&
+    (isIndependentProject(activeProject) || !activeProject.archived)
+      ? activeProject
+      : undefined;
   const newTaskProject =
-    projects.find((project) => project.id === newTaskProjectId) ??
+    projects.find(
+      (project) =>
+        project.id === newTaskProjectId &&
+        (isIndependentProject(project) || !project.archived),
+    ) ??
     (defaultIndependentChat
-      ? (independentProject ?? activeProject)
-      : activeProject);
+      ? (independentProject ?? usableActiveProject)
+      : usableActiveProject);
 
   const createTaskFromPrompt = async (
     content: string,
@@ -1039,6 +1051,8 @@ export function AgentWorkspace() {
           activeResearchSection={researchSection}
           activeSessionId={settingsOpen ? undefined : activeSession?.id}
           loading={workspaceLoading}
+          onArchiveProject={(project) => void archiveProject(project)}
+          onDeleteProject={deleteProject}
           onDeleteSession={(session) => void deleteSession(session)}
           onModeChange={changeWorkspaceMode}
           onNewSession={(project) => {
@@ -1061,6 +1075,7 @@ export function AgentWorkspace() {
             updateSidebarWidth(sidebarWidthRef.current + delta)
           }
           onResizeStart={beginSidebarResize}
+          onRestoreProject={(project) => void restoreProject(project)}
           onSelectProject={(project) => {
             returnToConversation();
             setNewTaskOpen(false);

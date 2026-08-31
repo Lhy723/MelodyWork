@@ -3,6 +3,7 @@ use std::{
     fs,
     path::Path,
     sync::Mutex,
+    time::Duration,
 };
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
-const DATABASE_SCHEMA_VERSION: i64 = 4;
+const DATABASE_SCHEMA_VERSION: i64 = 5;
 const MAX_TIMELINE_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const INDEPENDENT_PROJECT_ID: &str = "__melody_independent__";
 const INDEPENDENT_PROJECT_DIRECTORY: &str = "independent-chat";
@@ -88,6 +89,28 @@ fn ensure_session_column(
     Ok(())
 }
 
+fn project_columns(connection: &Connection) -> rusqlite::Result<HashSet<String>> {
+    let mut statement = connection.prepare("PRAGMA table_info(projects)")?;
+    statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect()
+}
+
+fn ensure_project_column(
+    connection: &Connection,
+    columns: &mut HashSet<String>,
+    name: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    if columns.insert(name.to_string()) {
+        connection.execute(
+            &format!("ALTER TABLE projects ADD COLUMN {name} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn ensure_timeline_archive_schema(connection: &Connection) -> rusqlite::Result<()> {
     connection.execute_batch(
         "
@@ -145,7 +168,7 @@ fn migrate_schema(connection: &Connection) -> Result<(), Box<dyn std::error::Err
     }
 
     // v2 added the ACP replay cursor; v3 added the projection version; v4
-    // added the unbounded timeline archive. The column/table checks also
+    // added the unbounded timeline archive; v5 added project archiving. The column/table checks also
     // repair an interrupted/partially migrated database whose user_version
     // was not advanced before the process exited.
     let mut columns = session_columns(connection)?;
@@ -164,6 +187,15 @@ fn migrate_schema(connection: &Connection) -> Result<(), Box<dyn std::error::Err
     if version < 4 {
         backfill_timeline_archive(connection)?;
     }
+    let mut project_columns = project_columns(connection)?;
+    if !project_columns.is_empty() && (version < 5 || !project_columns.contains("archived")) {
+        ensure_project_column(
+            connection,
+            &mut project_columns,
+            "archived",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
 
     connection.pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)?;
     Ok(())
@@ -176,7 +208,8 @@ fn initialize_schema(connection: &Connection) -> Result<(), Box<dyn std::error::
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             path TEXT NOT NULL UNIQUE,
-            last_opened_at INTEGER NOT NULL
+            last_opened_at INTEGER NOT NULL,
+            archived INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
@@ -223,6 +256,7 @@ pub struct ProjectRecord {
     name: String,
     path: String,
     last_opened_at: i64,
+    archived: bool,
     is_independent: bool,
 }
 
@@ -684,6 +718,7 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRecord> 
         name: row.get(1)?,
         path: row.get(2)?,
         last_opened_at: row.get(3)?,
+        archived: row.get(4)?,
     })
 }
 
@@ -722,6 +757,7 @@ impl AppDatabase {
         fs::create_dir_all(&independent_directory)?;
         let independent_path = independent_directory.canonicalize()?;
         let connection = Connection::open(app_data_dir.join("melody-work.sqlite3"))?;
+        connection.busy_timeout(Duration::from_secs(5))?;
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         initialize_schema(&connection)?;
         let independent_path = independent_path.to_string_lossy().into_owned();
@@ -731,7 +767,7 @@ impl AppDatabase {
             params![INDEPENDENT_PROJECT_ID, "任务", independent_path],
         )?;
         connection.execute(
-            "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
+            "UPDATE projects SET name = ?1, path = ?2, archived = 0 WHERE id = ?3",
             params!["任务", independent_path, INDEPENDENT_PROJECT_ID],
         )?;
         Ok(Self {
@@ -773,6 +809,9 @@ impl AppDatabase {
     fn in_memory() -> Self {
         let connection = Connection::open_in_memory().expect("in-memory database");
         connection
+            .busy_timeout(Duration::from_secs(5))
+            .expect("busy timeout");
+        connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .expect("foreign keys");
         initialize_schema(&connection).expect("schema");
@@ -793,7 +832,7 @@ pub fn list_projects(
         .map_err(|_| "Database lock poisoned".to_string())?;
     let mut statement = connection
         .prepare(
-            "SELECT id, name, path, last_opened_at
+            "SELECT id, name, path, last_opened_at, archived
              FROM projects
              ORDER BY last_opened_at DESC",
         )
@@ -837,21 +876,114 @@ pub fn upsert_project(
     let id = existing_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     connection
         .execute(
-            "INSERT INTO projects (id, name, path, last_opened_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO projects (id, name, path, last_opened_at, archived)
+             VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name,
-                last_opened_at = excluded.last_opened_at",
+                last_opened_at = excluded.last_opened_at,
+                archived = 0",
             params![id, name, path_string, now],
         )
         .map_err(|error| error.to_string())?;
     connection
         .query_row(
-            "SELECT id, name, path, last_opened_at FROM projects WHERE path = ?1",
+            "SELECT id, name, path, last_opened_at, archived FROM projects WHERE path = ?1",
             [&path_string],
             project_from_row,
         )
         .map_err(|error| error.to_string())
+}
+
+fn set_project_archived(
+    database: &AppDatabase,
+    id: &str,
+    archived: bool,
+) -> Result<ProjectRecord, String> {
+    if id == INDEPENDENT_PROJECT_ID {
+        return Err("独立任务不能归档或恢复。".to_string());
+    }
+    let connection = database
+        .connection
+        .lock()
+        .map_err(|_| "Database lock poisoned".to_string())?;
+    let archived_value = if archived { 1 } else { 0 };
+    let changed = connection
+        .execute(
+            "UPDATE projects SET archived = ?1 WHERE id = ?2",
+            params![archived_value, id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed == 0 {
+        return Err("项目不存在。".to_string());
+    }
+    connection
+        .query_row(
+            "SELECT id, name, path, last_opened_at, archived
+             FROM projects
+             WHERE id = ?1",
+            [id],
+            project_from_row,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn archive_project(
+    database: State<'_, AppDatabase>,
+    id: String,
+) -> Result<ProjectRecord, String> {
+    set_project_archived(&database, &id, true)
+}
+
+#[tauri::command]
+pub fn restore_project(
+    database: State<'_, AppDatabase>,
+    id: String,
+) -> Result<ProjectRecord, String> {
+    set_project_archived(&database, &id, false)
+}
+
+#[tauri::command]
+pub fn delete_project(database: State<'_, AppDatabase>, id: String) -> Result<(), String> {
+    let mut connection = database
+        .connection
+        .lock()
+        .map_err(|_| "Database lock poisoned".to_string())?;
+    delete_project_record(&mut connection, &id)
+}
+
+fn delete_project_record(connection: &mut Connection, id: &str) -> Result<(), String> {
+    if id == INDEPENDENT_PROJECT_ID {
+        return Err("独立任务不能删除。".to_string());
+    }
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    // Delete children explicitly so projects created by older schemas are
+    // removable even when their foreign-key cascade was not preserved.
+    transaction
+        .execute(
+            "DELETE FROM session_timeline_entries
+             WHERE session_id IN (
+                 SELECT id FROM sessions WHERE project_id = ?1
+             )",
+            [id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM permission_rules WHERE project_id = ?1", [id])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM sessions WHERE project_id = ?1", [id])
+        .map_err(|error| error.to_string())?;
+    let deleted = transaction
+        .execute("DELETE FROM projects WHERE id = ?1", [id])
+        .map_err(|error| error.to_string())?;
+    if deleted == 0 {
+        return Err("项目不存在。".to_string());
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1201,7 +1333,7 @@ mod tests {
         let connection = database.connection.lock().unwrap();
         connection
             .execute(
-                "INSERT INTO projects VALUES ('p1', 'Demo', '/tmp/demo', 1)",
+                "INSERT INTO projects VALUES ('p1', 'Demo', '/tmp/demo', 1, 0)",
                 [],
             )
             .unwrap();
@@ -1247,11 +1379,67 @@ mod tests {
     }
 
     #[test]
+    fn deleting_a_project_removes_its_local_records() {
+        let database = AppDatabase::in_memory();
+        let mut connection = database.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects VALUES ('p1', 'Demo', '/tmp/demo', 1, 0)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions VALUES
+                 ('s1', 'p1', 'Test session', '/tmp/demo', NULL, '[]', NULL, 0, 1, 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_timeline_entries
+                 (session_id, ordinal, entry_json, updated_at)
+                 VALUES ('s1', 0, '{}', 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO permission_rules VALUES
+                 ('r1', 'p1', 'Shell\npnpm check', 'Shell', 'pnpm check', 'allow', 1)",
+                [],
+            )
+            .unwrap();
+
+        delete_project_record(&mut connection, "p1").unwrap();
+
+        for table in [
+            "projects",
+            "sessions",
+            "session_timeline_entries",
+            "permission_rules",
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be empty");
+        }
+    }
+
+    #[test]
     fn migrates_legacy_session_schema_and_records_version() {
         let connection = Connection::open_in_memory().unwrap();
         connection
             .execute_batch(
                 "
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL UNIQUE,
+                    last_opened_at INTEGER NOT NULL
+                );
                 CREATE TABLE sessions (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -1272,6 +1460,8 @@ mod tests {
         let columns = session_columns(&connection).unwrap();
         assert!(columns.contains("acp_cursor"));
         assert!(columns.contains("timeline_version"));
+        let project_columns = project_columns(&connection).unwrap();
+        assert!(project_columns.contains("archived"));
         assert_eq!(
             schema_version(&connection).unwrap(),
             DATABASE_SCHEMA_VERSION

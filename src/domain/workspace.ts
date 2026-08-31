@@ -5,8 +5,14 @@ export interface ProjectRecord {
   name: string;
   path: string;
   lastOpenedAt: number;
+  archived: boolean;
   /** Reserved project whose root is managed by MelodyWork for isolated chats. */
   isIndependent?: boolean;
+}
+
+export interface ProjectDeleteResult {
+  deleted: boolean;
+  error?: string;
 }
 
 export const isIndependentProject = (project?: ProjectRecord) =>

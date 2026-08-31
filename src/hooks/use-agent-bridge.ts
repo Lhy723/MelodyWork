@@ -56,6 +56,7 @@ export const useAgentBridge = (session?: SessionRecord) => {
           return;
         }
         setStatus(current);
+        const shouldInitialize = current.phase === "stopped";
         let running = current;
         if (current.phase === "stopped") {
           running = await startAgent(sessionCwd);
@@ -84,6 +85,7 @@ export const useAgentBridge = (session?: SessionRecord) => {
             currentSession.acpCursor,
             archiveReadFailed ? 0 : currentSession.timelineVersion,
             archivedTimelineJson,
+            shouldInitialize,
           );
         }
       } catch (reason) {
