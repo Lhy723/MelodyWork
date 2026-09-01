@@ -1,17 +1,22 @@
 import { create } from "zustand";
 
-import { toUserMessage } from "@/domain/app-error";
+import { rawErrorMessage, toUserMessage } from "@/domain/app-error";
 import {
   isIndependentProject,
+  type ProjectDeleteResult,
   type ProjectRecord,
   type SessionRecord,
 } from "@/domain/workspace";
 import {
   createStoredSession,
   deleteStoredSession,
+  archiveProject as archiveStoredProject,
+  deleteProject as deleteStoredProject,
   listProjects,
   listStoredSessions,
   pickWorkspaceDirectory,
+  restoreProject as restoreStoredProject,
+  stopAgent,
   upsertProject,
 } from "@/lib/melody-bridge";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
@@ -24,11 +29,16 @@ interface WorkspaceStore {
   activeSession?: SessionRecord;
   loading: boolean;
   initialized: boolean;
+  /** The user dismissed the initial folder picker and needs a starting scope. */
+  needsWorkspace: boolean;
   error?: string;
   initialize: () => Promise<void>;
   addProject: () => Promise<ProjectRecord | undefined>;
+  archiveProject: (project: ProjectRecord) => Promise<void>;
   chooseProject: () => Promise<void>;
+  deleteProject: (project: ProjectRecord) => Promise<ProjectDeleteResult>;
   selectProject: (project: ProjectRecord) => Promise<void>;
+  restoreProject: (project: ProjectRecord) => Promise<void>;
   createSession: (
     project?: ProjectRecord,
   ) => Promise<SessionRecord | undefined>;
@@ -43,6 +53,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   sessionsByProject: {},
   loading: true,
   initialized: false,
+  needsWorkspace: false,
   initialize: async () => {
     if (get().initialized) {
       return;
@@ -52,27 +63,43 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       let projects = await listProjects();
       const defaultIndependentChat =
         useAppSettingsStore.getState().defaultIndependentChat;
-      let regularProjects = projects.filter(
+      const hasRegularProjects = projects.some(
         (project) => !isIndependentProject(project),
       );
-      if (regularProjects.length === 0 && !defaultIndependentChat) {
+      let regularProjects = projects.filter(
+        (project) => !isIndependentProject(project) && !project.archived,
+      );
+      const shouldPromptForWorkspace =
+        projects.length === 0 ||
+        (regularProjects.length === 0 &&
+          !defaultIndependentChat &&
+          !hasRegularProjects);
+      if (shouldPromptForWorkspace) {
         const path = await pickWorkspaceDirectory();
         if (!path) {
-          throw new Error("请选择一个工作区后再继续。");
+          const sessionEntries = await Promise.all(
+            projects.map(
+              async (project) =>
+                [project.id, await listStoredSessions(project.id)] as const,
+            ),
+          );
+          set({
+            activeProject: undefined,
+            activeSession: undefined,
+            error: undefined,
+            loading: false,
+            needsWorkspace: true,
+            projects,
+            sessions: [],
+            sessionsByProject: Object.fromEntries(sessionEntries),
+          });
+          return;
         }
         const project = await upsertProject(path);
         projects = [
           ...projects.filter((item) => isIndependentProject(item)),
           project,
         ];
-        regularProjects = [project];
-      } else if (projects.length === 0) {
-        const path = await pickWorkspaceDirectory();
-        if (!path) {
-          throw new Error("请选择一个工作区后再继续。");
-        }
-        const project = await upsertProject(path);
-        projects = [project];
         regularProjects = [project];
       }
       const sessionEntries = await Promise.all(
@@ -82,6 +109,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ),
       );
       set({
+        error: undefined,
+        needsWorkspace: false,
         projects,
         sessionsByProject: Object.fromEntries(sessionEntries),
       });
@@ -106,6 +135,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       const project = await upsertProject(path);
       set((state) => ({
+        needsWorkspace: false,
         projects: [
           project,
           ...state.projects.filter((item) => item.id !== project.id),
@@ -115,6 +145,35 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     } catch (reason) {
       set({ error: toUserMessage(reason) });
       return undefined;
+    }
+  },
+  archiveProject: async (project) => {
+    if (isIndependentProject(project)) {
+      return;
+    }
+    set({ loading: true, error: undefined });
+    try {
+      const archivedProject = await archiveStoredProject(project.id);
+      const state = get();
+      const projects = state.projects.map((item) =>
+        item.id === archivedProject.id ? archivedProject : item,
+      );
+      if (state.activeProject?.id !== project.id) {
+        set({ projects, loading: false });
+        return;
+      }
+      const replacement =
+        projects.find(
+          (item) => !isIndependentProject(item) && !item.archived,
+        ) ?? projects.find((item) => isIndependentProject(item));
+      set({ projects });
+      if (replacement) {
+        await get().selectProject(replacement);
+      } else {
+        set({ loading: false });
+      }
+    } catch (reason) {
+      set({ error: toUserMessage(reason), loading: false });
     }
   },
   chooseProject: async () => {
@@ -135,12 +194,64 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       set({ error: toUserMessage(reason), loading: false });
     }
   },
+  deleteProject: async (project) => {
+    if (isIndependentProject(project)) {
+      return { deleted: false, error: "独立任务不能删除。" };
+    }
+    // Stop the active ACP session before removing its database rows. This
+    // prevents a final persistence flush from racing the project deletion.
+    if (get().activeProject?.id === project.id) {
+      try {
+        await stopAgent();
+      } catch {
+        // Deleting the local project record remains possible if the agent has
+        // already exited or the stop notification is unavailable.
+      }
+    }
+    set({ loading: true, error: undefined });
+    try {
+      await deleteStoredProject(project.id);
+      const state = get();
+      const projects = state.projects.filter((item) => item.id !== project.id);
+      const sessionsByProject = { ...state.sessionsByProject };
+      delete sessionsByProject[project.id];
+      if (state.activeProject?.id !== project.id) {
+        set({ projects, sessionsByProject, loading: false });
+        return { deleted: true };
+      }
+      const replacement =
+        projects.find(
+          (item) => !isIndependentProject(item) && !item.archived,
+        ) ?? projects.find((item) => isIndependentProject(item));
+      set({ projects, sessionsByProject });
+      if (replacement) {
+        await get().selectProject(replacement);
+      } else {
+        set({
+          activeProject: undefined,
+          activeSession: undefined,
+          sessions: [],
+          loading: false,
+          needsWorkspace: true,
+        });
+      }
+      return { deleted: true };
+    } catch (reason) {
+      const detail = rawErrorMessage(reason);
+      const error = detail
+        ? `删除项目失败：${detail}`
+        : "删除项目失败，请重试。";
+      set({ error: toUserMessage(reason), loading: false });
+      return { deleted: false, error };
+    }
+  },
   selectProject: async (project) => {
     set({
       activeProject: project,
       activeSession: undefined,
       sessions: [],
       loading: true,
+      needsWorkspace: false,
       error: undefined,
     });
     try {
@@ -165,9 +276,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       set({ error: toUserMessage(reason), loading: false });
     }
   },
+  restoreProject: async (project) => {
+    if (isIndependentProject(project)) {
+      return;
+    }
+    set({ loading: true, error: undefined });
+    try {
+      const restoredProject = await restoreStoredProject(project.id);
+      set((state) => ({
+        activeProject:
+          state.activeProject?.id === restoredProject.id
+            ? restoredProject
+            : state.activeProject,
+        projects: state.projects.map((item) =>
+          item.id === restoredProject.id ? restoredProject : item,
+        ),
+        loading: false,
+      }));
+    } catch (reason) {
+      set({ error: toUserMessage(reason), loading: false });
+    }
+  },
   createSession: async (requestedProject) => {
     const project = requestedProject ?? get().activeProject;
-    if (!project) {
+    if (!project || (project.archived && !isIndependentProject(project))) {
       return;
     }
     set({ loading: true, error: undefined });

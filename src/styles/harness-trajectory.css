@@ -1,0 +1,434 @@
+.harness-trajectory {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--harness-bg-layer-1);
+  color: var(--harness-label-primary);
+}
+
+.harness-trajectory-toolbar {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--harness-border-2);
+  background: var(--harness-bg-layer-1);
+  padding: 0 6px;
+}
+
+.harness-trajectory-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.harness-trajectory-action {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 0 7px;
+  color: var(--harness-label-tertiary);
+  cursor: pointer;
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+}
+
+.harness-trajectory-action:focus-visible {
+  outline: 2px solid var(--harness-blue);
+  outline-offset: 1px;
+}
+
+.harness-trajectory-action:hover,
+.harness-trajectory-action[aria-pressed="true"] {
+  background: var(--harness-bg-layer-2);
+  color: var(--harness-label-primary);
+}
+
+.harness-trajectory-search {
+  display: flex;
+  width: clamp(112px, 20vw, 280px);
+  height: 24px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--harness-border-2);
+  border-radius: 5px;
+  background: var(--harness-bg-layer-2);
+  padding: 0 7px;
+  color: var(--harness-label-caption);
+}
+
+.harness-trajectory-search:focus-within {
+  border-color: var(--harness-blue);
+  background: var(--harness-bg-layer-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--harness-blue) 24%, transparent);
+}
+
+.harness-trajectory-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--harness-label-primary);
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+}
+
+.harness-trajectory-search input::placeholder {
+  color: var(--harness-label-caption);
+}
+
+.harness-trajectory-timeline {
+  display: grid;
+  height: 50px;
+  min-height: 50px;
+  flex: none;
+  grid-template-columns: 50px minmax(0, 1fr);
+  border-bottom: 1px solid var(--harness-border-2);
+  background: var(--harness-bg-layer-2);
+}
+
+.harness-trajectory-lane-labels {
+  position: relative;
+  border-right: 1px solid var(--harness-border-1);
+  color: var(--harness-label-caption);
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+  text-align: right;
+}
+
+.harness-trajectory-lane-labels span {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  height: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.harness-trajectory-lane-labels span:nth-child(1) {
+  top: 7px;
+}
+
+.harness-trajectory-lane-labels span:nth-child(2) {
+  top: 21px;
+}
+
+.harness-trajectory-lane-labels span:nth-child(3) {
+  top: 35px;
+}
+
+.harness-trajectory-lanes {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 8px;
+}
+
+.harness-trajectory-turn-boundary {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--harness-border-2);
+}
+
+.harness-trajectory-span {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--trajectory-span-lane) * 14px);
+  left: var(--trajectory-span-left);
+  width: max(2px, var(--trajectory-span-width));
+  height: 8px;
+  min-width: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--harness-label-secondary);
+  cursor: pointer;
+  opacity: 0.86;
+}
+
+.harness-trajectory-span[data-equal-duration="true"] {
+  width: 8px;
+  min-width: 8px;
+}
+
+.harness-trajectory-span[data-lane="0"] {
+  background: var(--harness-blue);
+}
+
+.harness-trajectory-span[data-lane="1"] {
+  background: var(--harness-purple);
+}
+
+.harness-trajectory-span[data-lane="2"] {
+  background: var(--harness-amber);
+}
+
+.harness-trajectory-span[data-search-match="false"] {
+  opacity: 0.14;
+}
+
+.harness-trajectory-span.is-error {
+  background: var(--harness-red);
+}
+
+.harness-trajectory-span.is-selected {
+  outline: 2px solid var(--harness-blue);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+.harness-trajectory-empty-lane {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--harness-label-caption);
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-table {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-bottom: 0;
+}
+
+.harness-trajectory-turn {
+  border-bottom: 1px solid var(--harness-border-2);
+}
+
+.harness-trajectory-turn-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: color-mix(in srgb, var(--harness-bg-layer-2) 84%, transparent);
+  padding: 0 max(16px, calc((100% - 880px) / 2));
+  color: var(--harness-label-primary);
+  cursor: pointer;
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+  text-align: left;
+  backdrop-filter: blur(8px);
+}
+
+.harness-trajectory-turn-header > span {
+  color: var(--harness-label-tertiary);
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-turn-time {
+  margin-left: auto;
+  color: var(--harness-label-caption) !important;
+  font-family: var(--app-code-font, var(--font-mono));
+  font-size: var(--type-size-caption) !important;
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-turn-body {
+  width: min(100%, 880px);
+  margin: 0 auto;
+  padding: 6px 16px 20px;
+}
+
+.harness-trajectory-column-head {
+  display: grid;
+  grid-template-columns: 122px minmax(0, 1fr) 72px;
+  min-height: 30px;
+  align-items: center;
+  border-bottom: 1px solid var(--harness-border-2);
+  color: var(--harness-label-caption);
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-record {
+  border-bottom: 1px solid var(--harness-border-1);
+}
+
+.harness-trajectory-row {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: 24px 80px minmax(0, 1fr) 22px 72px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--harness-bg-layer-3);
+  padding: 0 8px 0 10px;
+  color: var(--harness-label-primary);
+  cursor: pointer;
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+  text-align: left;
+}
+
+.harness-trajectory-row:hover {
+  background: var(--harness-bg-layer-2);
+}
+
+.harness-trajectory-row.is-selected {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--harness-blue);
+}
+
+.harness-trajectory-row.is-failed {
+  color: var(--harness-red);
+}
+
+.harness-trajectory-row-index,
+.harness-trajectory-row-duration {
+  color: var(--harness-label-tertiary);
+  font-family: var(--app-code-font, var(--font-mono));
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-tag {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 80px;
+  align-items: center;
+  border-radius: 5px;
+  padding: 3px 5px;
+  font-size: var(--type-size-caption);
+  font-weight: 600;
+  line-height: var(--type-leading-caption);
+  white-space: nowrap;
+}
+
+.harness-trajectory-tag.tag-input {
+  background: var(--harness-green-soft);
+  color: var(--harness-green);
+}
+
+.harness-trajectory-tag.tag-model,
+.harness-trajectory-tag.tag-think,
+.harness-trajectory-tag.tag-plan {
+  background: var(--harness-purple-soft);
+  color: var(--harness-purple);
+}
+
+.harness-trajectory-tag.tag-tool {
+  background: var(--harness-amber-soft);
+  color: var(--harness-amber);
+}
+
+.harness-trajectory-row-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-trajectory-row-meta {
+  color: var(--harness-label-tertiary);
+}
+
+.harness-trajectory-row-state {
+  display: inline-flex;
+  align-items: center;
+  color: var(--harness-label-tertiary);
+}
+
+.harness-trajectory-row-state svg {
+  color: var(--harness-green);
+}
+
+.harness-trajectory-row.is-failed .harness-trajectory-row-state svg {
+  color: var(--harness-red);
+}
+
+@keyframes harness-trajectory-detail-wipe {
+  from {
+    clip-path: inset(0 0 30% 0);
+    opacity: 0.7;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+.harness-trajectory-table--wipe .harness-trajectory-record-detail {
+  animation: harness-trajectory-detail-wipe 280ms var(--motion-ease-out) both;
+}
+
+.harness-trajectory-table--wipe .harness-trajectory-row.is-selected {
+  outline: 1px solid color-mix(in srgb, var(--harness-blue) 70%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .harness-trajectory-table--wipe .harness-trajectory-record-detail {
+    animation: none;
+    clip-path: none;
+  }
+}
+
+.harness-trajectory-record-detail {
+  margin: 4px 0 8px 48px;
+  overflow: hidden;
+  border: 1px solid var(--harness-border-1);
+  border-radius: 8px;
+  background: var(--harness-bg-base);
+}
+
+.harness-trajectory-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--harness-border-1);
+  padding: 6px 10px;
+  color: var(--harness-label-tertiary);
+  font-family: var(--app-code-font, var(--font-mono));
+  font-size: var(--type-size-caption);
+  line-height: var(--type-leading-caption);
+}
+
+.harness-trajectory-detail-meta span:first-child {
+  color: var(--harness-label-secondary);
+  font-weight: 600;
+}
+
+.harness-trajectory-record-detail pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  color: var(--harness-label-secondary);
+  font-family: var(--app-code-font, var(--font-mono));
+  font-size: var(--type-size-caption);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.harness-trajectory-empty {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--harness-label-caption);
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+}

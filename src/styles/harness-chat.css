@@ -1,0 +1,119 @@
+.harness-chat-scroll-button {
+  bottom: 12px !important;
+}
+
+.harness-chat-message {
+  max-width: 100%;
+  gap: 8px;
+}
+
+.harness-chat-message.is-user .harness-chat-message-content {
+  max-width: min(80%, 680px);
+  border: 1px solid var(--harness-border-1);
+  border-radius: 10px;
+  background: var(--harness-bg-layer-3);
+  padding: 10px 14px;
+}
+
+.harness-chat-message.is-assistant .harness-chat-message-content {
+  width: min(100%, 75ch);
+  max-width: 75ch;
+  color: var(--harness-label-primary);
+}
+
+.harness-chat-message-content {
+  line-height: var(--type-leading-body);
+}
+
+.harness-activity-group,
+.harness-tool-group {
+  color: var(--harness-label-tertiary);
+}
+
+.harness-activity-trigger,
+.harness-tool-trigger {
+  min-height: 26px;
+  color: var(--harness-label-tertiary);
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+}
+
+.harness-activity-trigger:hover,
+.harness-tool-trigger:hover {
+  color: var(--harness-label-primary);
+}
+
+.harness-activity-group[data-completion-pulse="true"]
+  .motion-activity-state-icon {
+  animation: motion-activity-complete 220ms var(--motion-ease-out) both;
+  color: var(--harness-green);
+}
+
+.motion-streaming-indicator {
+  display: inline-block;
+  width: 1.25rem;
+  height: 2px;
+  align-self: flex-start;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.55;
+  transform-origin: left center;
+  animation: motion-streaming-pulse 500ms var(--motion-ease-in-out) infinite;
+}
+
+.harness-activity-content > div,
+.harness-tool-content > div {
+  margin-top: 4px;
+  border-left: 1px solid var(--harness-border-2);
+  padding-left: 16px;
+}
+
+.harness-tool-row {
+  min-height: 26px;
+  color: var(--harness-label-secondary);
+  font-size: var(--type-size-label);
+  line-height: var(--type-leading-label);
+}
+
+.harness-tool-row:hover {
+  color: var(--harness-label-primary);
+}
+
+.harness-tool-row svg {
+  color: var(--harness-label-tertiary);
+}
+
+.harness-composer-wrap {
+  position: relative;
+  z-index: 8;
+  padding-top: 8px;
+  padding-bottom: 12px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--harness-bg-base) 45%, transparent) 26px,
+    transparent 100%
+  );
+}
+
+.harness-composer {
+  background: transparent !important;
+}
+
+.harness-composer [data-slot="input-group"] {
+  border-color: var(--harness-border-2) !important;
+  background: color-mix(
+    in srgb,
+    var(--harness-bg-layer-1) 68%,
+    transparent
+  ) !important;
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--harness-label-primary) 6%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
+}
+
+.harness-composer [data-slot="prompt-input-footer"] {
+  min-height: 42px;
+  border-top-color: var(--harness-border-1);
+}

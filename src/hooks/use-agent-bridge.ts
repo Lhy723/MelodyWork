@@ -11,8 +11,12 @@ import {
 import type { SessionRecord } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
 
-export const useAgentBridge = (session?: SessionRecord) => {
+export const useAgentBridge = (
+  session?: SessionRecord,
+  resetWhenSessionMissing = false,
+) => {
   const setStatus = useAgentStore((state) => state.setStatus);
+  const resetSessionView = useAgentStore((state) => state.resetSessionView);
   const appendStderr = useAgentStore((state) => state.appendStderr);
   const receiveAcp = useAgentStore((state) => state.receiveAcp);
   const beginSession = useAgentStore((state) => state.beginSession);
@@ -34,6 +38,9 @@ export const useAgentBridge = (session?: SessionRecord) => {
 
     const connect = async () => {
       if (!sessionId || !sessionCwd) {
+        if (resetWhenSessionMissing) {
+          resetSessionView();
+        }
         return;
       }
       const currentSession = sessionRef.current;
@@ -56,6 +63,7 @@ export const useAgentBridge = (session?: SessionRecord) => {
           return;
         }
         setStatus(current);
+        const shouldInitialize = current.phase === "stopped";
         let running = current;
         if (current.phase === "stopped") {
           running = await startAgent(sessionCwd);
@@ -84,6 +92,7 @@ export const useAgentBridge = (session?: SessionRecord) => {
             currentSession.acpCursor,
             archiveReadFailed ? 0 : currentSession.timelineVersion,
             archivedTimelineJson,
+            shouldInitialize,
           );
         }
       } catch (reason) {
@@ -109,6 +118,8 @@ export const useAgentBridge = (session?: SessionRecord) => {
     sessionAcpId,
     sessionCwd,
     sessionId,
+    resetSessionView,
+    resetWhenSessionMissing,
     setStatus,
   ]);
 };
