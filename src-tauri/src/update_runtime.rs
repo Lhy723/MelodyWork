@@ -77,10 +77,7 @@ async fn check_endpoint(
         .map_err(|error| error.to_string())?
         .build()
         .map_err(|error| error.to_string())?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|error| error.to_string())?;
+    let update = updater.check().await.map_err(|error| error.to_string())?;
     Ok(update.map(|update| UpdateCandidate { channel, update }))
 }
 
@@ -100,9 +97,8 @@ fn channel_priority(channel: UpdateChannel) -> u8 {
 
 fn select_newest_update(candidates: Vec<UpdateCandidate>) -> Option<UpdateCandidate> {
     candidates.into_iter().max_by(|left, right| {
-        compare_versions(&left.update.version, &right.update.version).then_with(|| {
-            channel_priority(left.channel).cmp(&channel_priority(right.channel))
-        })
+        compare_versions(&left.update.version, &right.update.version)
+            .then_with(|| channel_priority(left.channel).cmp(&channel_priority(right.channel)))
     })
 }
 
@@ -214,18 +210,12 @@ mod tests {
 
     #[test]
     fn stable_release_is_newer_than_a_beta_for_the_same_base_version() {
-        assert_eq!(
-            compare_versions("0.3.1", "0.3.1-beta.2"),
-            Ordering::Greater
-        );
+        assert_eq!(compare_versions("0.3.1", "0.3.1-beta.2"), Ordering::Greater);
     }
 
     #[test]
     fn newer_beta_still_wins_over_an_older_stable_release() {
-        assert_eq!(
-            compare_versions("0.3.2-beta.1", "0.3.1"),
-            Ordering::Greater
-        );
+        assert_eq!(compare_versions("0.3.2-beta.1", "0.3.1"), Ordering::Greater);
     }
 
     #[test]

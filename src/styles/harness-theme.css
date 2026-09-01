@@ -1,0 +1,72 @@
+/* DeepSeek Harness-inspired session surfaces. The implementation keeps
+   MelodyWork's existing component primitives and ACP data model, while
+   adopting Harness' compact event-ledger geometry: quiet chrome, one-line
+   disclosures, stateful tool colors, and a separate trajectory view. */
+:root {
+  --harness-window-titlebar-height: 46px;
+  --harness-bg-base: #ffffff;
+  --harness-bg-layer-1: #ffffff;
+  --harness-bg-layer-2: #fafafa;
+  --harness-bg-layer-3: #f5f5f6;
+  --harness-label-primary: #17181a;
+  --harness-label-secondary: #62666d;
+  --harness-label-tertiary: #5b6068;
+  --harness-label-caption: #6c7179;
+  --harness-border-1: rgb(0 0 0 / 5%);
+  --harness-border-2: rgb(0 0 0 / 11%);
+  --harness-blue: #245fba;
+  --harness-blue-soft: #e4edfd;
+  --harness-green: #157a45;
+  --harness-green-soft: #e6faed;
+  --harness-amber: #8a5316;
+  --harness-amber-soft: #fef5e7;
+  --harness-red: #b42318;
+  --harness-red-soft: rgb(180 35 24 / 12%);
+  --harness-purple: #6b3c8a;
+  --harness-purple-soft: #f1e8f7;
+  --harness-chart-low: #edf2f7;
+  --harness-chart-mid: #a8c8e8;
+  --harness-chart-high: #5c91c5;
+  --harness-chart-accent: #245fba;
+  --harness-chart-border: #dfe2e5;
+  --harness-chart-1: #4f8fca;
+  --harness-chart-2: #6b3c8a;
+  --harness-chart-3: #157a45;
+  --harness-chart-4: #8a5316;
+  --harness-text-strong: var(--harness-label-primary);
+  --harness-text-muted: var(--harness-label-secondary);
+}
+
+.dark {
+  --harness-bg-base: #151517;
+  --harness-bg-layer-1: #232324;
+  --harness-bg-layer-2: #2c2c2e;
+  --harness-bg-layer-3: #353638;
+  --harness-label-primary: #f9fafb;
+  --harness-label-secondary: #cfd3d6;
+  --harness-label-tertiary: #adb2b8;
+  --harness-label-caption: #81858c;
+  --harness-border-1: rgb(255 255 255 / 6%);
+  --harness-border-2: rgb(255 255 255 / 12%);
+  --harness-blue: #67a0fe;
+  --harness-blue-soft: #34415b;
+  --harness-green: #63d596;
+  --harness-green-soft: #233c2c;
+  --harness-amber: #f0ad5e;
+  --harness-amber-soft: #27241f;
+  --harness-red: #ff8585;
+  --harness-red-soft: rgb(255 133 133 / 15%);
+  --harness-purple: #c4a3e5;
+  --harness-purple-soft: #3c2c49;
+  --harness-chart-low: #232d38;
+  --harness-chart-mid: #3f6285;
+  --harness-chart-high: #5f91c4;
+  --harness-chart-accent: #67a0fe;
+  --harness-chart-border: #3b3c3e;
+  --harness-chart-1: #78b7f4;
+  --harness-chart-2: #c4a3e5;
+  --harness-chart-3: #63d596;
+  --harness-chart-4: #f0ad5e;
+  --harness-text-strong: var(--harness-label-primary);
+  --harness-text-muted: var(--harness-label-secondary);
+}

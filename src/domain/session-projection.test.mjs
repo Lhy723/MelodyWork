@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   applySessionUpdate,
+  isPromptCompleteMethod,
   isSessionUpdateMethod,
   parseTimelineProjection,
   readTimelineProjection,
@@ -86,6 +87,14 @@ test("recognizes live and durable Melody session update rails", () => {
   }
   assert.equal(isSessionUpdateMethod("session/request_permission"), false);
   assert.equal(isSessionUpdateMethod(undefined), false);
+  for (const method of [
+    "x.ai/session/prompt_complete",
+    "_x.ai/session/prompt_complete",
+  ]) {
+    assert.equal(isPromptCompleteMethod(method), true, method);
+  }
+  assert.equal(isPromptCompleteMethod("session/update"), false);
+  assert.equal(isPromptCompleteMethod(undefined), false);
 });
 
 test("does not mark legacy tool rows as a current projection", () => {
@@ -142,6 +151,12 @@ test("reads the Melody Build replay and cursor metadata", () => {
       _meta: { eventId: "session-8", isReplay: true },
     }),
     { eventId: "session-8", isReplay: true },
+  );
+  assert.deepEqual(
+    notificationMetadata({
+      meta: { event_id: "session-9", is_replay: true, prompt_id: "p-9" },
+    }),
+    { eventId: "session-9", isReplay: true, promptId: "p-9" },
   );
 });
 
@@ -203,6 +218,16 @@ test("projects and coalesces assistant chunks through the real interface", () =>
       streaming: true,
     },
   );
+});
+
+test("accepts snake-case ACP updates and array content blocks", () => {
+  const result = applySessionUpdate([], {
+    session_update: "agent_message_chunk",
+    content: [{ type: "text", text: "hello" }],
+  });
+
+  assert.equal(result.streaming, true);
+  assert.equal(result.timeline[0].content, "hello");
 });
 
 test("settles an assistant stream when thought projection starts", () => {
@@ -310,6 +335,34 @@ test("settles a completed turn and stamps normalized billing usage", () => {
   });
 });
 
+test("settles a turn from snake-case completion fields and terminal result", () => {
+  const result = applySessionUpdate(
+    [{ id: "user-1", kind: "message", role: "user", content: "go" }],
+    {
+      session_update: "turn_completed",
+      stop_reason: "end_turn",
+      agent_result: "done",
+    },
+  );
+
+  assert.equal(result.completed, true);
+  assert.equal(result.timeline.at(-1).role, "assistant");
+  assert.equal(result.timeline.at(-1).content, "done");
+});
+
+test("shows a visible fallback when a turn completes without an answer", () => {
+  const result = applySessionUpdate(
+    [{ id: "user-1", kind: "message", role: "user", content: "go" }],
+    { sessionUpdate: "turn_completed", stopReason: "end_turn" },
+  );
+
+  assert.equal(result.completed, true);
+  assert.equal(
+    result.timeline.at(-1).content,
+    "本轮已完成，但没有返回可显示的文本。",
+  );
+});
+
 test("projects failures and permission requests as observable timeline state", () => {
   const failure = applySessionUpdate([], {
     sessionUpdate: "retry_state",
@@ -336,4 +389,50 @@ test("projects failures and permission requests as observable timeline state", (
   assert.equal(permission.command, "src/app.ts");
   assert.equal(permission.timeline[0].permission, "pending");
   assert.equal(permission.timeline[0].permissionRequestId, 41);
+});
+
+test("surfaces retry exhaustion instead of silently ending the turn", () => {
+  const retrying = applySessionUpdate(
+    [{ id: "user-1", kind: "message", role: "user", content: "skills" }],
+    {
+      session_update: "retry_state",
+      type: "retrying",
+      reason:
+        "API error (status 429 Too Many Requests): inference tpm exhausted",
+    },
+  );
+  const exhausted = applySessionUpdate(retrying.timeline, {
+    session_update: "retry_state",
+    type: "exhausted",
+    reason: "API error (status 429 Too Many Requests): inference tpm exhausted",
+    is_rate_limited: true,
+  });
+
+  assert.equal(retrying.statusMessage, "模型请求受到限流，正在重试…");
+  assert.equal(exhausted.completed, true);
+  assert.equal(
+    exhausted.error,
+    "模型请求受到限流（TPM），请稍后再试或切换模型。",
+  );
+  assert.equal(
+    exhausted.timeline.at(-1).content,
+    "Melody 无法完成请求：模型请求受到限流（TPM），请稍后再试或切换模型。",
+  );
+});
+
+test("treats rate-limit turn completion as a visible terminal error", () => {
+  const result = applySessionUpdate(
+    [{ id: "user-1", kind: "message", role: "user", content: "skills" }],
+    {
+      session_update: "turn_completed",
+      stop_reason: "rate_limit",
+    },
+  );
+
+  assert.equal(result.completed, true);
+  assert.equal(result.error, "模型请求受到限流（TPM），请稍后再试或切换模型。");
+  assert.equal(
+    result.timeline.at(-1).content,
+    "Melody 无法完成请求：模型请求受到限流（TPM），请稍后再试或切换模型。",
+  );
 });

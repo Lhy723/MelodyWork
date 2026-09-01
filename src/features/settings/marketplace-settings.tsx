@@ -1,6 +1,4 @@
 import {
-  BotIcon,
-  BracesIcon,
   CheckCircle2Icon,
   FolderIcon,
   GitBranchIcon,
@@ -8,24 +6,13 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
-  SparklesIcon,
   StoreIcon,
   Trash2Icon,
-  WebhookIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
 import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
@@ -40,11 +27,11 @@ import {
 } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 
-const emptySource: MarketplaceSource = {
-  name: "",
-  kind: "git",
-  location: "",
-};
+import { MarketplacePluginRow } from "./marketplace-plugin-row";
+import {
+  emptyMarketplaceSource,
+  MarketplaceSourceDialog,
+} from "./marketplace-source-dialog";
 
 interface MarketplaceSettingsProps {
   cwd: string;
@@ -63,7 +50,7 @@ export function MarketplaceSettings({
 }: MarketplaceSettingsProps) {
   const [sources, setSources] = useState<MarketplaceSource[]>([]);
   const [plugins, setPlugins] = useState<MarketplacePlugin[]>([]);
-  const [draft, setDraft] = useState<MarketplaceSource>(emptySource);
+  const [draft, setDraft] = useState<MarketplaceSource>(emptyMarketplaceSource);
   const [sourceInput, setSourceInput] = useState("");
   const [originalName, setOriginalName] = useState<string>();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -160,7 +147,7 @@ export function MarketplaceSettings({
   }, [load]);
 
   const openEditor = (source?: MarketplaceSource) => {
-    setDraft(source ? { ...source } : { ...emptySource });
+    setDraft(source ? { ...source } : { ...emptyMarketplaceSource });
     setSourceInput("");
     setOriginalName(source?.name);
     setError(undefined);
@@ -428,219 +415,18 @@ export function MarketplaceSettings({
         </div>
       ) : null}
 
-      <Dialog onOpenChange={setDialogOpen} open={dialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {originalName ? "编辑 Marketplace" : "添加 Marketplace"}
-            </DialogTitle>
-            <DialogDescription>
-              保存后会写入用户级 Melody 配置，并立即同步和扫描插件。
-            </DialogDescription>
-            {error ? (
-              <p
-                aria-live="assertive"
-                className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
-                role="alert"
-              >
-                {error}
-              </p>
-            ) : null}
-          </DialogHeader>
-
-          {originalName ? (
-            <div className="grid gap-4">
-              <label className="grid gap-1.5">
-                <span className="font-medium text-xs">名称</span>
-                <Input
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="例如 Team Plugins"
-                  value={draft.name}
-                />
-              </label>
-              <div className="grid gap-1.5">
-                <span className="font-medium text-xs">来源类型</span>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["git", "local"] as const).map((kind) => (
-                    <Button
-                      key={kind}
-                      onClick={() =>
-                        setDraft((current) => ({
-                          ...current,
-                          kind,
-                          branch: kind === "git" ? current.branch : undefined,
-                        }))
-                      }
-                      type="button"
-                      variant={draft.kind === kind ? "secondary" : "outline"}
-                    >
-                      {kind === "git" ? <GitBranchIcon /> : <FolderIcon />}
-                      {kind === "git" ? "Git 仓库" : "本地目录"}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <label className="grid gap-1.5">
-                <span className="font-medium text-xs">
-                  {draft.kind === "git" ? "Git 地址" : "目录路径"}
-                </span>
-                <Input
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      location: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    draft.kind === "git"
-                      ? "https://github.com/org/plugins.git"
-                      : "~/dev/plugins"
-                  }
-                  value={draft.location}
-                />
-              </label>
-              {draft.kind === "git" ? (
-                <label className="grid gap-1.5">
-                  <span className="font-medium text-xs">分支（可选）</span>
-                  <Input
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        branch: event.target.value,
-                      }))
-                    }
-                    placeholder="main"
-                    value={draft.branch ?? ""}
-                  />
-                </label>
-              ) : null}
-            </div>
-          ) : (
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">链接或路径</span>
-              <Input
-                autoFocus
-                onChange={(event) => setSourceInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && sourceInput.trim() && !saving) {
-                    event.preventDefault();
-                    void save();
-                  }
-                }}
-                placeholder="Git 链接、owner/repo 或本地目录"
-                value={sourceInput}
-              />
-              <span className="text-muted-foreground text-xs">
-                自动识别来源类型、名称和 GitHub 简写中的分支。
-              </span>
-            </label>
-          )}
-
-          <DialogFooter showCloseButton>
-            <Button
-              disabled={
-                saving ||
-                (originalName
-                  ? !draft.name.trim() || !draft.location.trim()
-                  : !sourceInput.trim())
-              }
-              onClick={() => void save()}
-            >
-              {saving ? "正在保存并扫描…" : "保存并扫描"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MarketplaceSourceDialog
+        draft={draft}
+        error={error}
+        onOpenChange={setDialogOpen}
+        onSave={() => void save()}
+        open={dialogOpen}
+        originalName={originalName}
+        saving={saving}
+        setDraft={setDraft}
+        setSourceInput={setSourceInput}
+        sourceInput={sourceInput}
+      />
     </section>
-  );
-}
-
-function MarketplacePluginRow({
-  busy,
-  disabled,
-  onAction,
-  plugin,
-}: {
-  busy: boolean;
-  disabled: boolean;
-  onAction: (plugin: MarketplacePlugin) => Promise<void>;
-  plugin: MarketplacePlugin;
-}) {
-  const capabilities = [
-    plugin.skillCount > 0
-      ? {
-          icon: SparklesIcon,
-          label: `${plugin.skillCount} Skills`,
-        }
-      : undefined,
-    plugin.hasAgents ? { icon: BotIcon, label: "Agents" } : undefined,
-    plugin.hasHooks ? { icon: WebhookIcon, label: "Hooks" } : undefined,
-    plugin.hasMcp ? { icon: BracesIcon, label: "MCP" } : undefined,
-  ].filter(
-    (
-      item,
-    ): item is {
-      icon: typeof SparklesIcon;
-      label: string;
-    } => item !== undefined,
-  );
-
-  return (
-    <div className="flex items-center gap-3 rounded-lg bg-background/55 px-4 py-3 transition-colors hover:bg-background/75">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted">
-        <PackageIcon className="size-4 text-muted-foreground" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="font-medium text-sm">{plugin.name}</p>
-          {plugin.status === "installed" ? (
-            <Badge variant="secondary">已安装</Badge>
-          ) : null}
-          {plugin.installedVersion || plugin.version ? (
-            <span className="text-muted-foreground text-xs">
-              v{plugin.installedVersion ?? plugin.version}
-            </span>
-          ) : null}
-        </div>
-        {plugin.description ? (
-          <p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
-            {plugin.description}
-          </p>
-        ) : null}
-        {capabilities.length > 0 ? (
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {capabilities.map(({ icon: Icon, label }) => (
-              <span
-                className="flex items-center gap-1 text-muted-foreground text-[11px]"
-                key={label}
-              >
-                <Icon className="size-3" />
-                {label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <Button
-        disabled={disabled}
-        onClick={() => void onAction(plugin)}
-        size="sm"
-        variant={plugin.status === "installed" ? "outline" : "default"}
-      >
-        {busy ? <RefreshCwIcon className="animate-spin" /> : null}
-        {busy
-          ? plugin.status === "installed"
-            ? "正在更新"
-            : "正在安装"
-          : plugin.status === "installed"
-            ? "更新"
-            : "安装"}
-      </Button>
-    </div>
   );
 }
