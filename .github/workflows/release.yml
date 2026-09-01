@@ -44,6 +44,21 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Load release notes
+        id: release-notes
+        shell: bash
+        run: |
+          notes_file="docs/releases/${GITHUB_REF_NAME#v}.md"
+          if [[ ! -s "$notes_file" ]]; then
+            echo "::error::Missing release notes: $notes_file"
+            exit 1
+          fi
+          {
+            echo 'body<<RELEASE_NOTES'
+            cat "$notes_file"
+            echo 'RELEASE_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Verify release tag and source branch
         shell: bash
         run: |
@@ -118,7 +133,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "MelodyWork v__VERSION__"
-          releaseBody: "Download the installer for your platform."
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: "${{ matrix.tauri_args }} ${{ contains(github.ref_name, '-') && matrix.beta_bundle_args || '' }} --config src-tauri/tauri.release.conf.json"

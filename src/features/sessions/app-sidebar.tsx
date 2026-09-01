@@ -3,40 +3,21 @@ import {
   BlocksIcon,
   BrainCircuitIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   FlaskConicalIcon,
-  FolderOpenIcon,
   GitPullRequestIcon,
   InboxIcon,
   LayoutDashboardIcon,
   LibraryIcon,
-  MessageCircleIcon,
-  MoreHorizontalIcon,
   RadarIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
-  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useState, type PointerEventHandler } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { Presence } from "@/components/ui/presence";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,24 +27,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   isIndependentProject,
+  type ProjectDeleteResult,
   type ProjectRecord,
   type SessionRecord,
 } from "@/domain/workspace";
-import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
 
-export type WorkspaceMode = "work" | "research";
-export type ResearchSection =
-  | "overview"
-  | "knowledge"
-  | "library"
-  | "experiments"
-  | "sandbox"
-  | "search"
-  | "tracking"
-  | "inbox"
-  | "skills"
-  | "capabilities";
+import { SidebarDeleteDialogs } from "./sidebar-delete-dialogs";
+import { SidebarProjectsNavigation } from "./sidebar-projects-navigation";
+import type {
+  ResearchSection,
+  SidebarProjectEntry,
+  WorkspaceMode,
+} from "./sidebar-types";
+
+export type { ResearchSection, WorkspaceMode } from "./sidebar-types";
 
 interface AppSidebarProps {
   activeProject?: ProjectRecord;
@@ -80,11 +58,14 @@ interface AppSidebarProps {
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
   onDeleteSession: (session: SessionRecord) => void;
+  onArchiveProject: (project: ProjectRecord) => void;
+  onDeleteProject: (project: ProjectRecord) => Promise<ProjectDeleteResult>;
   onModeChange: (mode: WorkspaceMode) => void;
   onOpenExtensions: () => void;
   onOpenGit: () => void;
   onOpenSettings: () => void;
   onNewSession: (project?: ProjectRecord) => void;
+  onRestoreProject: (project: ProjectRecord) => void;
   onSelectProject: (project: ProjectRecord) => void;
   onSelectSession: (session: SessionRecord) => void;
   onSelectResearchSection: (section: ResearchSection) => void;
@@ -105,26 +86,38 @@ export function AppSidebar({
   onResizeStart,
   onResetWidth,
   onDeleteSession,
+  onArchiveProject,
+  onDeleteProject,
   onModeChange,
   onNewSession,
   onOpenExtensions,
   onOpenGit,
   onOpenSettings,
+  onRestoreProject,
   onSelectProject,
   onSelectSession,
   onSelectResearchSection,
 }: AppSidebarProps) {
   const [pendingDelete, setPendingDelete] = useState<SessionRecord>();
+  const [pendingDeleteProject, setPendingDeleteProject] =
+    useState<ProjectRecord>();
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [projectDeleteError, setProjectDeleteError] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(activeProject ? [activeProject.id] : []),
   );
+  const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [tasksExpanded, setTasksExpanded] = useState(true);
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleProjects = projects.flatMap((project) => {
+  const getVisibleProjectEntry = (
+    project: ProjectRecord,
+  ): SidebarProjectEntry | undefined => {
     const projectSessions = sessionsByProject[project.id] ?? [];
     if (!normalizedQuery) {
-      return [{ project, sessions: projectSessions }];
+      return { project, sessions: projectSessions };
     }
     const projectMatches = project.name
       .toLocaleLowerCase()
@@ -133,14 +126,28 @@ export function AppSidebar({
       session.title.toLocaleLowerCase().includes(normalizedQuery),
     );
     return projectMatches || matchingSessions.length > 0
-      ? [
-          {
-            project,
-            sessions: projectMatches ? projectSessions : matchingSessions,
-          },
-        ]
-      : [];
-  });
+      ? {
+          project,
+          sessions: projectMatches ? projectSessions : matchingSessions,
+        }
+      : undefined;
+  };
+  const visibleProjects = projects
+    .filter((project) => !isIndependentProject(project) && !project.archived)
+    .flatMap((project) => {
+      const entry = getVisibleProjectEntry(project);
+      return entry ? [entry] : [];
+    });
+  const archivedProjects = projects
+    .filter((project) => !isIndependentProject(project) && project.archived)
+    .flatMap((project) => {
+      const entry = getVisibleProjectEntry(project);
+      return entry ? [entry] : [];
+    });
+  const independentProject = projects.find(isIndependentProject);
+  const visibleTask = independentProject
+    ? getVisibleProjectEntry(independentProject)
+    : undefined;
 
   useEffect(() => {
     if (!activeProject) {
@@ -154,6 +161,16 @@ export function AppSidebar({
       next.add(activeProject.id);
       return next;
     });
+  }, [activeProject]);
+
+  useEffect(() => {
+    if (isIndependentProject(activeProject)) {
+      setTasksExpanded(true);
+    } else if (activeProject?.archived) {
+      setArchivedExpanded(true);
+    } else if (activeProject) {
+      setProjectsExpanded(true);
+    }
   }, [activeProject]);
 
   return (
@@ -255,7 +272,7 @@ export function AppSidebar({
           className={cn(
             "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
           )}
-          disabled={loading || !activeProject}
+          disabled={loading || !activeProject || activeProject.archived}
           onClick={() => onNewSession()}
           variant="ghost"
         >
@@ -374,200 +391,39 @@ export function AppSidebar({
             </nav>
           </>
         ) : null}
-        <p
-          className={cn(
-            "px-3 pb-1.5 font-medium text-sidebar-foreground text-xs uppercase tracking-wide",
-            workspaceMode === "research" && "mt-5",
-          )}
-        >
-          项目
-        </p>
-        <nav
-          aria-label="项目和任务"
-          className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-1 pb-2"
-        >
-          {visibleProjects.map(({ project, sessions }, projectIndex) => {
-            const active = project.id === activeProject?.id;
-            const independent = isIndependentProject(project);
-            const expanded =
-              Boolean(normalizedQuery) || expandedProjectIds.has(project.id);
-            return (
-              <Collapsible
-                className="motion-list-item"
-                key={project.id}
-                onOpenChange={(open) => {
-                  setExpandedProjectIds((current) => {
-                    const next = new Set(current);
-                    if (open) {
-                      next.add(project.id);
-                    } else {
-                      next.delete(project.id);
-                    }
-                    return next;
-                  });
-                }}
-                open={expanded}
-                style={{
-                  animationDelay: `${Math.min(projectIndex, 6) * 24}ms`,
-                }}
-              >
-                <div
-                  className={cn(
-                    "group/project flex h-8 w-full items-center rounded-lg px-1 transition-colors",
-                    active
-                      ? "bg-sidebar-selected font-medium text-sidebar-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                  )}
-                >
-                  <CollapsibleTrigger asChild>
-                    <button
-                      aria-label={`${expanded ? "收起" : "展开"}项目 ${project.name}`}
-                      className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left text-base"
-                      title={project.path}
-                      type="button"
-                    >
-                      <ChevronRightIcon
-                        className={cn(
-                          "motion-collapsible-chevron size-3.5 shrink-0 text-muted-foreground/70",
-                          expanded && "rotate-90",
-                        )}
-                      />
-                      {independent ? (
-                        <MessageCircleIcon className="size-4 shrink-0" />
-                      ) : (
-                        <FolderOpenIcon className="size-4 shrink-0" />
-                      )}
-                      <span className="truncate">{project.name}</span>
-                    </button>
-                  </CollapsibleTrigger>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        aria-label={`${project.name}的操作`}
-                        className="opacity-0 group-hover/project:opacity-100 focus:opacity-100"
-                        size="icon-sm"
-                        variant="ghost"
-                      >
-                        <MoreHorizontalIcon />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuItem
-                        onSelect={() => onSelectProject(project)}
-                      >
-                        {independent ? <MessageCircleIcon /> : <FolderOpenIcon />}
-                        {independent ? "切换到独立聊天" : "切换到项目"}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => onNewSession(project)}>
-                        <SquarePenIcon />
-                        {independent
-                          ? workspaceMode === "research"
-                            ? "在独立聊天中新建研究任务"
-                            : "在独立聊天中新建任务"
-                          : workspaceMode === "research"
-                          ? "在此项目新建研究任务"
-                          : "在此项目新建任务"}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <Button
-                    aria-label={
-                      independent
-                        ? `在独立聊天中新建${workspaceMode === "research" ? "研究任务" : "任务"}`
-                        : `在 ${project.name} 中新建${workspaceMode === "research" ? "研究任务" : "任务"}`
-                    }
-                    disabled={loading}
-                    onClick={() => onNewSession(project)}
-                    size="icon-sm"
-                    title={
-                      independent
-                        ? workspaceMode === "research"
-                          ? "在独立聊天中新建研究任务"
-                          : "在独立聊天中新建任务"
-                        : workspaceMode === "research"
-                          ? "在此项目新建研究任务"
-                          : "在此项目新建任务"
-                    }
-                    variant="ghost"
-                  >
-                    <SquarePenIcon />
-                  </Button>
-                </div>
-
-                <CollapsibleContent className="motion-collapsible-content">
-                  <div className="flex flex-col gap-0.5 pl-6 pt-0.5">
-                    {sessions.map((session) => {
-                      const selected = session.id === activeSessionId;
-                      const running = runningSessions[session.id] === true;
-                      return (
-                        <div
-                          className={cn(
-                            "group flex min-h-8 w-full items-center rounded-lg px-1 text-sm transition-colors",
-                            selected
-                              ? "bg-sidebar-selected text-sidebar-foreground"
-                              : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                          )}
-                          key={session.id}
-                        >
-                          <button
-                            className="min-w-0 flex-1 truncate px-2 py-1 text-left"
-                            onClick={() => onSelectSession(session)}
-                            title={localizedSessionTitle(session.title)}
-                            type="button"
-                          >
-                            {localizedSessionTitle(session.title)}
-                          </button>
-                          {running ? (
-                            <span
-                              aria-label="任务正在运行"
-                              className="mr-1 size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-foreground"
-                              role="status"
-                              title="任务正在运行"
-                            />
-                          ) : null}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                aria-label={`${localizedSessionTitle(session.title)}的操作`}
-                                className={cn(
-                                  "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100",
-                                  selected && "group-hover:opacity-100",
-                                )}
-                                size="icon-sm"
-                                variant="ghost"
-                              >
-                                <MoreHorizontalIcon />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start">
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onSelect={() => setPendingDelete(session)}
-                              >
-                                <Trash2Icon />
-                                删除任务…
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      );
-                    })}
-                    {!loading && sessions.length === 0 ? (
-                      <p className="px-2 py-2 text-sidebar-foreground text-xs">
-                        {normalizedQuery ? "没有匹配的任务" : "暂无任务"}
-                      </p>
-                    ) : null}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            );
-          })}
-          {!loading && visibleProjects.length === 0 ? (
-            <p className="px-3 py-4 text-center text-sidebar-foreground text-xs">
-              {normalizedQuery ? "没有匹配的项目" : "暂无项目"}
-            </p>
-          ) : null}
-        </nav>
+        <SidebarProjectsNavigation
+          activeProject={activeProject}
+          activeSessionId={activeSessionId}
+          archivedExpanded={archivedExpanded}
+          archivedProjects={archivedProjects}
+          expandedProjectIds={expandedProjectIds}
+          loading={loading}
+          normalizedQuery={normalizedQuery}
+          onArchiveProject={onArchiveProject}
+          onNewSession={onNewSession}
+          onRequestDelete={setPendingDelete}
+          onRequestDeleteProject={setPendingDeleteProject}
+          onRestoreProject={onRestoreProject}
+          onSelectProject={onSelectProject}
+          onSelectSession={onSelectSession}
+          onSetArchivedExpanded={setArchivedExpanded}
+          onSetExpandedProject={(projectId, open) => {
+            setExpandedProjectIds((current) => {
+              const next = new Set(current);
+              if (open) next.add(projectId);
+              else next.delete(projectId);
+              return next;
+            });
+          }}
+          onSetProjectsExpanded={setProjectsExpanded}
+          onSetTasksExpanded={setTasksExpanded}
+          projectsExpanded={projectsExpanded}
+          runningSessions={runningSessions}
+          tasksExpanded={tasksExpanded}
+          visibleProjects={visibleProjects}
+          visibleTask={visibleTask}
+          workspaceMode={workspaceMode}
+        />
       </div>
 
       <div className="app-sidebar-footer border-t px-1 pt-1.5">
@@ -584,40 +440,18 @@ export function AppSidebar({
         </Button>
       </div>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDelete(undefined);
-          }
-        }}
-        open={Boolean(pendingDelete)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除任务？</DialogTitle>
-            <DialogDescription>
-              “{pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}
-              ”及其本地对话记录将被永久删除，工作区文件不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
-            <Button
-              onClick={() => {
-                if (pendingDelete) {
-                  onDeleteSession(pendingDelete);
-                  setPendingDelete(undefined);
-                }
-              }}
-              variant="destructive"
-            >
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SidebarDeleteDialogs
+        deletingProject={deletingProject}
+        onDeleteProject={onDeleteProject}
+        onDeleteSession={onDeleteSession}
+        onDeletingProjectChange={setDeletingProject}
+        onPendingDeleteChange={setPendingDelete}
+        onPendingDeleteProjectChange={setPendingDeleteProject}
+        onProjectDeleteErrorChange={setProjectDeleteError}
+        pendingDelete={pendingDelete}
+        pendingDeleteProject={pendingDeleteProject}
+        projectDeleteError={projectDeleteError}
+      />
 
       <div
         aria-label="调整侧边栏宽度"

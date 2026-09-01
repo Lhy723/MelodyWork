@@ -17,10 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  isIndependentProject,
-  type ProjectRecord,
-} from "@/domain/workspace";
+import { isIndependentProject, type ProjectRecord } from "@/domain/workspace";
 
 interface NewTaskWorkspaceProps {
   children: ReactNode;
@@ -43,6 +40,10 @@ export function NewTaskWorkspace({
 }: NewTaskWorkspaceProps) {
   const researchMode = mode === "research";
   const independentChat = isIndependentProject(selectedProject);
+  const projectOptions = projects.filter(
+    (project) => !isIndependentProject(project) && !project.archived,
+  );
+  const taskOption = projects.find(isIndependentProject);
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-background">
@@ -76,10 +77,10 @@ export function NewTaskWorkspace({
             </h1>
             <p className="mt-2 text-muted-foreground text-sm">
               {independentChat
-                ? "使用 Melody 的隔离运行目录开始独立聊天。"
+                ? "使用 Melody 的隔离运行目录开始新任务。"
                 : researchMode
-                ? "选择 Melody Research 可以访问的工作目录，然后描述研究任务。"
-                : "选择 Melody 可以访问的工作目录，然后描述任务。"}
+                  ? "选择 Melody Research 可以访问的工作目录，然后描述研究任务。"
+                  : "选择 Melody 可以访问的工作目录，然后描述任务。"}
             </p>
           </div>
           <div className="mx-auto mb-3 w-full max-w-3xl px-4 sm:px-6">
@@ -105,22 +106,44 @@ export function NewTaskWorkspace({
                 className="w-[min(34rem,80vw)]"
               >
                 <DropdownMenuLabel>聊天范围</DropdownMenuLabel>
-                {projects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.id}
-                    onSelect={() => onSelectProject(project)}
-                  >
-                    {isIndependentProject(project) ? (
+                {projectOptions.length > 0 ? (
+                  <>
+                    <DropdownMenuLabel className="text-muted-foreground text-xs">
+                      项目
+                    </DropdownMenuLabel>
+                    {projectOptions.map((project) => (
+                      <DropdownMenuItem
+                        key={project.id}
+                        onSelect={() => onSelectProject(project)}
+                      >
+                        <FolderIcon />
+                        <span className="min-w-0 flex-1 truncate">
+                          {project.name}
+                        </span>
+                        {selectedProject?.id === project.id ? (
+                          <CheckIcon />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                ) : null}
+                {taskOption ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-muted-foreground text-xs">
+                      任务
+                    </DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() => onSelectProject(taskOption)}
+                    >
                       <MessageCircleIcon />
-                    ) : (
-                      <FolderIcon />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {project.name}
-                    </span>
-                    {selectedProject?.id === project.id ? <CheckIcon /> : null}
-                  </DropdownMenuItem>
-                ))}
+                      <span className="min-w-0 flex-1 truncate">任务</span>
+                      {selectedProject?.id === taskOption.id ? (
+                        <CheckIcon />
+                      ) : null}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onAddProject}>
                   <FolderPlusIcon />
@@ -132,7 +155,7 @@ export function NewTaskWorkspace({
           {children}
           <p className="mt-1 px-6 text-center text-muted-foreground text-xs">
             {independentChat
-              ? "独立聊天会在 MelodyWork 的隔离目录中运行；提交消息前不会创建会话。"
+              ? "任务会在 MelodyWork 的隔离目录中运行；提交消息前不会创建会话。"
               : `${researchMode ? "新研究任务" : "新任务"} 会在所选目录中运行；提交消息前不会创建会话。`}
           </p>
         </div>
