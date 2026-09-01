@@ -228,6 +228,8 @@ interface AgentStore {
   runningSessions: Record<string, boolean>;
   chatStatus: "ready" | "submitted" | "streaming" | "error";
   setStatus: (status: AgentStatus) => void;
+  /** Clears the session-scoped projection when no workspace session is active. */
+  resetSessionView: () => void;
   appendStderr: (line: string) => void;
   beginSession: (
     cwd: string,
@@ -902,14 +904,14 @@ const sendSessionOpen = async (
 };
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
-  activeSessionId: "implement-acp-bridge",
+  activeSessionId: isTauriRuntime() ? "" : "implement-acp-bridge",
   cwd: ".",
   status: {
     phase: "stopped",
     message: "正在启动桌面连接…",
   },
   acpPhase: "idle",
-  timeline: previewTimeline,
+  timeline: isTauriRuntime() ? [] : previewTimeline,
   backgroundTimelines: {},
   backgroundCursors: {},
   backgroundContextUsage: {},
@@ -953,6 +955,23 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           }
         : {}),
     }));
+  },
+  resetSessionView: () => {
+    clearTransientState();
+    set({
+      activeSessionId: isTauriRuntime() ? "" : "implement-acp-bridge",
+      localSessionId: undefined,
+      cwd: ".",
+      acpPhase: "idle",
+      acpSessionId: undefined,
+      acpCursor: undefined,
+      timeline: isTauriRuntime() ? [] : previewTimeline,
+      contextUsage: undefined,
+      availableSessionModes: [],
+      selectedSessionModeId: undefined,
+      pendingSessionModeId: undefined,
+      chatStatus: "ready",
+    });
   },
   appendStderr: (line) =>
     set((state) => ({ stderr: [...state.stderr.slice(-49), line] })),

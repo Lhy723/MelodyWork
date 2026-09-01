@@ -11,8 +11,12 @@ import {
 import type { SessionRecord } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
 
-export const useAgentBridge = (session?: SessionRecord) => {
+export const useAgentBridge = (
+  session?: SessionRecord,
+  resetWhenSessionMissing = false,
+) => {
   const setStatus = useAgentStore((state) => state.setStatus);
+  const resetSessionView = useAgentStore((state) => state.resetSessionView);
   const appendStderr = useAgentStore((state) => state.appendStderr);
   const receiveAcp = useAgentStore((state) => state.receiveAcp);
   const beginSession = useAgentStore((state) => state.beginSession);
@@ -34,6 +38,9 @@ export const useAgentBridge = (session?: SessionRecord) => {
 
     const connect = async () => {
       if (!sessionId || !sessionCwd) {
+        if (resetWhenSessionMissing) {
+          resetSessionView();
+        }
         return;
       }
       const currentSession = sessionRef.current;
@@ -111,6 +118,8 @@ export const useAgentBridge = (session?: SessionRecord) => {
     sessionAcpId,
     sessionCwd,
     sessionId,
+    resetSessionView,
+    resetWhenSessionMissing,
     setStatus,
   ]);
 };

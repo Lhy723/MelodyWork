@@ -29,6 +29,8 @@ interface WorkspaceStore {
   activeSession?: SessionRecord;
   loading: boolean;
   initialized: boolean;
+  /** The user dismissed the initial folder picker and needs a starting scope. */
+  needsWorkspace: boolean;
   error?: string;
   initialize: () => Promise<void>;
   addProject: () => Promise<ProjectRecord | undefined>;
@@ -51,6 +53,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   sessionsByProject: {},
   loading: true,
   initialized: false,
+  needsWorkspace: false,
   initialize: async () => {
     if (get().initialized) {
       return;
@@ -66,28 +69,37 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       let regularProjects = projects.filter(
         (project) => !isIndependentProject(project) && !project.archived,
       );
-      if (
-        regularProjects.length === 0 &&
-        !defaultIndependentChat &&
-        !hasRegularProjects
-      ) {
+      const shouldPromptForWorkspace =
+        projects.length === 0 ||
+        (regularProjects.length === 0 &&
+          !defaultIndependentChat &&
+          !hasRegularProjects);
+      if (shouldPromptForWorkspace) {
         const path = await pickWorkspaceDirectory();
         if (!path) {
-          throw new Error("请选择一个工作区后再继续。");
+          const sessionEntries = await Promise.all(
+            projects.map(
+              async (project) =>
+                [project.id, await listStoredSessions(project.id)] as const,
+            ),
+          );
+          set({
+            activeProject: undefined,
+            activeSession: undefined,
+            error: undefined,
+            loading: false,
+            needsWorkspace: true,
+            projects,
+            sessions: [],
+            sessionsByProject: Object.fromEntries(sessionEntries),
+          });
+          return;
         }
         const project = await upsertProject(path);
         projects = [
           ...projects.filter((item) => isIndependentProject(item)),
           project,
         ];
-        regularProjects = [project];
-      } else if (projects.length === 0) {
-        const path = await pickWorkspaceDirectory();
-        if (!path) {
-          throw new Error("请选择一个工作区后再继续。");
-        }
-        const project = await upsertProject(path);
-        projects = [project];
         regularProjects = [project];
       }
       const sessionEntries = await Promise.all(
@@ -97,6 +109,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ),
       );
       set({
+        error: undefined,
+        needsWorkspace: false,
         projects,
         sessionsByProject: Object.fromEntries(sessionEntries),
       });
@@ -121,6 +135,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       const project = await upsertProject(path);
       set((state) => ({
+        needsWorkspace: false,
         projects: [
           project,
           ...state.projects.filter((item) => item.id !== project.id),
@@ -217,6 +232,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           activeSession: undefined,
           sessions: [],
           loading: false,
+          needsWorkspace: true,
         });
       }
       return { deleted: true };
@@ -235,6 +251,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       activeSession: undefined,
       sessions: [],
       loading: true,
+      needsWorkspace: false,
       error: undefined,
     });
     try {
