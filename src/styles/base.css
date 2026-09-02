@@ -18,6 +18,7 @@ body {
   overflow: hidden;
 }
 
+/* ui-font-check: allow — research content intentionally uses a serif face */
 .research-serif {
   font-family:
     Georgia, "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
@@ -183,7 +184,7 @@ body {
     line-height: var(--type-leading-body);
   }
   html {
-    @apply font-sans;
+    font-family: var(--font-sans);
   }
   code,
   pre,

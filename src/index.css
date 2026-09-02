@@ -2,7 +2,6 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
 @import "./styles/base.css";
 @import "./styles/components.css";
 @import "./styles/harness.css";

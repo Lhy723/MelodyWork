@@ -1,12 +1,18 @@
 import { useEffect } from "react";
 
 import { isMacOSRuntime, isTauriRuntime } from "@/lib/melody-bridge";
-import { useAppSettingsStore } from "@/stores/app-settings-store";
+import {
+  SYSTEM_UI_FONT,
+  useAppSettingsStore,
+} from "@/stores/app-settings-store";
 
 const CJK_SANS_FALLBACK =
   '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC"';
 
 const withCjkFallback = (font: string) => {
+  if (!font.trim()) {
+    return `${CJK_SANS_FALLBACK}, sans-serif`;
+  }
   if (font.includes("PingFang SC")) {
     return font;
   }
@@ -36,10 +42,7 @@ export function useAppearanceSettings() {
           (settings.reducedMotion === "system" && motionMedia.matches),
       );
       root.classList.toggle("app-pointer-cursor", settings.pointerCursor);
-      root.classList.toggle(
-        "app-translucent-sidebar",
-        nativeVibrancyEnabled,
-      );
+      root.classList.toggle("app-translucent-sidebar", nativeVibrancyEnabled);
       root.classList.toggle(
         "app-native-vibrancy-window",
         nativeVibrancyEnabled,
@@ -72,7 +75,11 @@ export function useAppearanceSettings() {
       );
       root.style.setProperty("--ring", accent);
       root.style.setProperty("--sidebar-primary", accent);
-      root.style.setProperty("--font-sans", withCjkFallback(settings.uiFont));
+      const uiFont =
+        settings.uiFontPreset === "system" ? SYSTEM_UI_FONT : settings.uiFont;
+      const resolvedUiFont = withCjkFallback(uiFont);
+      root.style.setProperty("--font-sans", resolvedUiFont);
+      root.style.fontFamily = resolvedUiFont;
       root.style.setProperty("--app-code-font", settings.codeFont);
       root.style.setProperty("--font-mono", settings.codeFont);
       root.style.fontSize = `${settings.uiFontSize}px`;

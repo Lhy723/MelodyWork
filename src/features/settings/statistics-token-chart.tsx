@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { StatisticsActivityDay } from "@/domain/statistics";
 
-import { echartsLoader, readThemeColor } from "./statistics-charts";
+import {
+  echartsLoader,
+  readThemeColor,
+  readThemeFont,
+} from "./statistics-charts";
 import { compactNumber, buildTokenBreakdownDays } from "./statistics-utils";
 
 export function TokenBreakdownChart({
@@ -43,6 +47,7 @@ export function TokenBreakdownChart({
           "#26272a",
         );
         const chartBorder = readThemeColor("--harness-chart-border", "#dfe2e5");
+        const chartFont = readThemeFont();
         const chartColors = [
           readThemeColor("--harness-chart-1", "#4f8fca"),
           readThemeColor("--harness-chart-2", "#6b3c8a"),
@@ -54,6 +59,9 @@ export function TokenBreakdownChart({
         );
         chart.setOption({
           animationDuration: 240,
+          textStyle: {
+            fontFamily: chartFont,
+          },
           color: chartColors,
           grid: {
             left: 4,
@@ -68,7 +76,11 @@ export function TokenBreakdownChart({
             right: 0,
             itemWidth: 8,
             itemHeight: 8,
-            textStyle: { color: textColor, fontSize: 11 },
+            textStyle: {
+              color: textColor,
+              fontFamily: chartFont,
+              fontSize: 11,
+            },
             data: ["非缓存输入", "缓存读取", "普通输出", "推理"],
           },
           tooltip: {
@@ -76,7 +88,11 @@ export function TokenBreakdownChart({
             axisPointer: { type: "shadow" },
             backgroundColor: chartTooltip,
             borderColor: chartBorder,
-            textStyle: { color: chartTooltipText, fontSize: 12 },
+            textStyle: {
+              color: chartTooltipText,
+              fontFamily: chartFont,
+              fontSize: 12,
+            },
             valueFormatter: (value: number) => `${compactNumber(value)} Token`,
           },
           xAxis: {
@@ -86,6 +102,7 @@ export function TokenBreakdownChart({
             axisTick: { show: false },
             axisLabel: {
               color: textColor,
+              fontFamily: chartFont,
               fontSize: 10,
               interval: 4,
             },
@@ -97,6 +114,7 @@ export function TokenBreakdownChart({
             axisLabel: {
               show: hasUsage,
               color: textColor,
+              fontFamily: chartFont,
               fontSize: 10,
               formatter: (value: number) => compactNumber(value),
             },
