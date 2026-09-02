@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-melody-commands"
-description = "Explicitly expose only the commands used by the MelodyWork main window. High-impact commands still require Rust-side path checks and native confirmation."
+description = "Explicitly expose only the commands used by the MelodyWork main window. High-impact commands still require Rust-side path and protocol checks; user-facing confirmations are handled in the app UI."
 commands.allow = [
   "agent_status",
   "start_agent",

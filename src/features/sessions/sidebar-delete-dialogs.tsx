@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
   type ProjectDeleteResult,
@@ -40,6 +41,33 @@ export function SidebarDeleteDialogs({
   onDeleteSession,
   onDeleteProject,
 }: SidebarDeleteDialogsProps) {
+  const deleteProject = async () => {
+    if (!pendingDeleteProject || deletingProject) {
+      return;
+    }
+    const project = pendingDeleteProject;
+    onDeletingProjectChange(true);
+    onProjectDeleteErrorChange(undefined);
+    try {
+      const result = await onDeleteProject(project);
+      if (!result.deleted) {
+        const message = result.error ?? "删除项目失败，请重试。";
+        onProjectDeleteErrorChange(message);
+        throw new Error(message);
+      }
+      onPendingDeleteProjectChange(undefined);
+    } catch (reason) {
+      if (reason instanceof Error && reason.message) {
+        onProjectDeleteErrorChange(reason.message);
+      } else {
+        onProjectDeleteErrorChange("删除项目失败，请重试。");
+      }
+      throw reason;
+    } finally {
+      onDeletingProjectChange(false);
+    }
+  };
+
   return (
     <>
       <Dialog
@@ -99,33 +127,15 @@ export function SidebarDeleteDialogs({
             <DialogClose asChild>
               <Button variant="outline">取消</Button>
             </DialogClose>
-            <Button
-              disabled={deletingProject}
-              onClick={async () => {
-                if (!pendingDeleteProject || deletingProject) {
-                  return;
-                }
-                onDeletingProjectChange(true);
-                onProjectDeleteErrorChange(undefined);
-                try {
-                  const result = await onDeleteProject(pendingDeleteProject);
-                  if (result.deleted) {
-                    onPendingDeleteProjectChange(undefined);
-                  } else {
-                    onProjectDeleteErrorChange(
-                      result.error ?? "删除项目失败，请重试。",
-                    );
-                  }
-                } catch {
-                  onProjectDeleteErrorChange("删除项目失败，请重试。");
-                } finally {
-                  onDeletingProjectChange(false);
-                }
-              }}
+            <LoadingButton
+              errorLabel="重试"
+              onAction={deleteProject}
+              pendingLabel="删除中…"
+              successLabel="已删除"
               variant="destructive"
             >
-              {deletingProject ? "删除中…" : "删除项目"}
-            </Button>
+              删除项目
+            </LoadingButton>
           </DialogFooter>
           {projectDeleteError ? (
             <p className="text-destructive text-sm" role="alert">

@@ -2,7 +2,6 @@ import {
   BookmarkIcon,
   ImportIcon,
   LibraryIcon,
-  LoaderCircleIcon,
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -10,6 +9,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { MOTION_EASE } from "@/components/motion/page-transition";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
@@ -34,6 +34,7 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const searchGateRef = useRef(new RequestGate());
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
   const visiblePapers = searchMode ? results : papers;
   const selected = visiblePapers.find((paper) => paper.id === selectedId);
   const selectedInLibrary = papers.find((paper) => paper.id === selectedId);
@@ -53,6 +54,7 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setError(toUserMessage(reason));
       setResults([]);
+      throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) {
         setLoading(false);
@@ -76,25 +78,25 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && query.trim() && !loading) {
                     event.preventDefault();
-                    void runSearch();
+                    searchButtonRef.current?.click();
                   }
                 }}
                 placeholder="搜索 Crossref、OpenAlex、arXiv、Semantic Scholar 与 PubMed"
                 value={query}
               />
             </div>
-            <Button
-              disabled={!query.trim() || loading}
-              onClick={() => void runSearch()}
+            <LoadingButton
+              disabled={!query.trim()}
+              errorLabel="重试"
+              icon={<SearchIcon />}
+              onAction={runSearch}
+              pendingLabel="正在检索…"
+              ref={searchButtonRef}
               size="sm"
+              successLabel="检索完成"
             >
-              {loading ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <SearchIcon />
-              )}
               检索
-            </Button>
+            </LoadingButton>
           </>
         ) : (
           <>

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +48,6 @@ export function SkillDetailsView({
   } = useAsyncOperation();
   const loading = loadingState.phase === "pending";
   const error = loadingState.error;
-  const deleting = deleteState.phase === "pending";
   const deleteError = deleteState.error;
 
   const load = useCallback(() => {
@@ -60,13 +60,12 @@ export function SkillDetailsView({
     void load();
   }, [load]);
 
-  const remove = () => {
-    void runDelete(async () => {
+  const remove = () =>
+    runDelete(async () => {
       await deleteMelodySkill(cwd, skill);
       setDeleteOpen(false);
       await onDeleted();
-    }).catch(() => undefined);
-  };
+    });
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -253,14 +252,16 @@ export function SkillDetailsView({
             </p>
           ) : null}
           <DialogFooter showCloseButton>
-            <Button
-              disabled={deleting}
-              onClick={() => void remove()}
+            <LoadingButton
+              errorLabel="重试"
+              icon={<Trash2Icon />}
+              onAction={remove}
+              pendingLabel="正在删除…"
+              successLabel="已删除"
               variant="destructive"
             >
-              <Trash2Icon />
-              {deleting ? "正在删除…" : "确认删除"}
-            </Button>
+              确认删除
+            </LoadingButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

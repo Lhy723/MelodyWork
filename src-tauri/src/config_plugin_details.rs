@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use toml_edit::Item;
 
 use crate::config_io::remove_directory;
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
 use super::config_extensions::{inspect_skill_directory, run_melody_inspect};
@@ -478,7 +478,6 @@ pub async fn get_melody_skill_details(
 
 #[tauri::command]
 pub async fn delete_melody_skill(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     name: String,
@@ -486,12 +485,6 @@ pub async fn delete_melody_skill(
 ) -> Result<String, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let root = allowed_skill_path(&cwd, Path::new(&path))?;
-    confirm_action(
-        &app,
-        "确认删除 Melody 技能",
-        format!("允许删除技能目录 {} 吗？", root.display()),
-    )
-    .await?;
     remove_directory(&root, "skill")?;
     Ok(format!("Skill {} was deleted", name.trim()))
 }

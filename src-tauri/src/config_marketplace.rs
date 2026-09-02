@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
 use crate::melody_command::MelodyCommandRunner;
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
 use super::config_extensions::extension_config_names;
@@ -28,16 +28,6 @@ pub async fn install_melody_plugin(
         return Err("Plugin source is too long".to_string());
     }
     let workspace = registry.authorize(&cwd)?;
-    confirm_action(
-        &app,
-        "确认安装 Melody 插件",
-        format!(
-            "允许在 {} 以信任模式安装以下插件来源吗？\n{}",
-            workspace.display(),
-            source
-        ),
-    )
-    .await?;
     let mut command = MelodyCommandRunner::new(&app)
         .command(&["plugin", "install", source, "--trust"], Some(&workspace))?;
     let output = command
@@ -185,12 +175,6 @@ pub async fn update_melody_plugin(
         return Err("Plugin name cannot be empty".to_string());
     }
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    confirm_action(
-        &app,
-        "确认更新 Melody 插件",
-        format!("允许在 {} 更新插件 {} 吗？", cwd, name),
-    )
-    .await?;
     let message = run_plugin_command(&app, &cwd, &["plugin", "update", name]).await?;
     Ok(PluginInstallResult {
         source: name.to_string(),
@@ -263,21 +247,6 @@ pub async fn uninstall_melody_plugin(
         return Err("Plugin name cannot be empty".to_string());
     }
     let workspace = registry.authorize(&cwd)?;
-    confirm_action(
-        &app,
-        "确认卸载 Melody 插件",
-        format!(
-            "允许从 {} 卸载插件 {} 吗？{}",
-            workspace.display(),
-            name,
-            if keep_data {
-                "（保留插件数据）"
-            } else {
-                ""
-            }
-        ),
-    )
-    .await?;
     let mut command = MelodyCommandRunner::new(&app).command(
         &["plugin", "uninstall", name, "--confirm"],
         Some(&workspace),

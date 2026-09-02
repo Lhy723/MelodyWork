@@ -2,22 +2,19 @@ import {
   BotIcon,
   BracesIcon,
   PackageIcon,
-  RefreshCwIcon,
   SparklesIcon,
   WebhookIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { LoadingButton } from "@/components/interior/loading-button";
 import type { MarketplacePlugin } from "@/domain/config";
 
 export function MarketplacePluginRow({
-  busy,
   disabled,
   onAction,
   plugin,
 }: {
-  busy: boolean;
   disabled: boolean;
   onAction: (plugin: MarketplacePlugin) => Promise<void>;
   plugin: MarketplacePlugin;
@@ -74,21 +71,19 @@ export function MarketplacePluginRow({
           </div>
         ) : null}
       </div>
-      <Button
+      <LoadingButton
         disabled={disabled}
-        onClick={() => void onAction(plugin)}
+        errorLabel="重试"
+        onAction={() => onAction(plugin)}
+        pendingLabel={
+          plugin.status === "installed" ? "正在更新…" : "正在安装…"
+        }
         size="sm"
+        successLabel={plugin.status === "installed" ? "已更新" : "已安装"}
         variant={plugin.status === "installed" ? "outline" : "default"}
       >
-        {busy ? <RefreshCwIcon className="animate-spin" /> : null}
-        {busy
-          ? plugin.status === "installed"
-            ? "正在更新"
-            : "正在安装"
-          : plugin.status === "installed"
-            ? "更新"
-            : "安装"}
-      </Button>
+        {plugin.status === "installed" ? "更新" : "安装"}
+      </LoadingButton>
     </div>
   );
 }

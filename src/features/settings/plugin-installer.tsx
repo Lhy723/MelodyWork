@@ -1,6 +1,7 @@
 import { CheckCircle2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,16 +35,12 @@ export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
   };
 
   const install = async () => {
-    try {
-      const result = await installation.run(async () => {
-        const installed = await installMelodyPlugin(cwd, source);
-        await onInstalled();
-        return installed;
-      });
-      setSuccess(result.message);
-    } catch {
-      // The operation state owns the user-visible error.
-    }
+    const result = await installation.run(async () => {
+      const installed = await installMelodyPlugin(cwd, source);
+      await onInstalled();
+      return installed;
+    });
+    setSuccess(result.message);
   };
 
   return (
@@ -129,12 +126,15 @@ export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
 
           <DialogFooter showCloseButton>
             {!success ? (
-              <Button
-                disabled={installing || !source.trim()}
-                onClick={() => void install()}
+              <LoadingButton
+                disabled={!source.trim()}
+                errorLabel="重试"
+                onAction={install}
+                pendingLabel="正在安装…"
+                successLabel="已安装"
               >
-                {installing ? "正在安装…" : "信任并安装"}
-              </Button>
+                信任并安装
+              </LoadingButton>
             ) : null}
           </DialogFooter>
         </DialogContent>

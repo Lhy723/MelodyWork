@@ -1,8 +1,6 @@
 use rusqlite::{OptionalExtension, params};
-use tauri::{AppHandle, State};
+use tauri::State;
 use uuid::Uuid;
-
-use crate::workspace_access::confirm_action;
 
 use super::database_core::{
     AppDatabase, PermissionRule, current_timestamp, permission_rule_from_row,
@@ -56,7 +54,6 @@ pub fn find_permission_rule(
 
 #[tauri::command]
 pub async fn upsert_permission_rule(
-    app: AppHandle,
     database: State<'_, AppDatabase>,
     project_id: String,
     tool_key: String,
@@ -69,18 +66,6 @@ pub async fn upsert_permission_rule(
     }
     if tool_key.trim().is_empty() {
         return Err("Permission rule key cannot be empty".to_string());
-    }
-    if decision == "allow" {
-        confirm_action(
-            &app,
-            "确认保存永久权限",
-            format!(
-                "允许 MelodyWork 在此项目中永久放行以下工具吗？\n{}\n{}",
-                title.trim(),
-                command.trim()
-            ),
-        )
-        .await?;
     }
     let connection = database
         .connection

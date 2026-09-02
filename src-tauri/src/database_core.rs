@@ -378,36 +378,6 @@ impl AppDatabase {
         })
     }
 
-    /// Enforce a stored allow rule in Rust, keyed by the ACP session's
-    /// project and the exact normalized tool title/command pair.
-    pub fn has_allow_permission_for_acp_session(
-        &self,
-        acp_session_id: &str,
-        title: &str,
-        command: &str,
-    ) -> Result<bool, String> {
-        let tool_key = format!("{}\n{}", title.trim(), command.trim());
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| "Database lock poisoned".to_string())?;
-        let allowed = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1
-                    FROM permission_rules AS rules
-                    JOIN sessions ON sessions.project_id = rules.project_id
-                    WHERE sessions.acp_session_id = ?1
-                      AND rules.tool_key = ?2
-                      AND rules.decision = 'allow'
-                )",
-                params![acp_session_id, tool_key],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(allowed != 0)
-    }
-
     #[cfg(test)]
     pub(crate) fn in_memory() -> Self {
         let connection = Connection::open_in_memory().expect("in-memory database");

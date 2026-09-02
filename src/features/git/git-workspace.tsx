@@ -9,8 +9,9 @@ import {
   TreesIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage as messageFrom } from "@/domain/app-error";
@@ -52,6 +53,9 @@ export function GitWorkspace({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<string>();
+  const commitButtonRef = useRef<HTMLButtonElement>(null);
+  const branchButtonRef = useRef<HTMLButtonElement>(null);
+  const worktreeButtonRef = useRef<HTMLButtonElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -80,7 +84,11 @@ export function GitWorkspace({
     void refresh();
   }, [refresh]);
 
-  const runAction = async (action: () => Promise<void>, success: string) => {
+  const runAction = async (
+    action: () => Promise<void>,
+    success: string,
+    propagateError = false,
+  ) => {
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -90,6 +98,9 @@ export function GitWorkspace({
       await Promise.all([refresh(), Promise.resolve(onRefreshChanges())]);
     } catch (reason) {
       setError(messageFrom(reason));
+      if (propagateError) {
+        throw reason;
+      }
     } finally {
       setBusy(false);
     }
@@ -197,10 +208,7 @@ export function GitWorkspace({
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await commitGitChanges(cwd, commitMessage);
-                  setCommitMessage("");
-                }, "提交已创建。");
+                commitButtonRef.current?.click();
               }}
             >
               <Input
@@ -210,12 +218,25 @@ export function GitWorkspace({
                 placeholder="提交说明"
                 value={commitMessage}
               />
-              <Button
+              <LoadingButton
                 disabled={busy || stagedCount === 0 || !commitMessage.trim()}
-                type="submit"
+                errorLabel="重试"
+                onAction={() =>
+                  runAction(
+                    async () => {
+                      await commitGitChanges(cwd, commitMessage);
+                      setCommitMessage("");
+                    },
+                    "提交已创建。",
+                    true,
+                  )
+                }
+                pendingLabel="提交中…"
+                ref={commitButtonRef}
+                successLabel="已提交"
               >
                 提交
-              </Button>
+              </LoadingButton>
             </form>
           </section>
 
@@ -248,10 +269,7 @@ export function GitWorkspace({
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await createGitBranch(cwd, newBranch);
-                  setNewBranch("");
-                }, `已创建 ${newBranch}。`);
+                branchButtonRef.current?.click();
               }}
             >
               <Input
@@ -261,10 +279,27 @@ export function GitWorkspace({
                 placeholder="新分支"
                 value={newBranch}
               />
-              <Button disabled={busy || !newBranch.trim()} type="submit">
-                <PlusIcon />
+              <LoadingButton
+                disabled={busy || !newBranch.trim()}
+                errorLabel="重试"
+                icon={<PlusIcon />}
+                onAction={() => {
+                  const branchName = newBranch;
+                  return runAction(
+                    async () => {
+                      await createGitBranch(cwd, branchName);
+                      setNewBranch("");
+                    },
+                    `已创建 ${branchName}。`,
+                    true,
+                  );
+                }}
+                pendingLabel="创建中…"
+                ref={branchButtonRef}
+                successLabel="已创建"
+              >
                 创建
-              </Button>
+              </LoadingButton>
             </form>
           </section>
 
@@ -290,32 +325,37 @@ export function GitWorkspace({
                     </span>
                   </span>
                   {worktree.path !== cwd ? (
-                    <Button
-                      aria-label={`移除 ${worktree.path}`}
-                      disabled={busy}
-                      onClick={() => {
-                        if (pendingRemoval !== worktree.path) {
-                          setPendingRemoval(worktree.path);
-                          return;
-                        }
-                        setPendingRemoval(undefined);
-                        void runAction(
-                          () => removeGitWorktree(cwd, worktree.path),
-                          "工作树已移除。",
-                        );
-                      }}
-                      size={pendingRemoval === worktree.path ? "sm" : "icon"}
-                      variant={
-                        pendingRemoval === worktree.path
-                          ? "destructive"
-                          : "ghost"
-                      }
-                    >
-                      <Trash2Icon />
-                      {pendingRemoval === worktree.path ? (
-                        <span className="motion-view-enter">确认移除</span>
-                      ) : null}
-                    </Button>
+                    pendingRemoval === worktree.path ? (
+                      <LoadingButton
+                        aria-label={`确认移除 ${worktree.path}`}
+                        disabled={busy}
+                        errorLabel="重试"
+                        onAction={() => {
+                          setPendingRemoval(undefined);
+                          return runAction(
+                            () => removeGitWorktree(cwd, worktree.path),
+                            "工作树已移除。",
+                            true,
+                          );
+                        }}
+                        pendingLabel="移除中…"
+                        size="sm"
+                        successLabel="已移除"
+                        variant="destructive"
+                      >
+                        确认移除
+                      </LoadingButton>
+                    ) : (
+                      <Button
+                        aria-label={`移除 ${worktree.path}`}
+                        disabled={busy}
+                        onClick={() => setPendingRemoval(worktree.path)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    )
                   ) : null}
                 </div>
               ))}
@@ -324,16 +364,7 @@ export function GitWorkspace({
               className="grid gap-2 border-t p-3 md:grid-cols-[1fr_1fr_auto]"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await createGitWorktree({
-                    cwd,
-                    path: worktreePath,
-                    branch: worktreeBranch,
-                    createBranch: true,
-                  });
-                  setWorktreePath("");
-                  setWorktreeBranch("");
-                }, "工作树已创建。");
+                worktreeButtonRef.current?.click();
               }}
             >
               <Input
@@ -350,14 +381,35 @@ export function GitWorkspace({
                 placeholder="新分支"
                 value={worktreeBranch}
               />
-              <Button
+              <LoadingButton
                 disabled={
                   busy || !worktreePath.trim() || !worktreeBranch.trim()
                 }
-                type="submit"
+                errorLabel="重试"
+                onAction={() => {
+                  const path = worktreePath;
+                  const branch = worktreeBranch;
+                  return runAction(
+                    async () => {
+                      await createGitWorktree({
+                        cwd,
+                        path,
+                        branch,
+                        createBranch: true,
+                      });
+                      setWorktreePath("");
+                      setWorktreeBranch("");
+                    },
+                    "工作树已创建。",
+                    true,
+                  );
+                }}
+                pendingLabel="创建中…"
+                ref={worktreeButtonRef}
+                successLabel="已创建"
               >
                 创建工作树
-              </Button>
+              </LoadingButton>
             </form>
           </section>
         </div>

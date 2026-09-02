@@ -1,12 +1,12 @@
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCwIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 import type { PermissionRule } from "@/domain/permission";
-import { cn } from "@/lib/utils";
 
 interface SettingsPermissionsPageProps {
   loading: boolean;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
   onRemoveRule: (id: string) => void | Promise<void>;
   rules: PermissionRule[];
 }
@@ -27,14 +27,17 @@ export function SettingsPermissionsPage({
               已为此项目允许或拒绝的精确工具调用会自动应用。
             </p>
           </div>
-          <Button
+          <LoadingButton
             disabled={loading}
-            onClick={() => void onRefresh()}
+            errorLabel="重试"
+            icon={<RefreshCwIcon />}
+            onAction={onRefresh}
+            pendingLabel="刷新中…"
+            successLabel="已刷新"
             variant="outline"
           >
-            <RefreshCwIcon className={cn(loading && "animate-spin")} />
             刷新
-          </Button>
+          </LoadingButton>
         </div>
 
         <div className="mt-6 flex flex-col gap-3">

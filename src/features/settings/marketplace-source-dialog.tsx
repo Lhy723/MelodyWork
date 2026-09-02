@@ -1,6 +1,8 @@
 import { FolderIcon, GitBranchIcon } from "lucide-react";
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,7 +25,7 @@ export interface MarketplaceSourceDialogProps {
   draft: MarketplaceSource;
   error?: string;
   onOpenChange: (open: boolean) => void;
-  onSave: () => void;
+  onSave: () => unknown;
   open: boolean;
   originalName?: string;
   saving: boolean;
@@ -44,6 +46,8 @@ export function MarketplaceSourceDialog({
   setSourceInput,
   sourceInput,
 }: MarketplaceSourceDialogProps) {
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
@@ -146,7 +150,7 @@ export function MarketplaceSourceDialog({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && sourceInput.trim() && !saving) {
                   event.preventDefault();
-                  onSave();
+                  saveButtonRef.current?.click();
                 }
               }}
               placeholder="Git 链接、owner/repo 或本地目录"
@@ -159,17 +163,20 @@ export function MarketplaceSourceDialog({
         )}
 
         <DialogFooter showCloseButton>
-          <Button
+          <LoadingButton
             disabled={
-              saving ||
-              (originalName
+              originalName
                 ? !draft.name.trim() || !draft.location.trim()
-                : !sourceInput.trim())
+                : !sourceInput.trim()
             }
-            onClick={onSave}
+            errorLabel="重试"
+            onAction={onSave}
+            pendingLabel="正在保存并扫描…"
+            ref={saveButtonRef}
+            successLabel="已保存"
           >
-            {saving ? "正在保存并扫描…" : "保存并扫描"}
-          </Button>
+            保存并扫描
+          </LoadingButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

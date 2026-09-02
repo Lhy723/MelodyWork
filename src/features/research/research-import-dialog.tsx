@@ -1,7 +1,7 @@
-import { ImportIcon, LoaderCircleIcon } from "lucide-react";
-import { useState } from "react";
+import { ImportIcon } from "lucide-react";
+import { useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { LoadingButton } from "@/components/interior/loading-button";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +28,7 @@ export function ImportPaperDialog({
   const [candidate, setCandidate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const importButtonRef = useRef<HTMLButtonElement>(null);
   const runImport = async () => {
     setLoading(true);
     setError(undefined);
@@ -38,6 +39,7 @@ export function ImportPaperDialog({
       setOpen(false);
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setLoading(false);
     }
@@ -59,7 +61,7 @@ export function ImportPaperDialog({
           onKeyDown={(event) => {
             if (event.key === "Enter" && candidate.trim() && !loading) {
               event.preventDefault();
-              void runImport();
+              importButtonRef.current?.click();
             }
           }}
           placeholder="https://arxiv.org/abs/... 或 10.xxxx/..."
@@ -75,17 +77,17 @@ export function ImportPaperDialog({
           </p>
         ) : null}
         <DialogFooter showCloseButton>
-          <Button
-            disabled={!candidate.trim() || loading}
-            onClick={() => void runImport()}
+          <LoadingButton
+            disabled={!candidate.trim()}
+            errorLabel="重试"
+            icon={<ImportIcon />}
+            onAction={runImport}
+            pendingLabel="正在查询学术索引…"
+            ref={importButtonRef}
+            successLabel="已导入"
           >
-            {loading ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <ImportIcon />
-            )}
-            {loading ? "正在查询学术索引…" : "导入"}
-          </Button>
+            导入
+          </LoadingButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

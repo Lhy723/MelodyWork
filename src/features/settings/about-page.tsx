@@ -53,8 +53,6 @@ export function AboutPage() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
 
-  const isBusy =
-    updateState.status === "checking" || updateState.status === "installing";
   const hasUpdateDetails =
     updateState.status === "available" ||
     updateState.status === "installing" ||
@@ -68,9 +66,10 @@ export function AboutPage() {
         releases.length > 0 ? releases : fallbackReleaseHistory,
       );
       setReleaseHistoryState("ready");
-    } catch {
+    } catch (reason) {
       setReleaseHistory(fallbackReleaseHistory);
       setReleaseHistoryState("error");
+      throw reason;
     }
   }, []);
 
@@ -111,6 +110,7 @@ export function AboutPage() {
         status: "error",
         message: toUserMessage(reason, "检查更新失败，请稍后重试。"),
       });
+      throw reason;
     }
   };
 
@@ -127,6 +127,7 @@ export function AboutPage() {
         status: "error",
         message: toUserMessage(reason, "安装更新失败，请稍后重试。"),
       });
+      throw reason;
     }
   };
 
@@ -155,7 +156,7 @@ export function AboutPage() {
   }, []);
 
   useEffect(() => {
-    void refreshReleaseHistory();
+    void refreshReleaseHistory().catch(() => undefined);
     void refreshEnvironmentCapabilities();
   }, [refreshEnvironmentCapabilities, refreshReleaseHistory]);
 
@@ -227,9 +228,8 @@ export function AboutPage() {
         <AboutUpdatePanel
           autoCheckForUpdates={autoCheckForUpdates}
           hasUpdateDetails={hasUpdateDetails}
-          isBusy={isBusy}
-          onCheck={() => void checkForUpdate()}
-          onInstall={() => void installUpdate()}
+          onCheck={checkForUpdate}
+          onInstall={installUpdate}
           onSetAutoCheck={(enabled) =>
             setAppSetting("autoCheckForUpdates", enabled)
           }
@@ -250,7 +250,7 @@ export function AboutPage() {
         <AboutHistoryPanel
           currentVersion={currentVersion}
           onOpenRelease={(url) => void openExternalUrl(url)}
-          onRefresh={() => void refreshReleaseHistory()}
+          onRefresh={refreshReleaseHistory}
           releaseHistory={releaseHistory}
           state={releaseHistoryState}
         />

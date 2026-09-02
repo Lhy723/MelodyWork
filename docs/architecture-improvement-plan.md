@@ -29,7 +29,7 @@ ACP cursor，否则先展示归档并让 ACP 重放校验运行态，快照只�
 | 1    | Session Projection | store 与 reducer 各维护一套事件投影，测试依赖大量回调                           | `session-projection.ts` 直接拥有消息、思考、工具、用量、失败与权限请求的投影规则               | 真实 timeline 结果、版本恢复、事件去重             |
 | 2    | Research Project   | 搜索结果、历史、追踪主题和论文集合由 UI 分步更新，容易产生半完成状态            | research store 提供原子 `recordSearchResult` 与 `refreshTrackingTopic` 工作流                  | 项目隔离、论文身份保留、追踪刷新一致性             |
 | 3    | Task Launch        | 新任务和 Research prompt 分别维护 pending ref/effect，存在重复投递风险          | `TaskLauncher` 统一创建、排队、ready 对齐与一次性投递                                          | session 对齐、at-most-once、使用真实创建结果       |
-| 4    | ACP Policy         | 进程桥接、JSON-RPC 校验、pending request、权限选项和宿主确认混在一个 command 中 | `acp_policy.rs` 拥有协议与 pending 生命周期；Tauri 层只负责 workspace、SQLite、dialog 和 stdio | 方法白名单、MCP 注入、TTL/容量、响应匹配、权限选项 |
+| 4    | ACP Policy         | 进程桥接、JSON-RPC 校验、pending request、权限选项和宿主确认混在一个 command 中 | `acp_policy.rs` 拥有协议与 pending 生命周期；Tauri 层只负责 workspace、SQLite 和 stdio，确认由应用内权限卡片处理 | 方法白名单、MCP 注入、TTL/容量、响应匹配、权限选项 |
 | 5    | Melody Capability  | 设置页自行组合发现/安装结果和刷新规则，Rust 配置同时维护互斥状态集合            | 前端 lifecycle 统一发现、合并与刷新；Rust lifecycle 统一 enabled/disabled 不变量               | 插件身份优先、技能刷新时序、配置集合一致性         |
 
 ## 当前结构
@@ -44,7 +44,7 @@ flowchart LR
   Projection --> Archive[Session Timeline Archive]
   Runtime --> ACP[ACP protocol policy]
   ACP --> Host[Tauri host adapters]
-  Host --> IO[stdio / SQLite / dialog / filesystem]
+  Host --> IO[stdio / SQLite / filesystem / native picker]
   Archive --> Restore[Complete-history restore]
 ```
 
@@ -69,7 +69,7 @@ flowchart LR
 
 - renderer 只能发送明确允许的方法，且消息不得超过 1 MB。
 - session 方法必须携带所需的 `cwd` 或 `sessionId`。
-- ACP 不允许注入 MCP server；高权限模式仍由宿主确认。
+- ACP 不允许注入 MCP server；高权限模式仍受权限模式和 workspace 校验约束，用户确认在应用内完成。
 - Permission Request 只能选择该请求提供的 allow/reject option。
 - pending server request 有 10 分钟 TTL 和 256 条容量上限；校验失败会回填，供用户修正后重试。
 
@@ -89,7 +89,7 @@ Settings async state 已全部完成。当前没有需要立即推进的架构�
 ## 明确暂不做的事
 
 - 不为追求目录整齐而按 controller/service/repository 机械分层。
-- 不改变现有 ACP wire format、Tauri command 名称或用户确认流程。
+- 不改变现有 ACP wire format 或 Tauri command 名称；确认交互统一在应用内完成，不再弹出原生确认框。
 - 不在没有迁移计划时重写持久化格式。
 - 不把文件系统或进程 adapter 暴露成新的公共 API。
 

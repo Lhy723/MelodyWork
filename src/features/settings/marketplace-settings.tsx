@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
@@ -135,6 +136,7 @@ export function MarketplaceSettings({
         setPlugins(nextPlugins);
       } catch (reason) {
         setError(toUserMessage(reason));
+        throw reason;
       } finally {
         setLoading(false);
       }
@@ -143,7 +145,7 @@ export function MarketplaceSettings({
   );
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   const openEditor = (source?: MarketplaceSource) => {
@@ -170,6 +172,7 @@ export function MarketplaceSettings({
       setNotice("Marketplace 已保存并完成插件扫描。");
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setSaving(false);
       setLoading(false);
@@ -210,8 +213,6 @@ export function MarketplaceSettings({
       });
       setPlugins(result.nextPlugins);
       setNotice(result.message);
-    } catch {
-      // The operation state owns the user-visible error.
     } finally {
       setBusyPlugin(undefined);
     }
@@ -230,15 +231,18 @@ export function MarketplaceSettings({
             从 Git 仓库或本地目录发现、安装和更新 Melody 插件。
           </p>
         </div>
-        <Button
+        <LoadingButton
           disabled={loading}
-          onClick={() => void load(true)}
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          onAction={() => load(true)}
+          pendingLabel="刷新中…"
           size="sm"
+          successLabel="已刷新"
           variant="outline"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
           刷新目录
-        </Button>
+        </LoadingButton>
         <Button onClick={() => openEditor()} size="sm">
           <PlusIcon />
           添加来源
@@ -389,7 +393,6 @@ export function MarketplaceSettings({
             <div className="grid gap-1.5 p-2">
               {activeMarketplace.plugins.map((plugin) => (
                 <MarketplacePluginRow
-                  busy={busyPlugin === marketplaceReference(plugin)}
                   disabled={busyPlugin !== undefined}
                   key={marketplaceReference(plugin)}
                   onAction={runPluginAction}
@@ -419,7 +422,7 @@ export function MarketplaceSettings({
         draft={draft}
         error={error}
         onOpenChange={setDialogOpen}
-        onSave={() => void save()}
+        onSave={save}
         open={dialogOpen}
         originalName={originalName}
         saving={saving}

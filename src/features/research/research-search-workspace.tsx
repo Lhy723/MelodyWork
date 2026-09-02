@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type {
@@ -153,6 +154,7 @@ export function SearchWorkspace({
       setPapers([]);
       setSourceSummary([]);
       setSourceRuns([]);
+      throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) setLoading(false);
     }
@@ -166,7 +168,7 @@ export function SearchWorkspace({
         error={error}
         loading={loading}
         onNavigate={onNavigate}
-        onRunSearch={() => void runSearch()}
+        onRunSearch={() => runSearch()}
         projectName={projectName}
         query={query}
         queryPlan={queryPlan}
@@ -191,7 +193,11 @@ export function SearchWorkspace({
                 <button
                   className="flex w-full items-center gap-3 px-2 py-3 text-left hover:bg-muted/40"
                   key={item.id}
-                  onClick={() => void runSearch(item.query, item.searchQuery)}
+                  onClick={() => {
+                    void runSearch(item.query, item.searchQuery).catch(
+                      () => undefined,
+                    );
+                  }}
                   type="button"
                 >
                   <HistoryIcon className="size-4 text-muted-foreground" />
@@ -301,13 +307,16 @@ export function SearchWorkspace({
                   <EmptyWorkflow
                     actions={
                       <>
-                        <Button
-                          onClick={() => void runSearch(EXAMPLE_RESEARCH_QUERY)}
+                        <LoadingButton
+                          errorLabel="重试"
+                          icon={<SearchIcon />}
+                          onAction={() => runSearch(EXAMPLE_RESEARCH_QUERY)}
+                          pendingLabel="正在检索…"
+                          successLabel="检索完成"
                           size="sm"
                         >
-                          <SearchIcon />
                           {query.trim() ? "试用示例问题" : "运行示例检索"}
-                        </Button>
+                        </LoadingButton>
                         <Button
                           onClick={() => onNavigate("library")}
                           size="sm"
