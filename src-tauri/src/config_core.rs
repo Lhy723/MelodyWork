@@ -81,6 +81,10 @@ pub struct MarketplacePlugin {
     pub(crate) installed_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
+    /// Whether the marketplace catalog contains a version newer than the
+    /// installed plugin. A missing or non-semver version is deliberately
+    /// treated as unknown rather than as an update.
+    pub(crate) update_available: bool,
     pub(crate) skill_count: usize,
     pub(crate) has_hooks: bool,
     pub(crate) has_agents: bool,

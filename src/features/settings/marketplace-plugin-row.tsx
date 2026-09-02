@@ -19,6 +19,13 @@ export function MarketplacePluginRow({
   onAction: (plugin: MarketplacePlugin) => Promise<void>;
   plugin: MarketplacePlugin;
 }) {
+  const isInstalled = plugin.status === "installed";
+  const updateAvailable = isInstalled && plugin.updateAvailable === true;
+  const actionLabel = isInstalled
+    ? updateAvailable
+      ? "更新"
+      : "检查更新"
+    : "安装";
   const capabilities = [
     plugin.skillCount > 0
       ? { icon: SparklesIcon, label: `${plugin.skillCount} Skills` }
@@ -76,13 +83,19 @@ export function MarketplacePluginRow({
         errorLabel="重试"
         onAction={() => onAction(plugin)}
         pendingLabel={
-          plugin.status === "installed" ? "正在更新…" : "正在安装…"
+          isInstalled
+            ? updateAvailable
+              ? "正在更新…"
+              : "正在检查…"
+            : "正在安装…"
         }
         size="sm"
-        successLabel={plugin.status === "installed" ? "已更新" : "已安装"}
-        variant={plugin.status === "installed" ? "outline" : "default"}
+        successLabel={
+          isInstalled ? (updateAvailable ? "已更新" : "已检查") : "已安装"
+        }
+        variant={isInstalled ? "outline" : "default"}
       >
-        {plugin.status === "installed" ? "更新" : "安装"}
+        {actionLabel}
       </LoadingButton>
     </div>
   );

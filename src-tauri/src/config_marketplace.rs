@@ -5,6 +5,7 @@ pub use config_marketplace_sources::*;
 
 use std::path::PathBuf;
 
+use semver::Version;
 use tauri::{AppHandle, State};
 
 use crate::melody_command::MelodyCommandRunner;
@@ -58,7 +59,16 @@ pub async fn install_melody_plugin(
     })
 }
 
-async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result<String, String> {
+struct PluginCommandOutput {
+    stdout: String,
+    stderr: String,
+}
+
+async fn run_plugin_command_output(
+    app: &AppHandle,
+    cwd: &str,
+    args: &[&str],
+) -> Result<PluginCommandOutput, String> {
     let workspace = PathBuf::from(cwd);
     if !workspace.is_dir() {
         return Err(format!("Workspace does not exist: {}", workspace.display()));
@@ -81,7 +91,11 @@ async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result
             stderr
         });
     }
-    Ok(stdout)
+    Ok(PluginCommandOutput { stdout, stderr })
+}
+
+async fn run_plugin_command(app: &AppHandle, cwd: &str, args: &[&str]) -> Result<String, String> {
+    Ok(run_plugin_command_output(app, cwd, args).await?.stdout)
 }
 
 #[tauri::command]
@@ -107,60 +121,130 @@ pub(crate) fn marketplace_plugins_from_json(
 ) -> Result<Vec<MarketplacePlugin>, String> {
     let entries = serde_json::from_str::<Vec<serde_json::Value>>(output)
         .map_err(|error| format!("Melody returned an invalid Marketplace catalog: {error}"))?;
-    Ok(entries
-        .into_iter()
-        .filter_map(|entry| {
-            let status = entry.get("status")?.as_str()?;
-            let marketplace = entry.get("marketplace")?.as_str()?.to_string();
-            let name = entry.get("name")?.as_str()?.to_string();
-            let version = entry
-                .get("version")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            match status {
-                "installed" => Some(MarketplacePlugin {
-                    name,
-                    marketplace,
-                    status: "installed".to_string(),
-                    version: None,
-                    installed_version: version,
-                    description: None,
-                    skill_count: 0,
-                    has_hooks: false,
-                    has_agents: false,
-                    has_mcp: false,
-                }),
-                "available" => Some(MarketplacePlugin {
-                    name,
-                    marketplace,
-                    status: "available".to_string(),
-                    version,
-                    installed_version: None,
-                    description: entry
-                        .get("description")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string),
-                    skill_count: entry
-                        .get("skill_count")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0) as usize,
-                    has_hooks: entry
-                        .get("has_hooks")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                    has_agents: entry
-                        .get("has_agents")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                    has_mcp: entry
-                        .get("has_mcp")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
-                }),
-                _ => None,
+    let mut plugins = Vec::new();
+
+    for entry in entries {
+        let Some(status) = entry.get("status").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(marketplace) = entry.get("marketplace").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let marketplace = marketplace.to_string();
+        let name = name.to_string();
+        let version = entry
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let existing = plugins.iter().position(|plugin: &MarketplacePlugin| {
+            plugin.name == name && plugin.marketplace == marketplace
+        });
+
+        match status {
+            "installed" => {
+                if let Some(index) = existing {
+                    let plugin = &mut plugins[index];
+                    plugin.status = "installed".to_string();
+                    if version.is_some() {
+                        plugin.installed_version = version;
+                    }
+                    plugin.update_available = is_newer_version(
+                        plugin.version.as_deref(),
+                        plugin.installed_version.as_deref(),
+                    );
+                } else {
+                    plugins.push(MarketplacePlugin {
+                        name,
+                        marketplace,
+                        status: "installed".to_string(),
+                        version: None,
+                        installed_version: version,
+                        description: None,
+                        update_available: false,
+                        skill_count: 0,
+                        has_hooks: false,
+                        has_agents: false,
+                        has_mcp: false,
+                    });
+                }
             }
-        })
-        .collect())
+            "available" => {
+                let description = entry
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let skill_count = entry
+                    .get("skill_count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let has_hooks = entry
+                    .get("has_hooks")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let has_agents = entry
+                    .get("has_agents")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let has_mcp = entry
+                    .get("has_mcp")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+
+                if let Some(index) = existing {
+                    let plugin = &mut plugins[index];
+                    if version.is_some() {
+                        plugin.version = version;
+                    }
+                    if description.is_some() {
+                        plugin.description = description;
+                    }
+                    plugin.skill_count = skill_count;
+                    plugin.has_hooks = has_hooks;
+                    plugin.has_agents = has_agents;
+                    plugin.has_mcp = has_mcp;
+                    plugin.update_available = plugin.status == "installed"
+                        && is_newer_version(
+                            plugin.version.as_deref(),
+                            plugin.installed_version.as_deref(),
+                        );
+                } else {
+                    plugins.push(MarketplacePlugin {
+                        name,
+                        marketplace,
+                        status: "available".to_string(),
+                        version,
+                        installed_version: None,
+                        description,
+                        update_available: false,
+                        skill_count,
+                        has_hooks,
+                        has_agents,
+                        has_mcp,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(plugins)
+}
+
+fn is_newer_version(latest: Option<&str>, installed: Option<&str>) -> bool {
+    let Some(latest) = latest.and_then(parse_version) else {
+        return false;
+    };
+    let Some(installed) = installed.and_then(parse_version) else {
+        return false;
+    };
+    latest > installed
+}
+
+fn parse_version(value: &str) -> Option<Version> {
+    Version::parse(value.trim().trim_start_matches(['v', 'V'])).ok()
 }
 
 #[tauri::command]
@@ -175,15 +259,33 @@ pub async fn update_melody_plugin(
         return Err("Plugin name cannot be empty".to_string());
     }
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    let message = run_plugin_command(&app, &cwd, &["plugin", "update", name]).await?;
+    let output = run_plugin_command_output(&app, &cwd, &["plugin", "update", name]).await?;
+    if output
+        .stderr
+        .lines()
+        .any(|line| line.to_ascii_lowercase().contains("update failed:"))
+    {
+        return Err(output.stderr);
+    }
     Ok(PluginInstallResult {
         source: name.to_string(),
-        message: if message.is_empty() {
-            format!("Plugin {name} is already up to date")
-        } else {
-            message
-        },
+        message: format_plugin_update_message(name, &output.stdout),
     })
+}
+
+pub(crate) fn format_plugin_update_message(name: &str, output: &str) -> String {
+    let message = output.trim();
+    let lowercase = message.to_ascii_lowercase();
+    if message.is_empty() || lowercase.contains("already up to date") {
+        return format!("{name} 已是最新版本。");
+    }
+    if lowercase.contains("updated (? -> ?)") {
+        return format!("{name} 已完成同步；插件来源未提供版本号，暂时无法确认是否有版本变化。");
+    }
+    if lowercase.contains("updated (") {
+        return format!("{name} 已更新。",);
+    }
+    message.to_string()
 }
 
 #[tauri::command]
