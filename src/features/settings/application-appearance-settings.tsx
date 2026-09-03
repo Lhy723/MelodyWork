@@ -1,11 +1,5 @@
+import { Dropdown } from "@/components/interior/dropdown";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { isMacOSRuntime, isTauriRuntime } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 import {
@@ -127,21 +121,13 @@ function UiFontPreference() {
 
   return (
     <div className="flex items-center gap-2">
-      <Select
-        onValueChange={(value) => setUiFontPreset(value as UiFontPreset)}
+      <Dropdown
+        className="w-36"
+        items={uiFontPresetOptions}
+        label="UI 字体预设"
+        onChange={(value) => setUiFontPreset(value as UiFontPreset)}
         value={uiFontPreset}
-      >
-        <SelectTrigger aria-label="UI 字体预设" className="w-36">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {uiFontPresetOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
       {uiFontPreset === "custom" ? (
         <Input
           aria-label="自定义 UI 字体"

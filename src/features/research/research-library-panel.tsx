@@ -12,17 +12,9 @@ import { CollapsibleBanner } from "@/components/interior/collapsible-banner";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { MOTION_EASE } from "@/components/motion/page-transition";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
@@ -274,24 +266,16 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         open={importOpen}
         setOpen={setImportOpen}
       />
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPendingDeletePaper(undefined);
-        }}
-        open={Boolean(pendingDeletePaper)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>从文献库删除？</DialogTitle>
-            <DialogDescription>
-              “{pendingDeletePaper?.title ?? ""}
-              ”会从当前项目的文献库移除，原文链接不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeletePaper?.title ?? ""}”会从当前项目的文献库移除，原文链接不会受到影响。`}
+        footer={
+          <>
+            <Button
+              onClick={() => setPendingDeletePaper(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 if (pendingDeletePaper) {
@@ -304,9 +288,12 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
             >
               删除论文
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setPendingDeletePaper(undefined)}
+        open={Boolean(pendingDeletePaper)}
+        title="从文献库删除？"
+      />
     </div>
   );
 }

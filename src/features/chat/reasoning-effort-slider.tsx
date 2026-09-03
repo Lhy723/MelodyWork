@@ -12,12 +12,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { PromptInputButton } from "@/components/ai-elements/prompt-input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover } from "@/components/interior/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -124,107 +119,104 @@ export function ReasoningEffortSlider({
   };
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <PromptInputButton
-          aria-label={`思考强度：${committedOption?.label ?? "未选择"}`}
-          className="motion-view-enter max-w-40"
-          disabled={disabled}
-        >
+    <Popover
+      align="start"
+      className="w-56 p-3"
+      disabled={disabled}
+      label="思考强度设置"
+      side="top"
+      trigger={
+        <>
           {loading ? <LoaderCircleIcon className="animate-spin" /> : null}
           <span className="truncate">
             {committedOption?.label ?? "思考强度"}
           </span>
           <ChevronDownIcon className="size-3.5" />
-        </PromptInputButton>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-56 rounded-xl p-3"
-        side="top"
-        sideOffset={8}
+        </>
+      }
+      triggerAriaLabel={`思考强度：${committedOption?.label ?? "未选择"}`}
+      triggerClassName="motion-view-enter max-w-40 gap-2 rounded-[calc(var(--radius)-3px)] border-transparent bg-transparent px-2.5 text-muted-foreground shadow-none hover:bg-muted/80"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-sm text-muted-foreground">
+          <span>思考强度 </span>
+          <span className="font-medium text-violet-500">
+            {selectedOption?.label}
+          </span>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label="查看思考强度说明"
+              className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+            >
+              <CircleHelpIcon className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64" side="top" sideOffset={6}>
+            {helpText}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-between text-xs text-muted-foreground">
+        <span>更快</span>
+        <span>更聪明</span>
+      </div>
+
+      <div
+        className={cn(
+          "reasoning-effort-track mt-1.5",
+          isMaximum && "is-maximum",
+        )}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 text-sm text-muted-foreground">
-            <span>思考强度 </span>
-            <span className="font-medium text-violet-500">
-              {selectedOption?.label}
-            </span>
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                aria-label="查看思考强度说明"
-                className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                type="button"
-              >
-                <CircleHelpIcon className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-64" side="top" sideOffset={6}>
-              {helpText}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-
-        <div className="mt-2.5 flex items-center justify-between text-xs text-muted-foreground">
-          <span>更快</span>
-          <span>更聪明</span>
-        </div>
-
         <div
-          className={cn(
-            "reasoning-effort-track mt-1.5",
-            isMaximum && "is-maximum",
-          )}
+          aria-hidden="true"
+          className="reasoning-effort-fill"
+          style={{ width: fillWidth }}
+        />
+        <div
+          aria-hidden="true"
+          className="reasoning-effort-grid"
+          style={{ width: fillWidth }}
+        />
+        <div
+          aria-hidden="true"
+          className="reasoning-effort-pixels"
+          style={{ width: fillWidth }}
         >
-          <div
-            aria-hidden="true"
-            className="reasoning-effort-fill"
-            style={{ width: fillWidth }}
-          />
-          <div
-            aria-hidden="true"
-            className="reasoning-effort-grid"
-            style={{ width: fillWidth }}
-          />
-          <div
-            aria-hidden="true"
-            className="reasoning-effort-pixels"
-            style={{ width: fillWidth }}
-          >
-            {flickerPixels.map((pixel) => (
-              <span
-                className="reasoning-effort-pixel"
-                key={`${pixel.left}-${pixel.top}`}
-                style={{
-                  animationDelay: pixel.delay,
-                  animationDuration: pixel.duration,
-                  left: pixel.left,
-                  top: pixel.top,
-                }}
-              />
-            ))}
-          </div>
-          <input
-            aria-label="思考强度"
-            aria-valuetext={selectedOption?.label}
-            className="reasoning-effort-range"
-            disabled={disabled}
-            max={100}
-            min={0}
-            onBlur={commitDraft}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onKeyUp={commitDraft}
-            onPointerCancel={commitDraft}
-            onPointerUp={commitDraft}
-            step={1}
-            type="range"
-            value={draftProgress}
-          />
+          {flickerPixels.map((pixel) => (
+            <span
+              className="reasoning-effort-pixel"
+              key={`${pixel.left}-${pixel.top}`}
+              style={{
+                animationDelay: pixel.delay,
+                animationDuration: pixel.duration,
+                left: pixel.left,
+                top: pixel.top,
+              }}
+            />
+          ))}
         </div>
-      </PopoverContent>
+        <input
+          aria-label="思考强度"
+          aria-valuetext={selectedOption?.label}
+          className="reasoning-effort-range"
+          disabled={disabled}
+          max={100}
+          min={0}
+          onBlur={commitDraft}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onKeyUp={commitDraft}
+          onPointerCancel={commitDraft}
+          onPointerUp={commitDraft}
+          step={1}
+          type="range"
+          value={draftProgress}
+        />
+      </div>
     </Popover>
   );
 }

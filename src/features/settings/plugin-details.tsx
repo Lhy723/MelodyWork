@@ -16,16 +16,9 @@ import { useCallback, useEffect, useState } from "react";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type {
   MelodyExtension,
   PluginComponentGroup,
@@ -319,25 +312,13 @@ export function PluginDetailsView({
         </p>
       ) : null}
 
-      <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除“{plugin.name}”？</DialogTitle>
-            <DialogDescription>
-              这会从 Melody
-              的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。
-            </DialogDescription>
-          </DialogHeader>
-          {deleteError ? (
-            <p
-              aria-live="assertive"
-              className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
-              role="alert"
-            >
-              {deleteError}
-            </p>
-          ) : null}
-          <DialogFooter showCloseButton>
+      <Modal
+        description="这会从 Melody 的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。"
+        footer={
+          <>
+            <Button onClick={() => setDeleteOpen(false)} variant="outline">
+              取消
+            </Button>
             <HoldToConfirm
               aria-label={`确认删除插件 ${plugin.name}`}
               confirmLabel={
@@ -350,9 +331,22 @@ export function PluginDetailsView({
               <Trash2Icon />
               确认删除
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setDeleteOpen(false)}
+        open={deleteOpen}
+        title={`删除“${plugin.name}”？`}
+      >
+        {deleteError ? (
+          <p
+            aria-live="assertive"
+            className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+            role="alert"
+          >
+            {deleteError}
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }

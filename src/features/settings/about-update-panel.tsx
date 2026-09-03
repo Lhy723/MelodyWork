@@ -1,14 +1,8 @@
 import { CheckCircleIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
 
+import { Dropdown } from "@/components/interior/dropdown";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { ProgressBar } from "@/components/interior/progress-bar";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { UpdateChannel } from "@/stores/app-settings-store";
 
@@ -89,18 +83,16 @@ export function AboutUpdatePanel({
               正式版更稳定；测试版会更早提供新功能，可能包含未解决的问题。
             </p>
           </div>
-          <Select
-            onValueChange={(next) => onSetChannel(next as UpdateChannel)}
+          <Dropdown
+            className="w-28"
+            items={[
+              { label: "正式版", value: "stable" },
+              { label: "测试版", value: "beta" },
+            ]}
+            label="检测更新渠道"
+            onChange={(next) => onSetChannel(next as UpdateChannel)}
             value={updateChannel}
-          >
-            <SelectTrigger aria-label="检测更新渠道" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="stable">正式版</SelectItem>
-              <SelectItem value="beta">测试版</SelectItem>
-            </SelectContent>
-          </Select>
+          />
         </div>
       </div>
       {hasUpdateDetails ? (

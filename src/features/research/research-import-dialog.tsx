@@ -4,14 +4,8 @@ import { useRef, useState } from "react";
 import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Modal } from "@/components/interior/modal";
+import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 
@@ -67,15 +61,31 @@ export function ImportPaperDialog({
     }
   };
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>导入论文</DialogTitle>
-          <DialogDescription>
-            支持 arXiv 链接、doi.org 链接或
-            DOI。元信息来自真实学术索引，不会生成缺失字段。
-          </DialogDescription>
-        </DialogHeader>
+    <Modal
+      description="支持 arXiv 链接、doi.org 链接或 DOI。元信息来自真实学术索引，不会生成缺失字段。"
+      footer={
+        <>
+          <Button onClick={() => setOpen(false)} variant="outline">
+            取消
+          </Button>
+          <LoadingButton
+            disabled={!candidate.trim()}
+            errorLabel="重试"
+            icon={<ImportIcon />}
+            onAction={runImport}
+            pendingLabel="正在查询学术索引…"
+            ref={importButtonRef}
+            successLabel="已导入"
+          >
+            导入
+          </LoadingButton>
+        </>
+      }
+      onClose={() => setOpen(false)}
+      open={open}
+      title="导入论文"
+    >
+      <div className="grid gap-4">
         <FloatingLabelInput
           autoFocus
           hint="支持 arXiv、doi.org 链接或 DOI"
@@ -98,20 +108,7 @@ export function ImportPaperDialog({
             {error}
           </p>
         ) : null}
-        <DialogFooter showCloseButton>
-          <LoadingButton
-            disabled={!candidate.trim()}
-            errorLabel="重试"
-            icon={<ImportIcon />}
-            onAction={runImport}
-            pendingLabel="正在查询学术索引…"
-            ref={importButtonRef}
-            successLabel="已导入"
-          >
-            导入
-          </LoadingButton>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </Modal>
   );
 }

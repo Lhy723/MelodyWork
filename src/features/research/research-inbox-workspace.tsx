@@ -13,17 +13,9 @@ import {
 import { useEffect, useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { ResearchPaper } from "@/domain/research";
 import { openExternalUrl } from "@/lib/melody-bridge";
@@ -363,18 +355,13 @@ export function InboxWorkspace({
         </section>
       </div>
 
-      <Dialog onOpenChange={setClearInboxOpen} open={clearInboxOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>清空研究收件箱？</DialogTitle>
-            <DialogDescription>
-              本次检索的候选论文和数据源结果会被移除，已经加入文献库的内容不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description="本次检索的候选论文和数据源结果会被移除，已经加入文献库的内容不会受到影响。"
+        footer={
+          <>
+            <Button onClick={() => setClearInboxOpen(false)} variant="outline">
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 clearResearchInbox();
@@ -384,9 +371,12 @@ export function InboxWorkspace({
             >
               清空收件箱
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setClearInboxOpen(false)}
+        open={clearInboxOpen}
+        title="清空研究收件箱？"
+      />
     </div>
   );
 }

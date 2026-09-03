@@ -7,16 +7,8 @@ import {
 import { useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
@@ -337,26 +329,16 @@ export function DynamicSection({
         ) : null}
       </div>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPendingDeleteName(undefined);
-        }}
-        open={Boolean(pendingDeleteName)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              删除{kind === "models" ? "自定义模型" : " MCP 服务器"}？
-            </DialogTitle>
-            <DialogDescription>
-              “{pendingDeleteName ?? ""}
-              ”的配置将从当前设置中移除，之后需要重新添加才能使用。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeleteName ?? ""}”的配置将从当前设置中移除，之后需要重新添加才能使用。`}
+        footer={
+          <>
+            <Button
+              onClick={() => setPendingDeleteName(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 if (pendingDeleteName) {
@@ -368,9 +350,12 @@ export function DynamicSection({
             >
               确认删除
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setPendingDeleteName(undefined)}
+        open={Boolean(pendingDeleteName)}
+        title={`删除${kind === "models" ? "自定义模型" : " MCP 服务器"}？`}
+      />
     </div>
   );
 }

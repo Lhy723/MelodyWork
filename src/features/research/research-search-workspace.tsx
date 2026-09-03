@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Dropdown } from "@/components/interior/dropdown";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
@@ -281,29 +282,32 @@ export function SearchWorkspace({
                   {papers.filter((paper) => paper.verified).length} 篇已多源匹配
                 </span>
               ) : null}
-              <select
-                aria-label="按年份筛选"
-                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:ml-auto"
-                onChange={(event) => setYear(event.target.value)}
+              <Dropdown
+                className="shrink-0 sm:ml-auto"
+                items={[
+                  { label: "全部年份", value: "all" },
+                  ...years.map((value) => ({
+                    label: String(value),
+                    value: String(value),
+                  })),
+                ]}
+                label="按年份筛选"
+                onChange={setYear}
+                triggerClassName="h-7 rounded-md px-2 text-xs"
                 value={year}
-              >
-                <option value="all">全部年份</option>
-                {years.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="排序方式"
-                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                onChange={(event) => setSort(event.target.value as ResultSort)}
+              />
+              <Dropdown
+                className="shrink-0"
+                items={[
+                  { label: "相关度排序", value: "relevance" },
+                  { label: "最新发表", value: "year" },
+                  { label: "引用次数", value: "citations" },
+                ]}
+                label="排序方式"
+                onChange={(value) => setSort(value as ResultSort)}
+                triggerClassName="h-7 rounded-md px-2 text-xs"
                 value={sort}
-              >
-                <option value="relevance">相关度排序</option>
-                <option value="year">最新发表</option>
-                <option value="citations">引用次数</option>
-              </select>
+              />
               <label className="flex min-h-6 items-center gap-1.5 px-2 text-xs">
                 <input
                   checked={verifiedOnly}

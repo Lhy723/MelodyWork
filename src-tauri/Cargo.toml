@@ -1,6 +1,6 @@
 [package]
 name = "melody-work"
-version = "0.3.3-beta.1"
+version = "0.3.3-beta.2"
 description = "A conversation-first desktop client for Melody Build"
 authors = ["Lhy723"]
 edition = "2024"

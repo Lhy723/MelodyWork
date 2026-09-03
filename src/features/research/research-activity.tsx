@@ -19,17 +19,9 @@ import {
 import { useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { ProgressBar } from "@/components/interior/progress-bar";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   ResearchPaper,
@@ -480,23 +472,16 @@ export function ProgressRail({
         </Button>
       </section>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPendingDeleteTask(undefined);
-        }}
-        open={Boolean(pendingDeleteTask)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除研究任务？</DialogTitle>
-            <DialogDescription>
-              “{pendingDeleteTask?.title ?? ""}”会从当前项目的下一步列表中移除。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeleteTask?.title ?? ""}”会从当前项目的下一步列表中移除。`}
+        footer={
+          <>
+            <Button
+              onClick={() => setPendingDeleteTask(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 if (pendingDeleteTask) removeResearchTask(pendingDeleteTask.id);
@@ -506,9 +491,12 @@ export function ProgressRail({
             >
               删除任务
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setPendingDeleteTask(undefined)}
+        open={Boolean(pendingDeleteTask)}
+        title="删除研究任务？"
+      />
     </aside>
   );
 }

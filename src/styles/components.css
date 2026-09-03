@@ -21,6 +21,10 @@
     transform: translate(-50%, -50%) scale(0.95);
   }
 
+  .motion-drawer-content {
+    will-change: transform;
+  }
+
   .motion-popover {
     --motion-popover-x: 0px;
     --motion-popover-y: 0px;
@@ -381,54 +385,6 @@
   background-color: color-mix(in srgb, var(--foreground) 38%, transparent);
 }
 
-.settings-scope-switcher {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.settings-scope-button {
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  transition:
-    color var(--motion-duration-fast) var(--motion-ease-out),
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.settings-scope-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  color: var(--foreground);
-}
-
-.settings-scope-button[data-selected="true"] {
-  background: color-mix(in srgb, var(--foreground) 9%, transparent);
-  color: var(--foreground);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 8%),
-    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.settings-scope-button[data-selected="true"]:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 12%, transparent);
-}
-
-.settings-scope-button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ring) 72%, transparent);
-  outline-offset: -1px;
-}
-
-.settings-scope-button:disabled {
-  cursor: not-allowed;
-}
-
 .reasoning-effort-fill,
 .reasoning-effort-grid,
 .reasoning-effort-pixels {
@@ -568,6 +524,7 @@
   }
 
   .motion-dialog-content,
+  .motion-drawer-content,
   .motion-popover,
   .motion-collapsible-content,
   .motion-layer,

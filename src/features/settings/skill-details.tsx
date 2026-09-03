@@ -12,16 +12,9 @@ import { useCallback, useEffect, useState } from "react";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type { MelodyExtension, SkillDetails } from "@/domain/config";
 import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
@@ -302,25 +295,13 @@ export function SkillDetailsView({
         </p>
       ) : null}
 
-      <Dialog onOpenChange={setDeleteOpen} open={skill.deletable && deleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除“{skill.name}”？</DialogTitle>
-            <DialogDescription>
-              这会永久删除该技能目录及其中的所有文件。删除后，Melody
-              将不再发现或使用这个技能。
-            </DialogDescription>
-          </DialogHeader>
-          {deleteError ? (
-            <p
-              aria-live="assertive"
-              className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
-              role="alert"
-            >
-              {deleteError}
-            </p>
-          ) : null}
-          <DialogFooter showCloseButton>
+      <Modal
+        description="这会永久删除该技能目录及其中的所有文件。删除后，Melody 将不再发现或使用这个技能。"
+        footer={
+          <>
+            <Button onClick={() => setDeleteOpen(false)} variant="outline">
+              取消
+            </Button>
             <HoldToConfirm
               aria-label={`确认删除技能 ${skill.name}`}
               confirmLabel={
@@ -333,9 +314,22 @@ export function SkillDetailsView({
               <Trash2Icon />
               确认删除
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setDeleteOpen(false)}
+        open={Boolean(skill.deletable && deleteOpen)}
+        title={`删除“${skill.name}”？`}
+      >
+        {deleteError ? (
+          <p
+            aria-live="assertive"
+            className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+            role="alert"
+          >
+            {deleteError}
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }

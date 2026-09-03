@@ -13,16 +13,8 @@ import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
@@ -393,19 +385,13 @@ export function TrackingDetailWorkspace({
         </div>
       </main>
 
-      <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除追踪主题？</DialogTitle>
-            <DialogDescription>
-              “{topic.title}
-              ”及其关联的追踪关系将从当前项目中移除，已导入文献不会被删除。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${topic.title}”及其关联的追踪关系将从当前项目中移除，已导入文献不会被删除。`}
+        footer={
+          <>
+            <Button onClick={() => setDeleteOpen(false)} variant="outline">
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 removeTrackingTopic(topic.id);
@@ -416,9 +402,12 @@ export function TrackingDetailWorkspace({
             >
               删除主题
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setDeleteOpen(false)}
+        open={deleteOpen}
+        title="删除追踪主题？"
+      />
     </div>
   );
 }

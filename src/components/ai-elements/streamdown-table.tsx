@@ -7,6 +7,7 @@ import type { ComponentProps } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { CopyButton } from "@/components/interior/copy-button";
+import { Tooltip, TooltipGroup } from "@/components/interior/tooltip-group";
 
 type StreamdownTableProps = ComponentProps<"table"> & {
   node?: unknown;
@@ -80,48 +81,58 @@ function StreamdownTableActions({
   value: () => string;
 }) {
   const fullscreen = Boolean(onCloseFullscreen);
+  const tooltipSide = fullscreen ? "bottom" : "top";
 
   return (
-    <div className="flex items-center justify-end gap-1">
-      <CopyButton
-        aria-label="复制表格"
-        copiedLabel="已复制表格"
-        errorLabel="复制失败"
-        label="复制表格"
-        title="复制表格"
-        value={value}
-      />
-      <button
-        aria-label="下载表格"
-        className={actionButtonClassName}
-        onClick={onDownload}
-        title="下载表格"
-        type="button"
-      >
-        <DownloadIcon aria-hidden="true" className="size-4" />
-      </button>
+    <TooltipGroup
+      className="flex items-center justify-end gap-1"
+      closeDelay={120}
+      openDelay={200}
+      skipDelay={400}
+    >
+      <Tooltip label="复制表格" side={tooltipSide}>
+        <CopyButton
+          aria-label="复制表格"
+          copiedLabel="已复制表格"
+          errorLabel="复制失败"
+          label="复制表格"
+          value={value}
+        />
+      </Tooltip>
+      <Tooltip label="下载表格" side={tooltipSide}>
+        <button
+          aria-label="下载表格"
+          className={actionButtonClassName}
+          onClick={onDownload}
+          type="button"
+        >
+          <DownloadIcon aria-hidden="true" className="size-4" />
+        </button>
+      </Tooltip>
       {fullscreen ? (
-        <button
-          aria-label="关闭全屏表格"
-          className={actionButtonClassName}
-          onClick={onCloseFullscreen}
-          title="关闭全屏表格"
-          type="button"
-        >
-          <XIcon aria-hidden="true" className="size-4" />
-        </button>
+        <Tooltip label="关闭全屏表格" side={tooltipSide}>
+          <button
+            aria-label="关闭全屏表格"
+            className={actionButtonClassName}
+            onClick={onCloseFullscreen}
+            type="button"
+          >
+            <XIcon aria-hidden="true" className="size-4" />
+          </button>
+        </Tooltip>
       ) : (
-        <button
-          aria-label="全屏查看表格"
-          className={actionButtonClassName}
-          onClick={onOpenFullscreen}
-          title="全屏查看表格"
-          type="button"
-        >
-          <Maximize2Icon aria-hidden="true" className="size-4" />
-        </button>
+        <Tooltip label="全屏查看表格" side={tooltipSide}>
+          <button
+            aria-label="全屏查看表格"
+            className={actionButtonClassName}
+            onClick={onOpenFullscreen}
+            type="button"
+          >
+            <Maximize2Icon aria-hidden="true" className="size-4" />
+          </button>
+        </Tooltip>
       )}
-    </div>
+    </TooltipGroup>
   );
 }
 

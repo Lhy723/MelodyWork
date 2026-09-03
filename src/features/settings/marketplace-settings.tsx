@@ -16,18 +16,10 @@ import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadMore } from "@/components/interior/load-more";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
 import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
@@ -649,28 +641,19 @@ export function MarketplaceSettings({
         sourceInput={sourceInput}
       />
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open && !deletingSource) {
-            setPendingDeleteSource(undefined);
-          }
-        }}
-        open={Boolean(pendingDeleteSource)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除 Marketplace 来源？</DialogTitle>
-            <DialogDescription>
-              “{pendingDeleteSource?.name ?? ""}”及其本地索引会从 Melody
-              中移除， 不会删除来源目录本身。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button disabled={deletingSource} variant="outline">
-                取消
-              </Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeleteSource?.name ?? ""}”及其本地索引会从 Melody 中移除，不会删除来源目录本身。`}
+        footer={
+          <>
+            <Button
+              disabled={deletingSource}
+              onClick={() => {
+                if (!deletingSource) setPendingDeleteSource(undefined);
+              }}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               confirmLabel={deletingSource ? "删除中…" : "已删除"}
               disabled={deletingSource}
@@ -683,14 +666,20 @@ export function MarketplaceSettings({
             >
               删除来源
             </HoldToConfirm>
-          </DialogFooter>
-          {error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {error}
-            </p>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => {
+          if (!deletingSource) setPendingDeleteSource(undefined);
+        }}
+        open={Boolean(pendingDeleteSource)}
+        title="删除 Marketplace 来源？"
+      >
+        {error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </Modal>
     </section>
   );
 }

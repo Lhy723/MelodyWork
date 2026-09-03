@@ -3,9 +3,11 @@
 The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`,
 `icon-morph.tsx`, `press-depth.tsx`, `floating-label.tsx`, `expanding-search.tsx`,
 `progress-bar.tsx`, `load-more.tsx`, `live-activity.tsx`, `collapsible-banner.tsx`,
-and `presence-avatars.tsx`
-implementations in this directory are adapted from the Interior component
-library by ddoemonn, licensed under the MIT License.
+`presence-avatars.tsx`, `modal.tsx`, `popover.tsx`, `tooltip-group.tsx`,
+`drawer.tsx`, `context-menu.tsx`, `dropdown.tsx`, and `tabs.tsx` implementations in this
+directory are
+adapted from the Interior component library by ddoemonn, licensed under the MIT
+License.
 
 - Project: https://github.com/ddoemonn/interior
 - Source: https://github.com/ddoemonn/interior/blob/46473ce9e0edcebc70702814dc3d59c504e06bac/components/interior/copy-button.tsx
@@ -21,6 +23,13 @@ library by ddoemonn, licensed under the MIT License.
 - Live Activity source: https://www.interior.dev/docs/live-activity
 - Collapsible Banner source: https://www.interior.dev/docs/collapsible-banner
 - Presence Avatars source: https://www.interior.dev/docs/presence-avatars
+- Modal source: https://www.interior.dev/docs/modal
+- Popover source: https://www.interior.dev/docs/popover
+- Tooltip Group source: https://www.interior.dev/docs/tooltip-group
+- Drawer source: https://www.interior.dev/docs/drawer
+- Context Menu source: https://www.interior.dev/docs/context-menu
+- Dropdown source: https://www.interior.dev/docs/dropdown
+- Tabs source: https://www.interior.dev/docs/tabs
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -62,3 +71,25 @@ The Presence Avatars adapter keeps the library's stable roster ordering,
 overflow affordance, enter/leave motion, and live announcements while allowing
 MelodyWork to render local deterministic Subagent avatars without network
 requests.
+The Popover adapter keeps Interior's click-triggered disclosure, collision-aware
+placement, keyboard and outside-click dismissal, and reduced-motion-aware
+transition while exposing a child-safe trigger mode for existing controls.
+The Modal adapter keeps Interior's controlled open/close API, focus trap,
+backdrop dismissal, Escape handling, and scroll locking while using MelodyWork's
+theme tokens and shared button treatment for ordinary business dialogs.
+The Tooltip Group adapter keeps Interior's shared warm store, delayed-first
+hover, instant sibling switching, keyboard focus behavior, and reduced-motion
+tooltip transitions while preserving existing MelodyWork button semantics.
+The Drawer adapter keeps Interior's side-panel interaction model, focus and
+scroll management, scrim dismissal, reduced-motion-aware entrance, and
+header-driven swipe dismissal while using MelodyWork's dialog and button
+tokens for focused editing workflows.
+The Context Menu adapter keeps Interior's pointer and keyboard invocation,
+touch long-press, collision-aware placement, focus restoration, and
+reduced-motion-aware transitions while using MelodyWork's semantic menu tokens.
+The Dropdown adapter keeps Interior's active-item motion, controlled/uncontrolled
+selection API, keyboard navigation, typeahead, disabled-item handling, and
+collision-aware popover placement while using MelodyWork's semantic tokens.
+The Tabs adapter keeps Interior's shared motion indicator, controlled or
+uncontrolled selection, keyboard activation modes, tablist semantics, and
+reduced-motion-aware panel transitions while using MelodyWork's semantic tokens.

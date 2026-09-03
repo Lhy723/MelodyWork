@@ -1,4 +1,5 @@
 import type { AgentModelOption } from "@/domain/acp";
+import { Tabs } from "@/components/interior/tabs";
 
 import { SettingsList, valueAt } from "./configuration-controls";
 import { objectEntries } from "./configuration-utils";
@@ -57,19 +58,32 @@ export function ModelSettings({
   );
 
   return (
-    <div className="grid gap-7">
-      <section>
-        <h4 className="font-medium text-sm">默认值与生成行为</h4>
-        <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
-          应用于新会话；自定义模型中的同名参数可以单独覆盖这些值。
-        </p>
-        <SettingsList
-          onChange={onChange}
-          section={{ ...section, settings: defaultSettings }}
-          values={values}
-        />
-      </section>
-      <CustomModelManager onChange={onChange} values={values} />
-    </div>
+    <Tabs
+      className="w-full"
+      defaultValue="custom"
+      items={[
+        { label: "自定义模型", value: "custom" },
+        { label: "默认值与生成行为", value: "defaults" },
+      ]}
+      label="模型设置"
+      panelClassName="pt-5"
+      renderPanel={(value) =>
+        value === "custom" ? (
+          <CustomModelManager onChange={onChange} values={values} />
+        ) : (
+          <section>
+            <h4 className="font-medium text-sm">默认值与生成行为</h4>
+            <p className="mt-0.5 mb-2 text-muted-foreground text-xs">
+              应用于新会话；自定义模型中的同名参数可以单独覆盖这些值。
+            </p>
+            <SettingsList
+              onChange={onChange}
+              section={{ ...section, settings: defaultSettings }}
+              values={values}
+            />
+          </section>
+        )
+      }
+    />
   );
 }

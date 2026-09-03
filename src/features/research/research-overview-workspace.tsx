@@ -10,16 +10,10 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
+import { Dropdown } from "@/components/interior/dropdown";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -291,20 +285,16 @@ export function ResearchOverviewWorkspace({
                 </Button>
               ) : null}
             </div>
-            <select
-              aria-label="筛选研究活动"
-              className="h-8 border bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-              onChange={(event) =>
-                setActivityFilter(event.target.value as ActivityFilter)
-              }
+            <Dropdown
+              className="shrink-0"
+              items={Object.entries(ACTIVITY_FILTER_LABELS).map(
+                ([value, label]) => ({ value, label }),
+              )}
+              label="筛选研究活动"
+              onChange={(value) => setActivityFilter(value as ActivityFilter)}
+              triggerClassName="h-8 px-2 text-xs"
               value={activityFilter}
-            >
-              {Object.entries(ACTIVITY_FILTER_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           {activities.length ? (
@@ -379,20 +369,10 @@ export function ResearchOverviewWorkspace({
         />
       </div>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPendingDeleteNote(undefined);
-        }}
-        open={Boolean(pendingDeleteNote)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除这条研究记录？</DialogTitle>
-            <DialogDescription>
-              删除后会从当前项目的时间线和本地记录中移除，无法自动恢复。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+      <Modal
+        description="删除后会从当前项目的时间线和本地记录中移除，无法自动恢复。"
+        footer={
+          <>
             <Button
               onClick={() => setPendingDeleteNote(undefined)}
               variant="outline"
@@ -408,28 +388,17 @@ export function ResearchOverviewWorkspace({
             >
               删除记录
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => setPendingDeleteNote(undefined)}
+        open={Boolean(pendingDeleteNote)}
+        title="删除这条研究记录？"
+      />
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingImport(undefined);
-            setPendingImportName("");
-          }
-        }}
-        open={Boolean(pendingImport)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>导入研究数据？</DialogTitle>
-            <DialogDescription>
-              将使用“{pendingImportName}
-              ”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+      <Modal
+        description={`将使用“${pendingImportName}”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。`}
+        footer={
+          <>
             <Button
               onClick={() => {
                 setPendingImport(undefined);
@@ -442,9 +411,15 @@ export function ResearchOverviewWorkspace({
             <HoldToConfirm onConfirm={confirmImport} variant="destructive">
               导入并覆盖
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => {
+          setPendingImport(undefined);
+          setPendingImportName("");
+        }}
+        open={Boolean(pendingImport)}
+        title="导入研究数据？"
+      />
 
       {inbox ? (
         <button

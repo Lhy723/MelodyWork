@@ -1,13 +1,5 @@
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
 import {
   type ProjectDeleteResult,
@@ -70,26 +62,16 @@ export function SidebarDeleteDialogs({
 
   return (
     <>
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            onPendingDeleteChange(undefined);
-          }
-        }}
-        open={Boolean(pendingDelete)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除任务？</DialogTitle>
-            <DialogDescription>
-              “{pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}
-              ”及其本地对话记录将被永久删除，工作区文件不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}”及其本地对话记录将被永久删除，工作区文件不会受到影响。`}
+        footer={
+          <>
+            <Button
+              onClick={() => onPendingDeleteChange(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               onConfirm={() => {
                 if (pendingDelete) {
@@ -102,32 +84,28 @@ export function SidebarDeleteDialogs({
             >
               删除
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => onPendingDeleteChange(undefined)}
+        open={Boolean(pendingDelete)}
+        title="删除任务？"
+      />
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            onPendingDeleteProjectChange(undefined);
-            onDeletingProjectChange(false);
-            onProjectDeleteErrorChange(undefined);
-          }
-        }}
-        open={Boolean(pendingDeleteProject)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除项目？</DialogTitle>
-            <DialogDescription>
-              “{pendingDeleteProject?.name ?? ""}
-              ”及其本地任务记录将被永久删除，工作区文件不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeleteProject?.name ?? ""}”及其本地任务记录将被永久删除，工作区文件不会受到影响。`}
+        footer={
+          <>
+            <Button
+              disabled={deletingProject}
+              onClick={() => {
+                onPendingDeleteProjectChange(undefined);
+                onDeletingProjectChange(false);
+                onProjectDeleteErrorChange(undefined);
+              }}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               confirmLabel={deletingProject ? "删除中…" : "已删除"}
               disabled={deletingProject}
@@ -136,14 +114,22 @@ export function SidebarDeleteDialogs({
             >
               删除项目
             </HoldToConfirm>
-          </DialogFooter>
-          {projectDeleteError ? (
-            <p className="text-destructive text-sm" role="alert">
-              {projectDeleteError}
-            </p>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => {
+          onPendingDeleteProjectChange(undefined);
+          onDeletingProjectChange(false);
+          onProjectDeleteErrorChange(undefined);
+        }}
+        open={Boolean(pendingDeleteProject)}
+        title="删除项目？"
+      >
+        {projectDeleteError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {projectDeleteError}
+          </p>
+        ) : null}
+      </Modal>
     </>
   );
 }

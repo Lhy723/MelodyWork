@@ -1,6 +1,8 @@
+import { Popover } from "@/components/interior/popover";
 import { PresenceAvatars } from "@/components/interior/presence-avatars";
 import type { AgentSubagent } from "@/domain/acp";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 import { SubagentAvatar } from "./subagent-avatar";
 
 interface SubagentTrayProps {
@@ -40,6 +42,7 @@ export function SubagentTray({
   onOpenSubagent,
   subagents,
 }: SubagentTrayProps) {
+  const [openSubagentId, setOpenSubagentId] = useState<string | null>(null);
   const running = subagents.filter((subagent) => subagent.status === "running");
   const completed = subagents.filter(
     (subagent) => subagent.status !== "running",
@@ -61,15 +64,42 @@ export function SubagentTray({
               (candidate) => candidate.subagentId === person.id,
             );
             return subagent ? (
-              <button
-                aria-label={`打开 Subagent：${subagent.description}`}
-                className="block rounded-[22%] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => onOpenSubagent(subagent)}
-                title={`${subagent.description} · ${statusLabel(subagent)}`}
-                type="button"
+              <Popover
+                align="start"
+                className="w-64 p-3"
+                label={`Subagent：${subagent.description}`}
+                onOpenChange={(open) =>
+                  setOpenSubagentId(open ? subagent.subagentId : null)
+                }
+                open={openSubagentId === subagent.subagentId}
+                side="bottom"
+                trigger={
+                  <SubagentAvatar decorative size="xs" subagent={subagent} />
+                }
+                triggerAriaLabel={`查看 Subagent：${subagent.description}`}
+                triggerClassName="size-5 rounded-[22%] border-0 bg-transparent p-0 shadow-none hover:bg-transparent"
               >
-                <SubagentAvatar decorative size="xs" subagent={subagent} />
-              </button>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-sm">
+                      {subagent.description}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {statusLabel(subagent)}
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-primary px-3 font-medium text-primary-foreground text-sm outline-none transition-colors hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-ring/40"
+                    onClick={() => {
+                      setOpenSubagentId(null);
+                      onOpenSubagent(subagent);
+                    }}
+                    type="button"
+                  >
+                    打开会话
+                  </button>
+                </div>
+              </Popover>
             ) : null;
           }}
           onOverflowSelect={(people) => {

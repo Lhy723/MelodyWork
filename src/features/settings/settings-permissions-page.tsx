@@ -1,16 +1,8 @@
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { RefreshCwIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import type { PermissionRule } from "@/domain/permission";
@@ -114,26 +106,19 @@ export function SettingsPermissionsPage({
         </div>
       </section>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open && !deletingRuleId) setPendingDeleteRule(undefined);
-        }}
-        open={Boolean(pendingDeleteRule)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除项目权限规则？</DialogTitle>
-            <DialogDescription>
-              将删除“{pendingDeleteRule?.title ?? ""}
-              ”的自动权限规则，之后再次触发时需要重新确认。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button disabled={Boolean(deletingRuleId)} variant="outline">
-                取消
-              </Button>
-            </DialogClose>
+      <Modal
+        description={`将删除“${pendingDeleteRule?.title ?? ""}”的自动权限规则，之后再次触发时需要重新确认。`}
+        footer={
+          <>
+            <Button
+              disabled={Boolean(deletingRuleId)}
+              onClick={() => {
+                if (!deletingRuleId) setPendingDeleteRule(undefined);
+              }}
+              variant="outline"
+            >
+              取消
+            </Button>
             <HoldToConfirm
               confirmLabel={deletingRuleId ? "删除中…" : "已删除"}
               disabled={Boolean(deletingRuleId)}
@@ -142,9 +127,14 @@ export function SettingsPermissionsPage({
             >
               删除规则
             </HoldToConfirm>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+        onClose={() => {
+          if (!deletingRuleId) setPendingDeleteRule(undefined);
+        }}
+        open={Boolean(pendingDeleteRule)}
+        title="删除项目权限规则？"
+      />
     </>
   );
 }
