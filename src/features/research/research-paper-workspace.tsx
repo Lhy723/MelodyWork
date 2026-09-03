@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 
 import { CopyButton } from "@/components/interior/copy-button";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
@@ -38,6 +39,7 @@ export function PaperDetailWorkspace({
   onBack: () => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const stored = useResearchStore((state) =>
     state.papers.find((item) => item.id === initialPaper.id),
   );
@@ -60,16 +62,30 @@ export function PaperDetailWorkspace({
     if (!citationAuditEnabled || !paper.doi) return;
     setVerificationBusy(true);
     setVerificationMessage(undefined);
+    liveActivity.start({
+      detail: "正在从 Crossref 和 OpenAlex 获取元数据…",
+      title: "核验论文引用",
+    });
     try {
       const verified = await verifyResearchPaper(paper);
       addPapers([verified]);
-      setVerificationMessage(
-        verified.verified
-          ? `已匹配 ${verified.sources.join("、")}`
-          : "已返回单一来源元数据，请打开原文核对。",
-      );
+      const message = verified.verified
+        ? `已匹配 ${verified.sources.join("、")}`
+        : "已返回单一来源元数据，请打开原文核对。";
+      setVerificationMessage(message);
+      liveActivity.succeed({ detail: message, title: "论文引用核验完成" });
     } catch (reason) {
-      setVerificationMessage(toUserMessage(reason, "验证失败，请稍后重试。"));
+      const message = toUserMessage(reason, "验证失败，请稍后重试。");
+      setVerificationMessage(message);
+      liveActivity.fail(
+        { detail: message, title: "论文引用核验失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void verifyCitation().catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       setVerificationBusy(false);

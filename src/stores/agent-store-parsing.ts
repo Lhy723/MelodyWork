@@ -8,7 +8,10 @@ import type {
   PermissionOption,
   TimelineEntry,
 } from "@/domain/acp";
-import { parseSessionContextUsage } from "@/domain/session-projection";
+import {
+  contextUsageFromTotalTokens,
+  parseSessionContextUsage,
+} from "@/domain/session-projection";
 
 export const objectValue = (
   value: unknown,
@@ -295,7 +298,7 @@ export const contextUsageFromResult = (
     return directUsage;
   }
 
-  const meta = objectValue(result?._meta);
+  const meta = objectValue(result?._meta) ?? objectValue(result?.meta);
   const metadataUsage = parseSessionContextUsage(
     objectValue(meta?.["x.ai/contextUsage"]),
   );
@@ -303,15 +306,10 @@ export const contextUsageFromResult = (
     return metadataUsage;
   }
 
-  const usedTokens = numberValue(meta?.totalTokens);
-  if (fallback && usedTokens !== undefined && usedTokens >= 0) {
-    return {
-      ...fallback,
-      usedTokens,
-    };
-  }
-
-  return undefined;
+  return contextUsageFromTotalTokens(
+    numberValue(meta?.totalTokens ?? meta?.total_tokens),
+    fallback,
+  );
 };
 
 export const contextUsageForModel = (
@@ -388,7 +386,8 @@ export const directSessionUpdate = (
   if (objectValue(params.update)) {
     return objectValue(params.update);
   }
-  return params.sessionUpdate !== undefined || params.session_update !== undefined
+  return params.sessionUpdate !== undefined ||
+    params.session_update !== undefined
     ? params
     : undefined;
 };

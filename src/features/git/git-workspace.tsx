@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,11 @@ export function GitWorkspace({
   onClose,
   onRefreshChanges,
 }: GitWorkspaceProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([]);
   const [commitMessage, setCommitMessage] = useState("");
@@ -57,28 +63,55 @@ export function GitWorkspace({
   const branchButtonRef = useRef<HTMLButtonElement>(null);
   const worktreeButtonRef = useRef<HTMLButtonElement>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const [nextBranches, nextWorktrees] = await Promise.all([
-        getGitBranches(cwd),
-        getGitWorktrees(cwd),
-      ]);
-      setBranches(nextBranches);
-      setWorktrees(nextWorktrees);
-      setWorktreeBranch(
-        (current) =>
-          current ||
-          nextBranches.find((branch) => branch.current)?.name ||
-          "main",
-      );
-    } catch (reason) {
-      setError(messageFrom(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [cwd]);
+  const refresh = useCallback(
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: "正在读取分支和工作树…",
+          title: "刷新 Git",
+        });
+      }
+      setLoading(true);
+      setError(undefined);
+      try {
+        const [nextBranches, nextWorktrees] = await Promise.all([
+          getGitBranches(cwd),
+          getGitWorktrees(cwd),
+        ]);
+        setBranches(nextBranches);
+        setWorktrees(nextWorktrees);
+        setWorktreeBranch(
+          (current) =>
+            current ||
+            nextBranches.find((branch) => branch.current)?.name ||
+            "main",
+        );
+        if (announce) {
+          succeedActivity({
+            detail: `已读取 ${nextBranches.length} 个分支和 ${nextWorktrees.length} 个工作树。`,
+            title: "Git 已刷新",
+          });
+        }
+      } catch (reason) {
+        const message = messageFrom(reason);
+        setError(message);
+        if (announce) {
+          failActivity(
+            { detail: message, title: "Git 刷新失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void refresh(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [cwd, failActivity, startActivity, succeedActivity],
+  );
 
   useEffect(() => {
     void refresh();
@@ -88,7 +121,12 @@ export function GitWorkspace({
     action: () => Promise<void>,
     success: string,
     propagateError = false,
+    activityTitle = "Git 操作",
   ) => {
+    startActivity({
+      detail: "正在执行 Git 操作…",
+      title: activityTitle,
+    });
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -96,8 +134,24 @@ export function GitWorkspace({
       await action();
       setNotice(success);
       await Promise.all([refresh(), Promise.resolve(onRefreshChanges())]);
+      succeedActivity({ detail: success, title: `${activityTitle}完成` });
     } catch (reason) {
-      setError(messageFrom(reason));
+      const message = messageFrom(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: `${activityTitle}失败` },
+        {
+          label: "重试",
+          onClick: () => {
+            void runAction(
+              action,
+              success,
+              propagateError,
+              activityTitle,
+            ).catch(() => undefined);
+          },
+        },
+      );
       if (propagateError) {
         throw reason;
       }
@@ -121,7 +175,7 @@ export function GitWorkspace({
           errorLabel="重试"
           icon={<RefreshCwIcon />}
           iconOnly
-          onAction={refresh}
+          onAction={() => refresh(true)}
           pendingLabel="刷新中…"
           size="default"
           successLabel="已刷新"
@@ -189,6 +243,7 @@ export function GitWorkspace({
                             : stageGitPaths(cwd, [change.path]),
                         change.staged ? "文件已取消暂存。" : "文件已暂存。",
                         true,
+                        change.staged ? "取消暂存文件" : "暂存文件",
                       )
                     }
                     pendingLabel={change.staged ? "取消中…" : "暂存中…"}
@@ -238,6 +293,7 @@ export function GitWorkspace({
                     },
                     "提交已创建。",
                     true,
+                    "创建提交",
                   )
                 }
                 pendingLabel="提交中…"
@@ -264,6 +320,8 @@ export function GitWorkspace({
                     void runAction(
                       () => checkoutGitBranch(cwd, branch.name),
                       `已切换到 ${branch.name}。`,
+                      false,
+                      "切换 Git 分支",
                     )
                   }
                   type="button"
@@ -301,6 +359,7 @@ export function GitWorkspace({
                     },
                     `已创建 ${branchName}。`,
                     true,
+                    "创建 Git 分支",
                   );
                 }}
                 pendingLabel="创建中…"
@@ -344,6 +403,7 @@ export function GitWorkspace({
                             () => removeGitWorktree(cwd, worktree.path),
                             "工作树已移除。",
                             true,
+                            "移除工作树",
                           ).then(() => setPendingRemoval(undefined))
                         }
                         size="sm"
@@ -409,6 +469,7 @@ export function GitWorkspace({
                     },
                     "工作树已创建。",
                     true,
+                    "创建工作树",
                   );
                 }}
                 pendingLabel="创建中…"

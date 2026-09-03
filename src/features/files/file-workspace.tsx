@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,11 @@ export function FileWorkspace({
   root,
   onClose,
 }: FileWorkspaceProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const codeFont = useAppSettingsStore((state) => state.codeFont);
   const codeFontSize = useAppSettingsStore((state) => state.codeFontSize);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
@@ -72,17 +78,45 @@ export function FileWorkspace({
       ? "vs-dark"
       : "vs";
 
-  const loadTree = useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      setEntries(await getWorkspaceTree(root));
-    } catch (reason) {
-      setError(toUserMessage(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [root]);
+  const loadTree = useCallback(
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: "正在读取工作区文件树…",
+          title: "刷新文件",
+        });
+      }
+      setLoading(true);
+      setError(undefined);
+      try {
+        const nextEntries = await getWorkspaceTree(root);
+        setEntries(nextEntries);
+        if (announce) {
+          succeedActivity({
+            detail: `已读取 ${nextEntries.length} 个文件和目录。`,
+            title: "文件已刷新",
+          });
+        }
+      } catch (reason) {
+        const message = toUserMessage(reason);
+        setError(message);
+        if (announce) {
+          failActivity(
+            { detail: message, title: "刷新文件失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void loadTree(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [failActivity, root, startActivity, succeedActivity],
+  );
 
   useEffect(() => {
     void loadTree();
@@ -121,13 +155,29 @@ export function FileWorkspace({
     if (!selectedPath || content === savedContent) {
       return;
     }
+    const path = selectedPath;
+    startActivity({
+      detail: `正在保存 ${path}…`,
+      title: "保存文件",
+    });
     setError(undefined);
     try {
-      await writeWorkspaceFile(root, selectedPath, content);
+      await writeWorkspaceFile(root, path, content);
       setSavedContent(content);
       await loadTree();
+      succeedActivity({ detail: `${path} 已保存。`, title: "文件已保存" });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: "保存文件失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void save().catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     }
   };
@@ -155,7 +205,7 @@ export function FileWorkspace({
           errorLabel="重试"
           icon={<RefreshCwIcon />}
           iconOnly
-          onAction={loadTree}
+          onAction={() => loadTree(true)}
           pendingLabel="刷新中…"
           size="default"
           successLabel="已刷新"

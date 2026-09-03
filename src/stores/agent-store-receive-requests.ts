@@ -1,7 +1,6 @@
 import { toUserMessage as reasonMessage } from "@/domain/app-error";
-import {
-  sessionModeState,
-} from "@/domain/session-mode";
+import { sessionModeState } from "@/domain/session-mode";
+import { stampLatestTurnContextUsage } from "@/domain/session-projection";
 import { updateStoredSession, sendAcp } from "@/lib/melody-bridge";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -196,10 +195,7 @@ const handleModelResponse = (
   set({
     selectedModelId: pendingModelId,
     selectedReasoningEffort: selectedModel?.reasoningEffort,
-    contextUsage: contextUsageForModel(
-      get().availableModels,
-      pendingModelId,
-    ),
+    contextUsage: contextUsageForModel(get().availableModels, pendingModelId),
     pendingModelId: undefined,
     acpPhase: "ready",
     chatStatus: "ready",
@@ -318,14 +314,23 @@ const handleSessionOpenResponse = async (
     return true;
   }
 
-  const sessionUsage = contextUsageFromResult(message.result);
+  const sessionUsage = contextUsageFromResult(
+    message.result,
+    get().contextUsage ??
+      contextUsageForModel(get().availableModels, get().selectedModelId),
+  );
   const modes = sessionModeState(message.result);
   if (isCurrent) {
     set({
       acpPhase: "ready",
       acpSessionId: sessionId,
       chatStatus: "ready",
-      ...(sessionUsage ? { contextUsage: sessionUsage } : {}),
+      ...(sessionUsage
+        ? {
+            contextUsage: sessionUsage,
+            timeline: stampLatestTurnContextUsage(get().timeline, sessionUsage),
+          }
+        : {}),
       ...(modes
         ? {
             availableSessionModes: modes.availableSessionModes,

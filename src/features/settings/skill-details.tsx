@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { MelodyExtension, SkillDetails } from "@/domain/config";
+import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
 import { deleteMelodySkill, getMelodySkillDetails } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
@@ -39,6 +41,11 @@ export function SkillDetailsView({
   onBack,
   onDeleted,
 }: SkillDetailsViewProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [details, setDetails] = useState<SkillDetails>();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const { state: loadingState, run: runLoad } = useAsyncOperation();
@@ -51,20 +58,78 @@ export function SkillDetailsView({
   const error = loadingState.error;
   const deleteError = deleteState.error;
 
-  const load = useCallback(async () => {
-    await runLoad(() => getMelodySkillDetails(cwd, skill), setDetails);
-  }, [cwd, runLoad, skill]);
+  const load = useCallback(
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: `正在读取技能“${skill.name}”…`,
+          title: "刷新技能详情",
+        });
+      }
+      try {
+        const value = await runLoad(
+          () => getMelodySkillDetails(cwd, skill),
+          setDetails,
+        );
+        if (announce) {
+          succeedActivity({
+            detail: `已读取技能“${value.name}”的详细信息。`,
+            title: "技能详情已刷新",
+          });
+        }
+        return value;
+      } catch (reason) {
+        if (announce) {
+          const message = toUserMessage(reason);
+          failActivity(
+            { detail: message, title: "刷新技能详情失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void load(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+        throw reason;
+      }
+    },
+    [cwd, failActivity, runLoad, skill, startActivity, succeedActivity],
+  );
 
   useEffect(() => {
     void load().catch(() => undefined);
   }, [load]);
 
-  const remove = () =>
-    runDelete(async () => {
-      await deleteMelodySkill(cwd, skill);
-      setDeleteOpen(false);
-      await onDeleted();
+  const remove = async () => {
+    startActivity({
+      detail: `正在移除技能“${skill.name}”…`,
+      title: "删除技能",
     });
+    try {
+      await runDelete(async () => {
+        await deleteMelodySkill(cwd, skill);
+        setDeleteOpen(false);
+        await onDeleted();
+      });
+      succeedActivity({
+        detail: `技能“${skill.name}”已从 Melody 中移除。`,
+        title: "技能已删除",
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason);
+      failActivity(
+        { detail: message, title: "删除技能失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void remove().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
+    }
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -115,7 +180,7 @@ export function SkillDetailsView({
           errorLabel="重试"
           icon={<RefreshCwIcon />}
           iconOnly
-          onAction={load}
+          onAction={() => load(true)}
           pendingLabel="刷新中…"
           size="sm"
           successLabel="已刷新"

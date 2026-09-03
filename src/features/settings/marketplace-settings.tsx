@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExpandingSearch } from "@/components/interior/expanding-search";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadMore } from "@/components/interior/load-more";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,11 @@ export function MarketplaceSettings({
   cwd,
   onPluginsChanged,
 }: MarketplaceSettingsProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [sources, setSources] = useState<MarketplaceSource[]>([]);
   const [plugins, setPlugins] = useState<MarketplacePlugin[]>([]);
   const [draft, setDraft] = useState<MarketplaceSource>(emptyMarketplaceSource);
@@ -163,7 +169,8 @@ export function MarketplaceSettings({
     () => visibleMarketplacePlugins.slice(0, marketplaceVisibleCount),
     [marketplaceVisibleCount, visibleMarketplacePlugins],
   );
-  const marketplaceHasMore = marketplaceVisibleCount < visibleMarketplacePlugins.length;
+  const marketplaceHasMore =
+    marketplaceVisibleCount < visibleMarketplacePlugins.length;
 
   const loadMoreMarketplacePlugins = useCallback(() => {
     const total = visibleMarketplacePlugins.length;
@@ -187,6 +194,12 @@ export function MarketplaceSettings({
 
   const load = useCallback(
     async (refresh = false) => {
+      if (refresh) {
+        startActivity({
+          detail: "正在读取来源并扫描插件目录…",
+          title: "刷新 Marketplace",
+        });
+      }
       setLoading(true);
       setError(undefined);
       setNotice(undefined);
@@ -197,14 +210,32 @@ export function MarketplaceSettings({
         ]);
         setSources(nextSources);
         setPlugins(nextPlugins);
+        if (refresh) {
+          succeedActivity({
+            detail: `已扫描 ${nextPlugins.length} 个插件。`,
+            title: "Marketplace 已刷新",
+          });
+        }
       } catch (reason) {
-        setError(toUserMessage(reason));
+        const message = toUserMessage(reason);
+        setError(message);
+        if (refresh) {
+          failActivity(
+            { detail: message, title: "Marketplace 刷新失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void load(true).catch(() => undefined);
+              },
+            },
+          );
+        }
         throw reason;
       } finally {
         setLoading(false);
       }
     },
-    [cwd],
+    [cwd, failActivity, startActivity, succeedActivity],
   );
 
   useEffect(() => {
@@ -221,6 +252,10 @@ export function MarketplaceSettings({
   };
 
   const save = async () => {
+    startActivity({
+      detail: "正在保存来源并扫描插件…",
+      title: originalName ? "更新 Marketplace 来源" : "添加 Marketplace 来源",
+    });
     setSaving(true);
     setError(undefined);
     setNotice(undefined);
@@ -233,8 +268,22 @@ export function MarketplaceSettings({
       setLoading(true);
       setPlugins(await scanMarketplacePlugins(cwd, true));
       setNotice("Marketplace 已保存并完成插件扫描。");
+      succeedActivity({
+        detail: "来源已保存，插件索引已更新。",
+        title: "Marketplace 来源已保存",
+      });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: "Marketplace 来源保存失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void save().catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       setSaving(false);
@@ -243,6 +292,10 @@ export function MarketplaceSettings({
   };
 
   const remove = async (name: string) => {
+    startActivity({
+      detail: `正在移除“${name}”的本地索引…`,
+      title: "删除 Marketplace 来源",
+    });
     setDeletingSource(true);
     setLoading(true);
     setError(undefined);
@@ -252,8 +305,22 @@ export function MarketplaceSettings({
       setSources(nextSources);
       setPlugins(await scanMarketplacePlugins(cwd));
       setPendingDeleteSource(undefined);
+      succeedActivity({
+        detail: `“${name}”已从 Melody 中移除。`,
+        title: "Marketplace 来源已删除",
+      });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: "Marketplace 来源删除失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void remove(name).catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       setLoading(false);
@@ -263,6 +330,16 @@ export function MarketplaceSettings({
 
   const runPluginAction = async (plugin: MarketplacePlugin) => {
     const key = marketplaceReference(plugin);
+    const action =
+      plugin.status === "installed"
+        ? plugin.updateAvailable
+          ? "更新"
+          : "检查更新"
+        : "安装";
+    startActivity({
+      detail: `正在${action}插件“${plugin.name}”…`,
+      title: `${action} Marketplace 插件`,
+    });
     setBusyPlugin(key);
     setError(undefined);
     setNotice(undefined);
@@ -280,6 +357,23 @@ export function MarketplaceSettings({
       });
       setPlugins(result.nextPlugins);
       setNotice(result.message);
+      succeedActivity({
+        detail: result.message,
+        title: `插件${action}完成`,
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: `插件${action}失败` },
+        {
+          label: "重试",
+          onClick: () => {
+            void runPluginAction(plugin).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       setBusyPlugin(undefined);
     }

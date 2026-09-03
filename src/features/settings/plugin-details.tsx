@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import type {
   PluginComponentGroup,
   PluginDetails,
 } from "@/domain/config";
+import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
 import {
   getMelodyPluginDetails,
@@ -62,6 +64,11 @@ export function PluginDetailsView({
   onBack,
   onDeleted,
 }: PluginDetailsViewProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [details, setDetails] = useState<PluginDetails>();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const { state: loadingState, run: runLoad } = useAsyncOperation();
@@ -75,20 +82,77 @@ export function PluginDetailsView({
   const deleteError = deleteState.error;
 
   const load = useCallback(
-    () => runLoad(() => getMelodyPluginDetails(cwd, plugin), setDetails),
-    [cwd, plugin, runLoad],
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: `正在读取插件“${plugin.name}”…`,
+          title: "刷新插件详情",
+        });
+      }
+      try {
+        const value = await runLoad(
+          () => getMelodyPluginDetails(cwd, plugin),
+          setDetails,
+        );
+        if (announce) {
+          succeedActivity({
+            detail: `已读取插件“${value.name ?? plugin.name}”的详细信息。`,
+            title: "插件详情已刷新",
+          });
+        }
+        return value;
+      } catch (reason) {
+        if (announce) {
+          const message = toUserMessage(reason);
+          failActivity(
+            { detail: message, title: "刷新插件详情失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void load(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+        throw reason;
+      }
+    },
+    [cwd, failActivity, plugin, runLoad, startActivity, succeedActivity],
   );
 
   useEffect(() => {
     void load().catch(() => undefined);
   }, [load]);
 
-  const remove = () =>
-    runDelete(async () => {
-      await uninstallMelodyPlugin(cwd, plugin.name);
-      setDeleteOpen(false);
-      await onDeleted();
+  const remove = async () => {
+    startActivity({
+      detail: `正在移除插件“${plugin.name}”…`,
+      title: "删除插件",
     });
+    try {
+      await runDelete(async () => {
+        await uninstallMelodyPlugin(cwd, plugin.name);
+        setDeleteOpen(false);
+        await onDeleted();
+      });
+      succeedActivity({
+        detail: `插件“${plugin.name}”已从 Melody 中移除。`,
+        title: "插件已删除",
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason);
+      failActivity(
+        { detail: message, title: "删除插件失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void remove().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
+    }
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -122,7 +186,7 @@ export function PluginDetailsView({
           disabled={loading}
           errorLabel="重试"
           icon={<RefreshCwIcon />}
-          onAction={load}
+          onAction={() => load(true)}
           pendingLabel="刷新中…"
           size="sm"
           successLabel="已刷新"

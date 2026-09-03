@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
@@ -40,6 +41,7 @@ export function SearchWorkspace({
   onNavigate: (kind: ResearchMainKind) => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const addPapers = useResearchStore((state) => state.addPapers);
   const inbox = useResearchStore((state) => state.inbox);
   const recordSearchResult = useResearchStore(
@@ -131,10 +133,29 @@ export function SearchWorkspace({
     setWarnings([]);
     setSourceRuns([]);
     setActiveView("results");
+    liveActivity.start({
+      detail: `正在查询 ${enabledSources.size} 个数据源…`,
+      progress: 0,
+      title: "检索文献",
+    });
     try {
       const result = await searchResearchPapers(
         queryForSearch,
         Array.from(enabledSources),
+        (progress) => {
+          if (!searchGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "检索文献",
+          });
+        },
       );
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setPapers(result.papers);
@@ -148,12 +169,30 @@ export function SearchWorkspace({
         terms: buildResearchQueryPlan(queryForSearch).terms,
         result,
       });
+      liveActivity.succeed({
+        detail: `找到 ${result.papers.length} 篇文献${
+          result.warnings.length
+            ? `，${result.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "文献检索完成",
+      });
     } catch (reason) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
       setPapers([]);
       setSourceSummary([]);
       setSourceRuns([]);
+      liveActivity.fail(
+        { detail: message, title: "文献检索失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runSearch(normalized, queryForSearch).catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) setLoading(false);

@@ -2,6 +2,7 @@ import { ImportIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { FloatingLabelInput } from "@/components/interior/floating-label";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import {
   Dialog,
@@ -25,20 +26,41 @@ export function ImportPaperDialog({
   open: boolean;
   setOpen: (open: boolean) => void;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const [candidate, setCandidate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const importButtonRef = useRef<HTMLButtonElement>(null);
-  const runImport = async () => {
+  const runImport = async (nextCandidate = candidate) => {
+    const normalized = nextCandidate.trim();
+    if (!normalized) return;
     setLoading(true);
     setError(undefined);
+    liveActivity.start({
+      detail: "正在查询 Crossref、OpenAlex 或 arXiv…",
+      title: "导入论文",
+    });
     try {
-      const paper = await importResearchPaper(candidate);
+      const paper = await importResearchPaper(normalized);
       onImported(paper);
       setCandidate("");
       setOpen(false);
+      liveActivity.succeed({
+        detail: `已导入《${paper.title}》。`,
+        title: "论文导入完成",
+      });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "论文导入失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runImport(normalized).catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       setLoading(false);

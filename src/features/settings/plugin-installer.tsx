@@ -2,6 +2,7 @@ import { CheckCircle2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { FloatingLabelInput } from "@/components/interior/floating-label";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { PressDepthButton } from "@/components/interior/press-depth";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { installMelodyPlugin } from "@/lib/melody-bridge";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
+import { toUserMessage } from "@/domain/app-error";
 
 interface PluginInstallerProps {
   cwd: string;
@@ -21,6 +23,7 @@ interface PluginInstallerProps {
 }
 
 export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
+  const liveActivity = useGlobalLiveActivity();
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState("");
   const [success, setSuccess] = useState<string>();
@@ -34,13 +37,37 @@ export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
     setSuccess(undefined);
   };
 
-  const install = async () => {
-    const result = await installation.run(async () => {
-      const installed = await installMelodyPlugin(cwd, source);
-      await onInstalled();
-      return installed;
+  const install = async (nextSource = source) => {
+    const normalized = nextSource.trim();
+    if (!normalized) return;
+    liveActivity.start({
+      detail: `正在安装插件“${normalized}”…`,
+      title: "添加插件",
     });
-    setSuccess(result.message);
+    try {
+      const result = await installation.run(async () => {
+        const installed = await installMelodyPlugin(cwd, normalized);
+        await onInstalled();
+        return installed;
+      });
+      setSuccess(result.message);
+      liveActivity.succeed({
+        detail: result.message,
+        title: "插件安装完成",
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason);
+      liveActivity.fail(
+        { detail: message, title: "插件安装失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void install(normalized).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
+    }
   };
 
   return (

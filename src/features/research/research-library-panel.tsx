@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { MOTION_EASE } from "@/components/motion/page-transition";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,7 @@ import { PaperDetail, PaperList } from "./research-paper-ui";
 import { useResearchStore } from "./research-store";
 
 export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
+  const liveActivity = useGlobalLiveActivity();
   const papers = useResearchStore((state) => state.papers);
   const addPapers = useResearchStore((state) => state.addPapers);
   const removePaper = useResearchStore((state) => state.removePaper);
@@ -50,21 +52,63 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
   const selected = visiblePapers.find((paper) => paper.id === selectedId);
   const selectedInLibrary = papers.find((paper) => paper.id === selectedId);
 
-  const runSearch = async () => {
+  const runSearch = async (nextQuery = query) => {
+    const normalized = nextQuery.trim();
+    if (!normalized) return;
     const requestToken = searchGateRef.current.begin();
     setLoading(true);
     setError(undefined);
     setWarnings([]);
+    liveActivity.start({
+      detail: "正在查询文献数据源…",
+      progress: 0,
+      title: "检索文献",
+    });
     try {
-      const response = await searchResearchPapers(query);
+      const response = await searchResearchPapers(
+        normalized,
+        undefined,
+        (progress) => {
+          if (!searchGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "检索文献",
+          });
+        },
+      );
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setResults(response.papers);
       setWarnings(response.warnings);
       setSelectedId(response.papers[0]?.id);
+      liveActivity.succeed({
+        detail: `找到 ${response.papers.length} 篇文献${
+          response.warnings.length
+            ? `，${response.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "文献检索完成",
+      });
     } catch (reason) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
       setResults([]);
+      liveActivity.fail(
+        { detail: message, title: "文献检索失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runSearch(normalized).catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) {

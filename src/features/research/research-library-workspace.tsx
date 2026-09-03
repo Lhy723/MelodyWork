@@ -1,6 +1,7 @@
 import { BookmarkIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ export function LibraryWorkspace({
   onNavigate: (kind: ResearchMainKind) => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const papers = useResearchStore((state) => state.papers);
   const addPapers = useResearchStore((state) => state.addPapers);
   const [query, setQuery] = useState("");
@@ -45,17 +47,37 @@ export function LibraryWorkspace({
           paper.doi?.toLocaleLowerCase().includes(normalized)),
     );
   }, [papers, query, scope]);
-  const runImport = async () => {
+  const runImport = async (nextCandidate = candidate) => {
+    const normalized = nextCandidate.trim();
+    if (!normalized) return;
     setImporting(true);
     setError(undefined);
+    liveActivity.start({
+      detail: "正在查询学术索引…",
+      title: "导入论文",
+    });
     try {
-      const paper = await importResearchPaper(candidate);
+      const paper = await importResearchPaper(normalized);
       addPapers([paper]);
       onOpenPaper(paper);
       setCandidate("");
       setImportOpen(false);
+      liveActivity.succeed({
+        detail: `已导入《${paper.title}》。`,
+        title: "论文导入完成",
+      });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "论文导入失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runImport(normalized).catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       setImporting(false);

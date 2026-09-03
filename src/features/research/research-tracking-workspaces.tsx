@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -201,6 +202,7 @@ export function TrackingDetailWorkspace({
   projectName: string;
   topicId: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const topic = useResearchStore((state) =>
     state.trackingTopics.find((item) => item.id === topicId),
   );
@@ -226,13 +228,53 @@ export function TrackingDetailWorkspace({
     const requestToken = refreshGateRef.current.begin();
     setRefreshing(true);
     setError(undefined);
+    liveActivity.start({
+      detail: `正在刷新“${topic.title}”…`,
+      progress: 0,
+      title: "刷新科研追踪",
+    });
     try {
-      const result = await searchResearchPapers(topic.query);
+      const result = await searchResearchPapers(
+        topic.query,
+        undefined,
+        (progress) => {
+          if (!refreshGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "刷新科研追踪",
+          });
+        },
+      );
       if (!refreshGateRef.current.isCurrent(requestToken)) return;
       refreshTrackingTopic(topic.id, result.papers);
+      liveActivity.succeed({
+        detail: `已更新 ${result.papers.length} 条结果${
+          result.warnings.length
+            ? `，${result.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "科研追踪已刷新",
+      });
     } catch (reason) {
       if (!refreshGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "科研追踪刷新失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void refresh().catch(() => undefined);
+          },
+        },
+      );
       throw reason;
     } finally {
       if (refreshGateRef.current.isCurrent(requestToken)) {

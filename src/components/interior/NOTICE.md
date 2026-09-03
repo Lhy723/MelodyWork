@@ -2,7 +2,7 @@
 
 The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`,
 `icon-morph.tsx`, `press-depth.tsx`, `floating-label.tsx`, `expanding-search.tsx`,
-`progress-bar.tsx`, and `load-more.tsx`
+`progress-bar.tsx`, `load-more.tsx`, and `live-activity.tsx`
 implementations in this directory are adapted from the Interior component
 library by ddoemonn, licensed under the MIT License.
 
@@ -17,6 +17,7 @@ library by ddoemonn, licensed under the MIT License.
 - Expanding Search source: https://www.interior.dev/docs/expanding-search
 - Progress Bar source: https://www.interior.dev/docs/progress-bar
 - Load More source: https://www.interior.dev/docs/load-more
+- Live Activity source: https://www.interior.dev/docs/live-activity
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -47,3 +48,6 @@ adding a compact presentation for existing metric cards.
 The Load More adapter keeps the library's async sentinel, retry state, end
 state, and reduced-motion-aware transitions while using MelodyWork's design
 tokens and Chinese labels.
+The Live Activity adapter keeps the library's compact/expanded activity pod,
+progress phases, retry action, dismissal behavior, and reduced-motion-aware
+transitions while adding a provider for app-wide background work.

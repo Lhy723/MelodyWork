@@ -10,7 +10,6 @@ import {
   ICON_MORPH_SHAPES,
 } from "@/components/interior/icon-morph";
 import { LoadingButton } from "@/components/interior/loading-button";
-import { ProgressBar } from "@/components/interior/progress-bar";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
 import { localizedSessionTitle } from "@/lib/localize";
@@ -80,17 +79,6 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     workspaceTabs,
     beginWorkspacePanelResize,
   } = props;
-
-  const appUpdateProgressValue =
-    appUpdateProgress?.phase === "downloading" &&
-    appUpdateProgress.totalBytes !== null &&
-    appUpdateProgress.totalBytes > 0
-      ? Math.min(
-          100,
-          (appUpdateProgress.downloadedBytes / appUpdateProgress.totalBytes) *
-            100,
-        )
-      : null;
 
   return (
     <>
@@ -169,24 +157,6 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                   >
                     {`更新到 ${appUpdate.version}`}
                   </LoadingButton>
-                  {installingUpdate ? (
-                    <ProgressBar
-                      className="w-24 shrink-0"
-                      label={
-                        appUpdateProgress?.phase === "installing"
-                          ? "安装更新"
-                          : "下载更新"
-                      }
-                      pendingLabel={
-                        appUpdateProgress?.phase === "installing"
-                          ? "正在安装并重启…"
-                          : "正在下载…"
-                      }
-                      showLabel={false}
-                      size="compact"
-                      value={appUpdateProgressValue}
-                    />
-                  ) : null}
                 </div>
               ) : null}
               <Button
