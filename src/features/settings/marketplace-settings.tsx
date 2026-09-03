@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { LoadMore } from "@/components/interior/load-more";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
@@ -44,6 +45,8 @@ const marketplaceReference = (plugin: MarketplacePlugin) =>
 const marketplaceDomId = (key: string) =>
   `marketplace-${encodeURIComponent(key)}`;
 
+const MARKETPLACE_PAGE_SIZE = 40;
+
 export function MarketplaceSettings({
   cwd,
   onPluginsChanged,
@@ -60,6 +63,9 @@ export function MarketplaceSettings({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [activeMarketplaceKey, setActiveMarketplaceKey] = useState<string>();
+  const [marketplaceVisibleCount, setMarketplaceVisibleCount] = useState(
+    MARKETPLACE_PAGE_SIZE,
+  );
   const { state: pluginActionState, run: runPluginOperation } =
     useAsyncOperation();
   const visibleError = pluginActionState.error ?? error;
@@ -120,6 +126,29 @@ export function MarketplaceSettings({
   const activeMarketplace =
     marketplaceGroups.find((group) => group.key === activeMarketplaceKey) ??
     marketplaceGroups[0];
+
+  const loadedMarketplacePlugins = useMemo(
+    () => activeMarketplace?.plugins.slice(0, marketplaceVisibleCount) ?? [],
+    [activeMarketplace, marketplaceVisibleCount],
+  );
+  const marketplaceHasMore = Boolean(
+    activeMarketplace &&
+    marketplaceVisibleCount < activeMarketplace.plugins.length,
+  );
+
+  const loadMoreMarketplacePlugins = useCallback(() => {
+    const total = activeMarketplace?.plugins.length ?? 0;
+    const nextCount = Math.min(
+      marketplaceVisibleCount + MARKETPLACE_PAGE_SIZE,
+      total,
+    );
+    setMarketplaceVisibleCount(nextCount);
+    return nextCount < total;
+  }, [activeMarketplace, marketplaceVisibleCount]);
+
+  useEffect(() => {
+    setMarketplaceVisibleCount(MARKETPLACE_PAGE_SIZE);
+  }, [activeMarketplaceKey]);
 
   const load = useCallback(
     async (refresh = false) => {
@@ -387,7 +416,7 @@ export function MarketplaceSettings({
               ) : null}
             </header>
             <div className="grid gap-1.5 p-2">
-              {activeMarketplace.plugins.map((plugin) => (
+              {loadedMarketplacePlugins.map((plugin) => (
                 <MarketplacePluginRow
                   busy={busyPlugin === marketplaceReference(plugin)}
                   disabled={busyPlugin !== undefined}
@@ -409,6 +438,21 @@ export function MarketplaceSettings({
                   <RefreshCwIcon className="size-3.5 animate-spin" />
                   正在扫描插件目录…
                 </div>
+              ) : null}
+              {!loading &&
+              activeMarketplace.plugins.length > MARKETPLACE_PAGE_SIZE ? (
+                <LoadMore
+                  className="px-2 py-3"
+                  hasMore={marketplaceHasMore}
+                  labels={{
+                    idle: "加载更多",
+                    loading: "正在加载",
+                    error: "加载失败，重试",
+                    end: "已全部加载",
+                  }}
+                  onLoad={loadMoreMarketplacePlugins}
+                  rootMargin="240px 0px"
+                />
               ) : null}
             </div>
           </article>
