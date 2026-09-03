@@ -8,10 +8,11 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
-import { MOTION_EASE } from "@/components/motion/page-transition";
+import { CollapsibleBanner } from "@/components/interior/collapsible-banner";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { MOTION_EASE } from "@/components/motion/page-transition";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -182,14 +183,22 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         </p>
       ) : null}
       {warnings.length > 0 ? (
-        <div
-          aria-live="polite"
-          className="flex gap-2 border-b bg-amber-500/8 px-3 py-2 text-amber-800 text-xs dark:text-amber-200"
+        <CollapsibleBanner
+          ariaLive="polite"
+          className="mx-3 my-2"
+          defaultState="folded"
+          dismissible={false}
+          icon={<TriangleAlertIcon className="size-3.5" />}
           role="status"
+          title={`部分数据源未响应 · ${warnings.length} 项`}
+          tone="warning"
         >
-          <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-          <span>{warnings.join("；")}</span>
-        </div>
+          <ul className="space-y-1 text-muted-foreground text-xs leading-5">
+            {warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </CollapsibleBanner>
       ) : null}
       <div
         className={cn(

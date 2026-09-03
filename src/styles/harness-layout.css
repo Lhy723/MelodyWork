@@ -247,14 +247,6 @@
     margin-top: 4px;
   }
 
-  .harness-subagent-trigger {
-    color: var(--harness-text-strong);
-  }
-
-  .harness-subagent-trigger:hover {
-    background: color-mix(in srgb, var(--harness-bg-layer-2) 76%, transparent);
-  }
-
   .harness-stats-card {
     display: block;
     min-width: 0;

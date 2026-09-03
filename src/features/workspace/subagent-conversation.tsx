@@ -1,14 +1,10 @@
-import {
-  BotIcon,
-  CheckCircle2Icon,
-  CircleXIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
+import { CheckCircle2Icon, CircleXIcon, LoaderCircleIcon } from "lucide-react";
 
 import { MessageResponse } from "@/components/ai-elements/message";
 import type { AgentSubagent, TimelineEntry } from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
 import { AgentTimeline } from "@/features/chat/agent-timeline";
+import { SubagentAvatar } from "@/features/chat/subagent-avatar";
 import { useAgentStore } from "@/stores/agent-store";
 
 interface SubagentConversationProps {
@@ -60,9 +56,12 @@ export function SubagentConversation({
     <section className="flex size-full min-h-0 flex-col bg-background">
       <header className="shrink-0 border-b px-4 py-3">
         <div className="flex items-start gap-2.5">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-muted">
-            <BotIcon className="size-4" />
-          </span>
+          <SubagentAvatar
+            className="mt-0.5"
+            decorative
+            size="md"
+            subagent={subagent}
+          />
           <div className="min-w-0 flex-1">
             <h2 className="truncate font-medium text-sm">
               {subagent.description}
@@ -114,7 +113,12 @@ export function SubagentConversation({
             {subagent.status === "running" ? (
               <LoaderCircleIcon className="mx-auto mb-3 size-5 animate-spin text-muted-foreground" />
             ) : (
-              <BotIcon className="mx-auto mb-3 size-5 text-muted-foreground" />
+              <SubagentAvatar
+                className="mx-auto mb-3"
+                decorative
+                size="lg"
+                subagent={subagent}
+              />
             )}
             <p className="font-medium text-sm">
               {subagent.status === "running"

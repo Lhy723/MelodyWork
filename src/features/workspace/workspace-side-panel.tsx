@@ -32,6 +32,10 @@ import {
 import type { AgentSubagent } from "@/domain/acp";
 import type { GitChange } from "@/domain/git";
 import type { ProjectReference } from "@/domain/message-citations";
+import {
+  SUBAGENT_PLACEHOLDER,
+  SubagentAvatar,
+} from "@/features/chat/subagent-avatar";
 import type { ResearchPanelKind } from "@/features/research/research-panel";
 import { cn } from "@/lib/utils";
 
@@ -113,7 +117,10 @@ interface WorkspaceSidePanelProps {
   tabs: WorkspaceTab[];
 }
 
-const tabIcon = (tab: WorkspaceTab) => {
+const tabIcon = (
+  tab: WorkspaceTab,
+  subagents: Record<string, AgentSubagent>,
+) => {
   if (tab.kind === "files") {
     return <FilesIcon />;
   }
@@ -124,7 +131,12 @@ const tabIcon = (tab: WorkspaceTab) => {
     return <GitCompareArrowsIcon />;
   }
   if (tab.kind === "subagent") {
-    return <BotIcon />;
+    const subagent = subagents[tab.subagentId];
+    return subagent ? (
+      <SubagentAvatar decorative size="xs" subagent={subagent} />
+    ) : (
+      <BotIcon />
+    );
   }
   if (tab.kind === "research") {
     return <LibraryIcon />;
@@ -270,7 +282,9 @@ export function WorkspaceSidePanel({
                 title={tab.kind === "file" ? tab.path : tab.label}
                 type="button"
               >
-                <span className="[&>svg]:size-3.5">{tabIcon(tab)}</span>
+                <span className="[&>svg]:size-3.5">
+                  {tabIcon(tab, subagents)}
+                </span>
                 <span className="truncate">{tab.label}</span>
               </button>
               <Button
@@ -411,7 +425,12 @@ export function WorkspaceSidePanel({
                 ) : (
                   <div className="grid size-full place-items-center p-6 text-center">
                     <div>
-                      <BotIcon className="mx-auto mb-3 size-5 text-muted-foreground" />
+                      <SubagentAvatar
+                        className="mx-auto mb-3 opacity-60"
+                        decorative
+                        size="lg"
+                        subagent={SUBAGENT_PLACEHOLDER}
+                      />
                       <p className="font-medium text-sm">Subagent 不可用</p>
                       <p className="mt-1 text-muted-foreground text-xs">
                         该子会话可能属于另一个对话。

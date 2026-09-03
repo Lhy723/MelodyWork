@@ -9,6 +9,7 @@ import {
 import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { CollapsibleBanner } from "@/components/interior/collapsible-banner";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -268,9 +269,22 @@ export function ResearchSearchHeader({
         </p>
       ) : null}
       {warnings.length ? (
-        <p className="border-b bg-amber-500/8 px-6 py-2 text-amber-800 text-xs dark:text-amber-200">
-          {warnings.join("；")}
-        </p>
+        <CollapsibleBanner
+          ariaLive="polite"
+          className="mx-6 my-2"
+          defaultState="folded"
+          dismissible={false}
+          icon={<TriangleAlertIcon className="size-3.5" />}
+          role="status"
+          title={`部分数据源未响应 · ${warnings.length} 项`}
+          tone="warning"
+        >
+          <ul className="space-y-1 text-muted-foreground text-xs leading-5">
+            {warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </CollapsibleBanner>
       ) : null}
       {sourceRuns.length ? (
         <div className="shrink-0 border-b bg-muted/10 px-6 py-2">

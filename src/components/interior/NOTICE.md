@@ -2,7 +2,8 @@
 
 The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`,
 `icon-morph.tsx`, `press-depth.tsx`, `floating-label.tsx`, `expanding-search.tsx`,
-`progress-bar.tsx`, `load-more.tsx`, and `live-activity.tsx`
+`progress-bar.tsx`, `load-more.tsx`, `live-activity.tsx`, `collapsible-banner.tsx`,
+and `presence-avatars.tsx`
 implementations in this directory are adapted from the Interior component
 library by ddoemonn, licensed under the MIT License.
 
@@ -18,6 +19,8 @@ library by ddoemonn, licensed under the MIT License.
 - Progress Bar source: https://www.interior.dev/docs/progress-bar
 - Load More source: https://www.interior.dev/docs/load-more
 - Live Activity source: https://www.interior.dev/docs/live-activity
+- Collapsible Banner source: https://www.interior.dev/docs/collapsible-banner
+- Presence Avatars source: https://www.interior.dev/docs/presence-avatars
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -51,3 +54,11 @@ tokens and Chinese labels.
 The Live Activity adapter keeps the library's compact/expanded activity pod,
 progress phases, retry action, dismissal behavior, and reduced-motion-aware
 transitions while adding a provider for app-wide background work.
+The Collapsible Banner adapter keeps the library's fold/dismiss state machine,
+detail disclosure and reduced-motion-aware height transitions while using
+MelodyWork's design tokens and explicit live-region semantics for page-level
+warnings and errors.
+The Presence Avatars adapter keeps the library's stable roster ordering,
+overflow affordance, enter/leave motion, and live announcements while allowing
+MelodyWork to render local deterministic Subagent avatars without network
+requests.
