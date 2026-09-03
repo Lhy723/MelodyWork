@@ -9,6 +9,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import { RippleLayer, useRipple } from "@/components/interior/ripple";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -52,6 +53,81 @@ export interface SidebarProjectGroupProps {
   workspaceMode: WorkspaceMode;
 }
 
+function SidebarSessionRow({
+  onRequestDelete,
+  onSelectSession,
+  running,
+  selected,
+  session,
+}: {
+  onRequestDelete: (session: SessionRecord) => void;
+  onSelectSession: (session: SessionRecord) => void;
+  running: boolean;
+  selected: boolean;
+  session: SessionRecord;
+}) {
+  const title = localizedSessionTitle(session.title);
+  const { bindings, fadeDuration, ripples } = useRipple({ max: 2 });
+
+  return (
+    <div
+      className={cn(
+        "group flex min-h-8 w-full items-center rounded-lg px-1 text-sm transition-colors",
+        selected
+          ? "bg-sidebar-selected text-sidebar-foreground"
+          : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+      )}
+    >
+      <button
+        className="relative isolate min-w-0 flex-1 truncate overflow-hidden rounded-md px-2 py-1 text-left"
+        onClick={() => onSelectSession(session)}
+        style={{
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+        }}
+        title={title}
+        type="button"
+        {...bindings}
+      >
+        <RippleLayer fadeDuration={fadeDuration} ripples={ripples} />
+        <span className="relative z-10 block truncate">{title}</span>
+      </button>
+      {running ? (
+        <span
+          aria-label="任务正在运行"
+          className="relative z-10 mr-1 size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-foreground"
+          role="status"
+          title="任务正在运行"
+        />
+      ) : null}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label={`${title}的操作`}
+            className={cn(
+              "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100",
+              selected && "group-hover:opacity-100",
+            )}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() => onRequestDelete(session)}
+          >
+            <Trash2Icon />
+            删除任务…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 export function SidebarProjectGroup({
   activeProject,
   activeSessionId,
@@ -75,6 +151,7 @@ export function SidebarProjectGroup({
   const independent = isIndependentProject(project);
   const label = independent ? "任务" : project.name;
   const active = project.id === activeProject?.id;
+  const { bindings, fadeDuration, ripples } = useRipple({ max: 2 });
   return (
     <Collapsible
       className="motion-list-item"
@@ -95,22 +172,30 @@ export function SidebarProjectGroup({
         <CollapsibleTrigger asChild>
           <button
             aria-label={`${expanded ? "收起" : "展开"}${independent ? "任务" : `项目 ${project.name}`}`}
-            className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left text-base"
+            className="relative isolate flex min-w-0 flex-1 items-center overflow-hidden rounded-md px-1 text-left text-base"
             title={independent ? "MelodyWork 的隔离任务目录" : project.path}
+            style={{
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
+            }}
             type="button"
+            {...bindings}
           >
-            <ChevronRightIcon
-              className={cn(
-                "motion-collapsible-chevron size-3.5 shrink-0 text-muted-foreground/70",
-                expanded && "rotate-90",
+            <RippleLayer fadeDuration={fadeDuration} ripples={ripples} />
+            <span className="relative z-10 flex min-w-0 items-center gap-1.5">
+              <ChevronRightIcon
+                className={cn(
+                  "motion-collapsible-chevron size-3.5 shrink-0 text-muted-foreground/70",
+                  expanded && "rotate-90",
+                )}
+              />
+              {independent ? (
+                <MessageCircleIcon className="size-4 shrink-0" />
+              ) : (
+                <FolderOpenIcon className="size-4 shrink-0" />
               )}
-            />
-            {independent ? (
-              <MessageCircleIcon className="size-4 shrink-0" />
-            ) : (
-              <FolderOpenIcon className="size-4 shrink-0" />
-            )}
-            <span className="truncate">{label}</span>
+              <span className="truncate">{label}</span>
+            </span>
           </button>
         </CollapsibleTrigger>
         <DropdownMenu>
@@ -207,59 +292,15 @@ export function SidebarProjectGroup({
       <CollapsibleContent className="motion-collapsible-content">
         <div className="flex flex-col gap-0.5 pl-6 pt-0.5">
           {sessions.map((session) => {
-            const selected = session.id === activeSessionId;
-            const running = runningSessions[session.id] === true;
             return (
-              <div
-                className={cn(
-                  "group flex min-h-8 w-full items-center rounded-lg px-1 text-sm transition-colors",
-                  selected
-                    ? "bg-sidebar-selected text-sidebar-foreground"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                )}
+              <SidebarSessionRow
+                onRequestDelete={onRequestDelete}
+                onSelectSession={onSelectSession}
                 key={session.id}
-              >
-                <button
-                  className="min-w-0 flex-1 truncate px-2 py-1 text-left"
-                  onClick={() => onSelectSession(session)}
-                  title={localizedSessionTitle(session.title)}
-                  type="button"
-                >
-                  {localizedSessionTitle(session.title)}
-                </button>
-                {running ? (
-                  <span
-                    aria-label="任务正在运行"
-                    className="mr-1 size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-foreground"
-                    role="status"
-                    title="任务正在运行"
-                  />
-                ) : null}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      aria-label={`${localizedSessionTitle(session.title)}的操作`}
-                      className={cn(
-                        "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100",
-                        selected && "group-hover:opacity-100",
-                      )}
-                      size="icon-sm"
-                      variant="ghost"
-                    >
-                      <MoreHorizontalIcon />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onSelect={() => onRequestDelete(session)}
-                    >
-                      <Trash2Icon />
-                      删除任务…
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                running={runningSessions[session.id] === true}
+                selected={session.id === activeSessionId}
+                session={session}
+              />
             );
           })}
           {!loading && sessions.length === 0 ? (

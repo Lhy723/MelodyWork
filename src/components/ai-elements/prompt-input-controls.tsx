@@ -33,9 +33,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  IconMorphIcon,
+  ICON_MORPH_SHAPES,
+} from "@/components/interior/icon-morph";
 import { cn } from "@/lib/utils";
 import type { ChatStatus } from "ai";
-import { ArrowUpIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import { Children, useCallback } from "react";
 
@@ -204,14 +208,12 @@ export const PromptInputSubmit = ({
     isGenerating && !hasContent && attachments.files.length === 0;
 
   const Icon = (
-    <span
-      aria-hidden="true"
-      className="prompt-input-submit-icon"
-      data-state={shouldStop ? "stop" : "send"}
-    >
-      <ArrowUpIcon className="prompt-input-submit-icon-send size-4" />
-      <SquareIcon className="prompt-input-submit-icon-stop size-3.5 fill-current" />
-    </span>
+    <IconMorphIcon
+      active={shouldStop}
+      shapes={ICON_MORPH_SHAPES.sendStop}
+      size={16}
+      strokeWidth={1.8}
+    />
   );
 
   const handleClick = useCallback(
@@ -259,7 +261,7 @@ export const PromptInputSelectTrigger = ({
   <SelectTrigger
     className={cn(
       "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
-      "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
+      "hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
       className,
     )}
     {...props}

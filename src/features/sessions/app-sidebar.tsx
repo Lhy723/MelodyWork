@@ -12,12 +12,15 @@ import {
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useState, type PointerEventHandler } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
+import {
+  IconMorphIcon,
+  ICON_MORPH_SHAPES,
+} from "@/components/interior/icon-morph";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -242,7 +245,12 @@ export function AppSidebar({
           size="icon"
           variant="ghost"
         >
-          {searchOpen ? <XIcon /> : <SearchIcon />}
+          <IconMorphIcon
+            active={searchOpen}
+            shapes={ICON_MORPH_SHAPES.searchClose}
+            size={16}
+            strokeWidth={1.8}
+          />
         </Button>
       </div>
 

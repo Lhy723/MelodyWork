@@ -131,7 +131,7 @@ export interface AgentWorkspaceViewProps {
     entryId: string,
     outcome: AgentPlanDecision,
     feedback?: string,
-  ) => void;
+  ) => void | Promise<void>;
   resolveQuestion: (
     entryId: string,
     response: AgentQuestionResponse,

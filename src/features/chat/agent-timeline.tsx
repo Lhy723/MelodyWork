@@ -36,7 +36,7 @@ interface AgentTimelineProps {
     entryId: string,
     outcome: AgentPlanDecision,
     feedback?: string,
-  ) => void;
+  ) => void | Promise<void>;
   onQuestion: (
     entryId: string,
     response: AgentQuestionResponse,

@@ -13,7 +13,7 @@ type StreamdownTableProps = ComponentProps<"table"> & {
 };
 
 const actionButtonClassName =
-  "cursor-pointer rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
+  "cursor-pointer rounded-lg p-1 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
 
 function tableCellText(cell: HTMLTableCellElement) {
   return (cell.textContent ?? "").replace(/\s+/gu, " ").trim();

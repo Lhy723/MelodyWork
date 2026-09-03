@@ -11,9 +11,20 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
 import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
@@ -57,6 +68,9 @@ export function MarketplaceSettings({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingSource, setDeletingSource] = useState(false);
+  const [pendingDeleteSource, setPendingDeleteSource] =
+    useState<MarketplaceSource>();
   const [busyPlugin, setBusyPlugin] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -180,6 +194,7 @@ export function MarketplaceSettings({
   };
 
   const remove = async (name: string) => {
+    setDeletingSource(true);
     setLoading(true);
     setError(undefined);
     setNotice(undefined);
@@ -187,10 +202,13 @@ export function MarketplaceSettings({
       const nextSources = await deleteMarketplaceSource(name);
       setSources(nextSources);
       setPlugins(await scanMarketplacePlugins(cwd));
+      setPendingDeleteSource(undefined);
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setLoading(false);
+      setDeletingSource(false);
     }
   };
 
@@ -231,6 +249,10 @@ export function MarketplaceSettings({
             从 Git 仓库或本地目录发现、安装和更新 Melody 插件。
           </p>
         </div>
+        <PressDepthButton onClick={() => openEditor()} size="sm">
+          <PlusIcon className="size-3.5" />
+          添加来源
+        </PressDepthButton>
         <LoadingButton
           disabled={loading}
           errorLabel="重试"
@@ -243,10 +265,6 @@ export function MarketplaceSettings({
         >
           刷新目录
         </LoadingButton>
-        <Button onClick={() => openEditor()} size="sm">
-          <PlusIcon />
-          添加来源
-        </Button>
       </div>
 
       {visibleError ? (
@@ -259,9 +277,15 @@ export function MarketplaceSettings({
         </p>
       ) : null}
       {notice ? (
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-emerald-500/8 px-3 py-2 text-emerald-800 text-xs dark:text-emerald-300">
-          <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
-          <p className="whitespace-pre-wrap">{notice}</p>
+        <div className="pointer-events-none fixed right-6 bottom-6 z-40 max-w-[calc(100vw-3rem)]">
+          <div
+            aria-live="polite"
+            className="motion-success pointer-events-auto flex max-w-xl items-start gap-2 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-emerald-800 text-xs shadow-lg shadow-emerald-950/10 backdrop-blur-md dark:text-emerald-300"
+            role="status"
+          >
+            <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
+            <p className="whitespace-pre-wrap">{notice}</p>
+          </div>
         </div>
       ) : null}
 
@@ -297,7 +321,7 @@ export function MarketplaceSettings({
                   aria-controls={panelId}
                   aria-selected={selected}
                   className={cn(
-                    "inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                    "inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-[9px] px-3 py-2 text-sm transition-colors",
                     selected
                       ? "bg-background font-medium text-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
@@ -381,7 +405,9 @@ export function MarketplaceSettings({
                   </Button>
                   <Button
                     aria-label={"删除 " + activeMarketplace.source.name}
-                    onClick={() => void remove(activeMarketplace.source.name)}
+                    onClick={() =>
+                      setPendingDeleteSource(activeMarketplace.source)
+                    }
                     size="icon-sm"
                     variant="ghost"
                   >
@@ -430,6 +456,49 @@ export function MarketplaceSettings({
         setSourceInput={setSourceInput}
         sourceInput={sourceInput}
       />
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !deletingSource) {
+            setPendingDeleteSource(undefined);
+          }
+        }}
+        open={Boolean(pendingDeleteSource)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 Marketplace 来源？</DialogTitle>
+            <DialogDescription>
+              “{pendingDeleteSource?.name ?? ""}”及其本地索引会从 Melody
+              中移除， 不会删除来源目录本身。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button disabled={deletingSource} variant="outline">
+                取消
+              </Button>
+            </DialogClose>
+            <HoldToConfirm
+              confirmLabel={deletingSource ? "删除中…" : "已删除"}
+              disabled={deletingSource}
+              onConfirm={() => {
+                if (pendingDeleteSource) {
+                  return remove(pendingDeleteSource.name);
+                }
+              }}
+              variant="destructive"
+            >
+              删除来源
+            </HoldToConfirm>
+          </DialogFooter>
+          {error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

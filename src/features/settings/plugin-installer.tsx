@@ -2,7 +2,7 @@ import { CheckCircle2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { LoadingButton } from "@/components/interior/loading-button";
-import { Button } from "@/components/ui/button";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import {
   Dialog,
   DialogContent,
@@ -45,16 +45,16 @@ export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
 
   return (
     <>
-      <Button
+      <PressDepthButton
         onClick={() => {
           reset();
           setOpen(true);
         }}
         size="sm"
       >
-        <PlusIcon />
+        <PlusIcon className="size-3.5" />
         添加插件
-      </Button>
+      </PressDepthButton>
 
       <Dialog
         onOpenChange={(nextOpen) => {

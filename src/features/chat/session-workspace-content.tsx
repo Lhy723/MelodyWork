@@ -1,11 +1,15 @@
 import {
   DownloadIcon,
   GitCompareArrowsIcon,
-  ListFilterIcon,
   PanelRightIcon,
 } from "lucide-react";
 import type { CSSProperties } from "react";
 
+import {
+  IconMorphIcon,
+  ICON_MORPH_SHAPES,
+} from "@/components/interior/icon-morph";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
 import { localizedSessionTitle } from "@/lib/localize";
@@ -81,11 +85,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
         <header
           className={cn(
             "harness-session-header sidebar-aware-header flex shrink-0 flex-col items-stretch pr-6",
-            sidebarCollapsed
-              ? isMacOS
-                ? "pl-52"
-                : "pl-32"
-              : "pl-6",
+            sidebarCollapsed ? (isMacOS ? "pl-52" : "pl-32") : "pl-6",
           )}
           data-tauri-drag-region
         >
@@ -115,17 +115,13 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
             <div className="harness-session-actions">
               <Button
                 aria-label={
-                  git.loading
-                    ? "正在检查更改"
-                    : `${git.changes.length} 项更改`
+                  git.loading ? "正在检查更改" : `${git.changes.length} 项更改`
                 }
                 className="gap-1 px-2"
                 onClick={onOpenGit}
                 size="sm"
                 title={
-                  git.loading
-                    ? "正在检查更改"
-                    : `${git.changes.length} 项更改`
+                  git.loading ? "正在检查更改" : `${git.changes.length} 项更改`
                 }
                 variant="outline"
               >
@@ -135,17 +131,18 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                 </span>
               </Button>
               {appUpdate?.available ? (
-                <Button
+                <LoadingButton
                   className="motion-view-enter"
                   disabled={installingUpdate}
-                  onClick={() => void installAppUpdate()}
+                  errorLabel="重试"
+                  icon={<DownloadIcon />}
+                  onAction={installAppUpdate}
+                  pendingLabel="正在安装更新"
+                  successLabel="已检查更新"
                   variant="outline"
                 >
-                  <DownloadIcon />
-                  {installingUpdate
-                    ? "正在安装更新"
-                    : `更新到 ${appUpdate.version}`}
-                </Button>
+                  {`更新到 ${appUpdate.version}`}
+                </LoadingButton>
               ) : null}
               <Button
                 aria-label={sessionInfoOpen ? "收起会话信息" : "展开会话信息"}
@@ -155,7 +152,12 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                 title={sessionInfoOpen ? "收起会话信息" : "展开会话信息"}
                 variant={sessionInfoOpen ? "secondary" : "ghost"}
               >
-                <ListFilterIcon />
+                <IconMorphIcon
+                  active={sessionInfoOpen}
+                  shapes={ICON_MORPH_SHAPES.filterClose}
+                  size={16}
+                  strokeWidth={1.8}
+                />
               </Button>
               <Button
                 aria-label={
@@ -164,9 +166,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                 aria-pressed={workspacePanelOpen}
                 onClick={onToggleWorkspacePanel}
                 size="icon"
-                title={
-                  workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"
-                }
+                title={workspacePanelOpen ? "收起右侧边栏" : "展开右侧边栏"}
                 variant={workspacePanelOpen ? "secondary" : "ghost"}
               >
                 <PanelRightIcon />
@@ -325,7 +325,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
         onNewTab={onNewWorkspaceToolTab}
         onOpenFile={onOpenFilePreview}
         onOpenProjectReference={onOpenProjectReference}
-        onRefreshGit={() => void git.refresh()}
+        onRefreshGit={() => git.refresh()}
         onResetWidth={() =>
           updateWorkspacePanelWidth(DEFAULT_WORKSPACE_PANEL_WIDTH)
         }

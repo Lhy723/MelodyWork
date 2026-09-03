@@ -11,7 +11,7 @@ export interface ConfigurationFormProps {
   scope: MelodyConfigScope;
   values: ConfigValues;
   onChange: (path: string[], value: MelodyConfigValue) => void;
-  onReload?: () => void;
+  onReload?: () => unknown;
   reloadDisabled?: boolean;
   reloadLoading?: boolean;
 }

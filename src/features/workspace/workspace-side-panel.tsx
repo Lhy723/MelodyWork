@@ -104,7 +104,7 @@ interface WorkspaceSidePanelProps {
   onResizeBy: (delta: number) => void;
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
-  onRefreshGit: () => void;
+  onRefreshGit: () => void | Promise<void>;
   panelWidth: number;
   minPanelWidth: number;
   maxPanelWidth: number;

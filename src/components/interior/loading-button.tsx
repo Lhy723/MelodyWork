@@ -1,13 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -193,12 +187,7 @@ function AlertMark() {
 
 type LoadingButtonSize = "default" | "xs" | "sm" | "lg";
 type LoadingButtonVariant =
-  | "default"
-  | "outline"
-  | "secondary"
-  | "ghost"
-  | "destructive"
-  | "link";
+  "default" | "outline" | "secondary" | "ghost" | "destructive" | "link";
 
 const sizeClasses: Record<LoadingButtonSize, string> = {
   default: "h-8 gap-1.5 px-2.5 text-sm",
@@ -207,13 +196,19 @@ const sizeClasses: Record<LoadingButtonSize, string> = {
   lg: "h-9 gap-1.5 px-2.5 text-sm",
 };
 
+const iconOnlySizeClasses: Record<LoadingButtonSize, string> = {
+  default: "size-8",
+  xs: "size-6 rounded-lg",
+  sm: "size-7 rounded-lg",
+  lg: "size-9",
+};
+
 const variantClasses: Record<LoadingButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/80",
   outline:
-    "border-border bg-background hover:bg-muted hover:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
-  secondary:
-    "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]",
-  ghost: "border-transparent bg-transparent shadow-none hover:bg-muted hover:text-foreground dark:hover:bg-muted/50",
+    "border-border bg-background hover:text-foreground dark:border-input dark:bg-input/30",
+  secondary: "bg-secondary text-secondary-foreground",
+  ghost: "border-transparent bg-transparent shadow-none hover:text-foreground",
   destructive:
     "border-transparent bg-destructive/10 text-destructive hover:bg-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30",
   link: "border-transparent bg-transparent text-primary underline-offset-4 hover:underline",
@@ -227,6 +222,7 @@ export type LoadingButtonProps = Omit<
   disabled?: boolean;
   errorLabel?: string;
   icon?: ReactNode;
+  iconOnly?: boolean;
   onAction: () => unknown;
   onError?: (error: unknown) => void;
   pendingLabel?: string;
@@ -245,6 +241,7 @@ export const LoadingButton = forwardRef<HTMLButtonElement, LoadingButtonProps>(
       disabled = false,
       errorLabel = "重试",
       icon,
+      iconOnly = false,
       onAction,
       onError,
       pendingLabel = children,
@@ -338,7 +335,7 @@ export const LoadingButton = forwardRef<HTMLButtonElement, LoadingButtonProps>(
           aria-label={buttonProps["aria-label"] ?? label}
           className={cn(
             "group/button relative inline-flex shrink-0 select-none items-center justify-center rounded-lg border border-transparent bg-clip-padding font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:scale-[0.97] disabled:pointer-events-none disabled:opacity-50",
-            sizeClasses[size],
+            iconOnly ? iconOnlySizeClasses[size] : sizeClasses[size],
             variantClasses[variant],
             className,
           )}
@@ -376,7 +373,9 @@ export const LoadingButton = forwardRef<HTMLButtonElement, LoadingButtonProps>(
                 transition={fade}
               >
                 {face.icon}
-                {face.text}
+                <span className={iconOnly ? "sr-only" : undefined}>
+                  {face.text}
+                </span>
               </motion.span>
             ))}
           </span>

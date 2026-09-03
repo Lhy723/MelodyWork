@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,14 +74,13 @@ export function PluginDetailsView({
   const error = loadingState.error;
   const deleteError = deleteState.error;
 
-  const load = useCallback(() => {
-    void runLoad(() => getMelodyPluginDetails(cwd, plugin), setDetails).catch(
-      () => undefined,
-    );
-  }, [cwd, plugin, runLoad]);
+  const load = useCallback(
+    () => runLoad(() => getMelodyPluginDetails(cwd, plugin), setDetails),
+    [cwd, plugin, runLoad],
+  );
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   const remove = () =>
@@ -117,15 +117,19 @@ export function PluginDetailsView({
             {details?.description ?? "查看插件包含的能力和配置。"}
           </p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新插件详情"
           disabled={loading}
-          onClick={() => void load()}
-          size="icon-sm"
-          variant="ghost"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          onAction={load}
+          pendingLabel="刷新中…"
+          size="sm"
+          successLabel="已刷新"
+          variant="outline"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新
+        </LoadingButton>
         {plugin.managed ? (
           <Button
             onClick={() => {
@@ -270,16 +274,18 @@ export function PluginDetailsView({
             </p>
           ) : null}
           <DialogFooter showCloseButton>
-            <LoadingButton
-              errorLabel="重试"
-              icon={<Trash2Icon />}
-              onAction={remove}
-              pendingLabel="正在删除…"
-              successLabel="已删除"
+            <HoldToConfirm
+              aria-label={`确认删除插件 ${plugin.name}`}
+              confirmLabel={
+                deleteState.phase === "pending" ? "正在删除…" : "已删除"
+              }
+              disabled={deleteState.phase === "pending"}
+              onConfirm={remove}
               variant="destructive"
             >
+              <Trash2Icon />
               确认删除
-            </LoadingButton>
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>

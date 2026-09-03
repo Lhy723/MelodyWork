@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { LoadingButton } from "@/components/interior/loading-button";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { Button } from "@/components/ui/button";
 import {
   type ProjectDeleteResult,
@@ -90,17 +90,18 @@ export function SidebarDeleteDialogs({
             <DialogClose asChild>
               <Button variant="outline">取消</Button>
             </DialogClose>
-            <Button
-              onClick={() => {
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDelete) {
                   onDeleteSession(pendingDelete);
                   onPendingDeleteChange(undefined);
                 }
               }}
+              size="default"
               variant="destructive"
             >
               删除
-            </Button>
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -127,15 +128,14 @@ export function SidebarDeleteDialogs({
             <DialogClose asChild>
               <Button variant="outline">取消</Button>
             </DialogClose>
-            <LoadingButton
-              errorLabel="重试"
-              onAction={deleteProject}
-              pendingLabel="删除中…"
-              successLabel="已删除"
+            <HoldToConfirm
+              confirmLabel={deletingProject ? "删除中…" : "已删除"}
+              disabled={deletingProject}
+              onConfirm={deleteProject}
               variant="destructive"
             >
               删除项目
-            </LoadingButton>
+            </HoldToConfirm>
           </DialogFooter>
           {projectDeleteError ? (
             <p className="text-destructive text-sm" role="alert">

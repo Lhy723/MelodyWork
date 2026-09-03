@@ -6,7 +6,17 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
@@ -30,6 +40,7 @@ export function DynamicSection({
   const root = kind === "models" ? ["model"] : ["mcp_servers"];
   const entries = objectEntries(values, root);
   const [draftName, setDraftName] = useState("");
+  const [pendingDeleteName, setPendingDeleteName] = useState<string>();
   const add = () => {
     const name = draftName.trim();
     if (!name || entries.some(([current]) => current === name)) {
@@ -294,7 +305,8 @@ export function DynamicSection({
                   aria-label={`删除 ${name}`}
                   onClick={(event) => {
                     event.preventDefault();
-                    onChange([...root, name], null);
+                    event.stopPropagation();
+                    setPendingDeleteName(name);
                   }}
                   size="icon-sm"
                   variant="ghost"
@@ -324,6 +336,41 @@ export function DynamicSection({
           </div>
         ) : null}
       </div>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteName(undefined);
+        }}
+        open={Boolean(pendingDeleteName)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              删除{kind === "models" ? "自定义模型" : " MCP 服务器"}？
+            </DialogTitle>
+            <DialogDescription>
+              “{pendingDeleteName ?? ""}
+              ”的配置将从当前设置中移除，之后需要重新添加才能使用。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">取消</Button>
+            </DialogClose>
+            <HoldToConfirm
+              onConfirm={() => {
+                if (pendingDeleteName) {
+                  onChange([...root, pendingDeleteName], null);
+                  setPendingDeleteName(undefined);
+                }
+              }}
+              variant="destructive"
+            >
+              确认删除
+            </HoldToConfirm>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

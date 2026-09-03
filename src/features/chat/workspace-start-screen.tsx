@@ -1,6 +1,6 @@
 import { FolderPlusIcon, MessageCircleIcon } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { PressDepthButton } from "@/components/interior/press-depth";
 
 export interface WorkspaceStartScreenProps {
   canUseIndependentTask: boolean;
@@ -56,15 +56,20 @@ export function WorkspaceStartScreen({
           ) : null}
           {!loading ? (
             <div className="mt-7 flex flex-wrap justify-center gap-3">
-              <Button onClick={onChooseWorkspace}>
+              <PressDepthButton depth={3} onClick={onChooseWorkspace} tilt={4}>
                 <FolderPlusIcon data-icon="inline-start" />
                 选择工作区
-              </Button>
+              </PressDepthButton>
               {canUseIndependentTask ? (
-                <Button onClick={onUseIndependentTask} variant="outline">
+                <PressDepthButton
+                  depth={3}
+                  onClick={onUseIndependentTask}
+                  tilt={4}
+                  variant="outline"
+                >
                   <MessageCircleIcon data-icon="inline-start" />
                   使用独立任务
-                </Button>
+                </PressDepthButton>
               ) : null}
             </div>
           ) : null}

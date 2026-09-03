@@ -1,11 +1,11 @@
 import { PlusIcon, RadarIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import { RequestGate } from "@/domain/request-gate";
-import { cn } from "@/lib/utils";
 
 import { searchResearchPapers } from "./research-api";
 import { useResearchStore } from "./research-store";
@@ -35,6 +35,7 @@ export function TrackingPanel() {
     } catch (reason) {
       if (!gate.isCurrent(requestToken)) return;
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       if (gate.isCurrent(requestToken)) {
         setRefreshing((current) => (current === id ? undefined : current));
@@ -112,17 +113,20 @@ export function TrackingPanel() {
                     : "尚未检索"}
                 </p>
               </div>
-              <Button
+              <LoadingButton
                 aria-label={`刷新 ${topic.title}`}
                 disabled={refreshing !== undefined}
-                onClick={() => void refresh(topic.id, topic.query)}
-                size="icon-sm"
+                errorLabel="重试"
+                icon={<RefreshCwIcon />}
+                iconOnly
+                onAction={() => refresh(topic.id, topic.query)}
+                pendingLabel="刷新中…"
+                size="sm"
+                successLabel="已刷新"
                 variant="outline"
               >
-                <RefreshCwIcon
-                  className={cn(refreshing === topic.id && "animate-spin")}
-                />
-              </Button>
+                刷新
+              </LoadingButton>
             </div>
           ))}
         </div>

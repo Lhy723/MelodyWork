@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,14 +51,12 @@ export function SkillDetailsView({
   const error = loadingState.error;
   const deleteError = deleteState.error;
 
-  const load = useCallback(() => {
-    void runLoad(() => getMelodySkillDetails(cwd, skill), setDetails).catch(
-      () => undefined,
-    );
+  const load = useCallback(async () => {
+    await runLoad(() => getMelodySkillDetails(cwd, skill), setDetails);
   }, [cwd, runLoad, skill]);
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   const remove = () =>
@@ -110,15 +109,20 @@ export function SkillDetailsView({
             {details?.description ?? "查看技能说明、包含的文件和安装位置。"}
           </p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新技能详情"
           disabled={loading}
-          onClick={() => void load()}
-          size="icon-sm"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={load}
+          pendingLabel="刷新中…"
+          size="sm"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新技能详情
+        </LoadingButton>
         {skill.deletable ? (
           <Button
             onClick={() => {
@@ -252,16 +256,18 @@ export function SkillDetailsView({
             </p>
           ) : null}
           <DialogFooter showCloseButton>
-            <LoadingButton
-              errorLabel="重试"
-              icon={<Trash2Icon />}
-              onAction={remove}
-              pendingLabel="正在删除…"
-              successLabel="已删除"
+            <HoldToConfirm
+              aria-label={`确认删除技能 ${skill.name}`}
+              confirmLabel={
+                deleteState.phase === "pending" ? "正在删除…" : "已删除"
+              }
+              disabled={deleteState.phase === "pending"}
+              onConfirm={remove}
               variant="destructive"
             >
+              <Trash2Icon />
               确认删除
-            </LoadingButton>
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>

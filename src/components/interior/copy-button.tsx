@@ -139,6 +139,7 @@ export type CopyButtonProps = Omit<
   label?: string;
   copiedLabel?: string;
   errorLabel?: string;
+  iconOnly?: boolean;
   timeout?: number;
   onCopy?: (value: string) => void;
   onError?: (reason: unknown) => void;
@@ -150,6 +151,7 @@ export function CopyButton({
   label = "复制",
   copiedLabel = "已复制",
   errorLabel = "复制失败",
+  iconOnly = false,
   timeout = 2000,
   onCopy,
   onError,
@@ -175,7 +177,8 @@ export function CopyButton({
       {...buttonProps}
       aria-label={ariaLabel ?? label}
       className={cn(
-        "inline-flex h-9 select-none items-center gap-2 rounded-[9px] border border-stone-200 bg-white px-3 text-[13px] font-medium text-stone-700 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.95),inset_0_-1px_0_rgba(28,25,23,0.06),0_1px_2px_rgba(28,25,23,0.08)] outline-none transition-[border-color,box-shadow,background-color] duration-150 hover:bg-stone-50 focus-visible:border-[#4568FF] focus-visible:shadow-[0_1px_2px_rgba(28,25,23,0.08),0_10px_20px_-14px_rgba(69,104,255,0.6)] disabled:opacity-50 dark:border-white/[0.16] dark:bg-[#252522] dark:text-stone-200 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_1px_2px_rgba(0,0,0,0.4)] dark:hover:bg-[#2A2A27] dark:focus-visible:border-[#93B0FF] dark:focus-visible:shadow-[0_10px_20px_-14px_rgba(147,176,255,0.5)]",
+        "inline-flex h-9 select-none items-center gap-2 rounded-[9px] border border-stone-200 bg-white px-3 text-[13px] font-medium text-stone-700 shadow-[inset_0_1.5px_0_rgba(255,255,255,0.95),inset_0_-1px_0_rgba(28,25,23,0.06),0_1px_2px_rgba(28,25,23,0.08)] outline-none transition-[border-color,box-shadow,background-color] duration-150 focus-visible:border-[#4568FF] focus-visible:shadow-[0_1px_2px_rgba(28,25,23,0.08),0_10px_20px_-14px_rgba(69,104,255,0.6)] disabled:opacity-50 dark:border-white/[0.16] dark:bg-[#252522] dark:text-stone-200 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_1px_2px_rgba(0,0,0,0.4)] dark:focus-visible:border-[#93B0FF] dark:focus-visible:shadow-[0_10px_20px_-14px_rgba(147,176,255,0.5)]",
+        iconOnly && "size-7 gap-0 rounded-md px-0",
         className,
       )}
       disabled={disabled}
@@ -266,7 +269,10 @@ export function CopyButton({
         </motion.svg>
       </span>
 
-      <span aria-hidden="true" className="relative grid">
+      <span
+        aria-hidden="true"
+        className={cn("relative grid", iconOnly && "sr-only")}
+      >
         {labels.map(([key, text]) => (
           <motion.span
             animate={

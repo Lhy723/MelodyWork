@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,6 @@ import {
   stageGitPaths,
   unstageGitPaths,
 } from "@/lib/melody-bridge";
-import { cn } from "@/lib/utils";
 
 interface GitWorkspaceProps {
   changes: GitChange[];
@@ -115,15 +115,20 @@ export function GitWorkspace({
           <h2 className="font-semibold text-base">Git</h2>
           <p className="truncate text-muted-foreground text-xs">{cwd}</p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新 Git"
           disabled={loading || busy}
-          onClick={() => void refresh()}
-          size="icon"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={refresh}
+          pendingLabel="刷新中…"
+          size="default"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新 Git
+        </LoadingButton>
         <Button
           aria-label="关闭 Git"
           onClick={onClose}
@@ -173,22 +178,26 @@ export function GitWorkspace({
                   <span className="text-red-700 text-xs">
                     −{change.deletions}
                   </span>
-                  <Button
+                  <LoadingButton
                     disabled={busy}
-                    onClick={() =>
-                      void runAction(
+                    errorLabel="重试"
+                    onAction={() =>
+                      runAction(
                         () =>
                           change.staged
                             ? unstageGitPaths(cwd, [change.path])
                             : stageGitPaths(cwd, [change.path]),
                         change.staged ? "文件已取消暂存。" : "文件已暂存。",
+                        true,
                       )
                     }
+                    pendingLabel={change.staged ? "取消中…" : "暂存中…"}
                     size="sm"
+                    successLabel={change.staged ? "已取消" : "已暂存"}
                     variant={change.staged ? "secondary" : "outline"}
                   >
                     {change.staged ? "取消暂存" : "暂存"}
-                  </Button>
+                  </LoadingButton>
                 </div>
               ))}
               {changes.length === 0 ? (
@@ -326,25 +335,23 @@ export function GitWorkspace({
                   </span>
                   {worktree.path !== cwd ? (
                     pendingRemoval === worktree.path ? (
-                      <LoadingButton
+                      <HoldToConfirm
                         aria-label={`确认移除 ${worktree.path}`}
+                        confirmLabel={busy ? "移除中…" : "已移除"}
                         disabled={busy}
-                        errorLabel="重试"
-                        onAction={() => {
-                          setPendingRemoval(undefined);
-                          return runAction(
+                        onConfirm={() =>
+                          runAction(
                             () => removeGitWorktree(cwd, worktree.path),
                             "工作树已移除。",
                             true,
-                          );
-                        }}
-                        pendingLabel="移除中…"
+                          ).then(() => setPendingRemoval(undefined))
+                        }
                         size="sm"
-                        successLabel="已移除"
                         variant="destructive"
                       >
+                        <Trash2Icon />
                         确认移除
-                      </LoadingButton>
+                      </HoldToConfirm>
                     ) : (
                       <Button
                         aria-label={`移除 ${worktree.path}`}

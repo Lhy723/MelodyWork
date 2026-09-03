@@ -149,15 +149,20 @@ export function FileWorkspace({
           <h2 className="font-semibold text-base">文件</h2>
           <p className="truncate text-muted-foreground text-xs">{root}</p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新文件"
           disabled={loading}
-          onClick={() => void loadTree()}
-          size="icon"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={loadTree}
+          pendingLabel="刷新中…"
+          size="default"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新文件
+        </LoadingButton>
         {!onOpenFile ? (
           <LoadingButton
             disabled={!selectedPath || content === savedContent}

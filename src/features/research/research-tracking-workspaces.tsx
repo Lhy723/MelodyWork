@@ -9,12 +9,22 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
-import { cn } from "@/lib/utils";
 
 import { searchResearchPapers } from "./research-api";
 import type { ResearchMainKind } from "./research-main-workspace";
@@ -214,6 +224,7 @@ export function TrackingDetailWorkspace({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const refreshGateRef = useRef(new RequestGate());
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const topicPapers =
     topic?.paperIds?.flatMap((id) => {
       const paper = papers.find((item) => item.id === id);
@@ -232,6 +243,7 @@ export function TrackingDetailWorkspace({
     } catch (reason) {
       if (!refreshGateRef.current.isCurrent(requestToken)) return;
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       if (refreshGateRef.current.isCurrent(requestToken)) {
         setRefreshing(false);
@@ -282,20 +294,20 @@ export function TrackingDetailWorkspace({
             <ProjectContext projectName={projectName} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button
+            <LoadingButton
               disabled={refreshing}
-              onClick={() => void refresh()}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={refresh}
+              pendingLabel="正在刷新…"
               size="sm"
+              successLabel="已刷新"
             >
-              <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
-              {refreshing ? "正在刷新…" : "刷新进展"}
-            </Button>
+              刷新进展
+            </LoadingButton>
             <Button
               aria-label="删除追踪主题"
-              onClick={() => {
-                removeTrackingTopic(topic.id);
-                onBack();
-              }}
+              onClick={() => setDeleteOpen(true)}
               size="icon-sm"
               variant="ghost"
             >
@@ -348,6 +360,33 @@ export function TrackingDetailWorkspace({
           </div>
         </div>
       </main>
+
+      <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除追踪主题？</DialogTitle>
+            <DialogDescription>
+              “{topic.title}
+              ”及其关联的追踪关系将从当前项目中移除，已导入文献不会被删除。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">取消</Button>
+            </DialogClose>
+            <HoldToConfirm
+              onConfirm={() => {
+                removeTrackingTopic(topic.id);
+                setDeleteOpen(false);
+                onBack();
+              }}
+              variant="destructive"
+            >
+              删除主题
+            </HoldToConfirm>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
