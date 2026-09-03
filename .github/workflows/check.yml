@@ -26,6 +26,7 @@ jobs:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm check:ui-font
       - run: pnpm check:architecture
       - run: pnpm test:unit
       - run: pnpm lint

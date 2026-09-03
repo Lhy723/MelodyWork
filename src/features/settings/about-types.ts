@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 
-import type { AppReleaseHistoryItem } from "@/lib/melody-bridge";
+import type {
+  AppReleaseHistoryItem,
+  AppUpdateProgress,
+} from "@/lib/melody-bridge";
 import type { UpdateChannel } from "@/stores/app-settings-store";
 
 export type UpdateCheckState =
@@ -13,7 +16,12 @@ export type UpdateCheckState =
       version: string;
       notes?: string;
     }
-  | { status: "installing"; channel: UpdateChannel }
+  | {
+      status: "installing";
+      channel: UpdateChannel;
+      version: string;
+      progress: AppUpdateProgress;
+    }
   | { status: "installed" }
   | { status: "error"; message: string }
   | { status: "not-configured" };

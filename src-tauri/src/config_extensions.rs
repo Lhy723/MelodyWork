@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 
 use crate::capability_lifecycle::{CapabilityKind, capability_name, change_capability_state};
 use crate::melody_command::MelodyCommandRunner;
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
 use super::config_plugin_details::allowed_skill_path;
@@ -88,7 +88,6 @@ pub(crate) fn extension_config_names(
 
 #[tauri::command]
 pub async fn set_melody_extension_enabled(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     scope: String,
     cwd: String,
@@ -99,16 +98,6 @@ pub async fn set_melody_extension_enabled(
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     let kind = CapabilityKind::parse(&kind)?;
     let name = capability_name(&name)?;
-    confirm_action(
-        &app,
-        "确认修改扩展状态",
-        format!(
-            "允许{}扩展 {} 吗？",
-            if enabled { "启用" } else { "停用" },
-            name
-        ),
-    )
-    .await?;
     let config_key = kind.config_key();
     let disabled = extension_config_names(&scope, &cwd, config_key, "disabled")?;
     let explicitly_enabled = if kind == CapabilityKind::Plugin {

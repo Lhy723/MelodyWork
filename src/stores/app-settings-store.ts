@@ -3,6 +3,12 @@ import { persist } from "zustand/middleware";
 
 export type UpdateChannel = "stable" | "beta";
 export type FileOpener = "system" | "vscode" | "cursor";
+export type UiFontPreset = "geist" | "system" | "custom";
+
+export const DEFAULT_UI_FONT =
+  '"Geist Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
+export const SYSTEM_UI_FONT =
+  '-apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 
 export interface AppSettings {
   theme: "system" | "light" | "dark";
@@ -13,6 +19,7 @@ export interface AppSettings {
   darkBackground: string;
   darkForeground: string;
   uiFont: string;
+  uiFontPreset: UiFontPreset;
   codeFont: string;
   translucentSidebar: boolean;
   pointerCursor: boolean;
@@ -51,8 +58,8 @@ const defaultSettings: AppSettings = {
   darkAccent: "#339cff",
   darkBackground: "#181818",
   darkForeground: "#ffffff",
-  uiFont:
-    '"Geist Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+  uiFont: DEFAULT_UI_FONT,
+  uiFontPreset: "geist",
   codeFont:
     'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   translucentSidebar: true,
@@ -119,9 +126,22 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
             Math.max(14, persistedSettings.uiFontSize),
           );
         }
+        const persistedUiFontPreset = persistedSettings.uiFontPreset;
+        const uiFontPreset: UiFontPreset =
+          persistedUiFontPreset === "geist" ||
+          persistedUiFontPreset === "system" ||
+          persistedUiFontPreset === "custom"
+            ? persistedUiFontPreset
+            : persistedSettings.uiFont === SYSTEM_UI_FONT
+              ? "system"
+              : typeof persistedSettings.uiFont === "string" &&
+                  persistedSettings.uiFont !== DEFAULT_UI_FONT
+                ? "custom"
+                : currentState.uiFontPreset;
         return {
           ...currentState,
           ...persistedSettings,
+          uiFontPreset,
           defaultPermissionMode:
             persistedSettings.defaultPermissionMode === "auto" ||
             persistedSettings.defaultPermissionMode === "always-approve" ||

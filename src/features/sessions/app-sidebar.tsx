@@ -12,12 +12,11 @@ import {
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
-  XIcon,
 } from "lucide-react";
 import { useEffect, useState, type PointerEventHandler } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Presence } from "@/components/ui/presence";
+import { ExpandingSearch } from "@/components/interior/expanding-search";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,7 +102,7 @@ export function AppSidebar({
     useState<ProjectRecord>();
   const [deletingProject, setDeletingProject] = useState(false);
   const [projectDeleteError, setProjectDeleteError] = useState<string>();
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(activeProject ? [activeProject.id] : []),
@@ -185,7 +184,7 @@ export function AppSidebar({
       />
 
       <div
-        className="flex h-10 shrink-0 items-center gap-1.5 px-1"
+        className="relative flex h-10 shrink-0 items-center gap-1.5 px-1"
         data-tauri-drag-region
       >
         <DropdownMenu>
@@ -230,42 +229,23 @@ export function AppSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          aria-label={searchOpen ? "关闭搜索" : "搜索任务"}
-          className="ml-auto shrink-0 text-sidebar-foreground hover:text-sidebar-foreground"
-          onClick={() => {
-            setSearchOpen((current) => !current);
-            if (searchOpen) {
-              setQuery("");
-            }
-          }}
-          size="icon"
-          variant="ghost"
-        >
-          {searchOpen ? <XIcon /> : <SearchIcon />}
-        </Button>
-      </div>
-
-      <Presence present={searchOpen}>
-        {(motionState) => (
+        <div className="pointer-events-none absolute inset-0 z-20">
           <div
-            className="motion-sidebar-search px-1 pb-2"
-            data-motion-state={motionState}
+            className="pointer-events-auto absolute inset-x-1 inset-y-0"
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
           >
-            <div className="flex h-8 items-center gap-2 rounded-lg border bg-background/70 px-2.5 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
-              <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <input
-                autoFocus
-                aria-label="搜索项目和任务"
-                className="min-w-0 flex-1 bg-transparent text-sidebar-foreground text-sm outline-none placeholder:text-muted-foreground"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索项目和任务"
-                value={query}
-              />
-            </div>
+            <ExpandingSearch
+              debounce={180}
+              label="搜索项目和任务"
+              onChange={setSearchInput}
+              onSearch={setQuery}
+              placeholder="搜索项目和任务"
+              value={searchInput}
+            />
           </div>
-        )}
-      </Presence>
+        </div>
+      </div>
 
       <nav aria-label="主导航" className="mt-2 flex flex-col gap-0 px-1">
         <Button

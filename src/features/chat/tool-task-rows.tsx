@@ -2,12 +2,12 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CircleXIcon,
-  CopyIcon,
   LoaderCircleIcon,
   PencilIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
+import { CopyButton } from "@/components/interior/copy-button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import type { AgentToolFileChange } from "@/domain/acp";
 import type { ToolTimelineEntry } from "@/domain/timeline-groups";
@@ -30,34 +30,17 @@ export function DiffCard({
   label: string;
 }) {
   const lines = useMemo(() => visibleDiffLines(change), [change]);
-  const [copied, setCopied] = useState(false);
-  const copyTimeoutRef = useRef<number>(0);
-
-  useEffect(
-    () => () => {
-      window.clearTimeout(copyTimeoutRef.current);
-    },
-    [],
+  const diffText = useMemo(
+    () =>
+      lines
+        .filter((line) => line.kind !== "ellipsis")
+        .map(
+          (line) =>
+            `${line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}${line.text}`,
+        )
+        .join("\n"),
+    [lines],
   );
-
-  const copyDiff = async () => {
-    const text = lines
-      .filter((line) => line.kind !== "ellipsis")
-      .map(
-        (line) =>
-          `${line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}${line.text}`,
-      )
-      .join("\n");
-    if (!navigator.clipboard?.writeText) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  };
 
   return (
     <div className="motion-view-enter mt-2 overflow-hidden rounded-xl border border-border/80 bg-background">
@@ -67,23 +50,41 @@ export function DiffCard({
         </span>
         <span className="text-emerald-600">+{change.additions}</span>
         <span className="text-red-600">-{change.deletions}</span>
-        <button
-          aria-label={
-            copied ? `已复制 ${label} 的差异` : `复制 ${label} 的差异`
-          }
-          className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        <CopyButton
+          aria-label={`复制 ${label} 的差异`}
+          className="ml-auto size-7 rounded-md border-0 bg-transparent p-1 text-muted-foreground shadow-none hover:text-foreground dark:bg-transparent"
+          copiedLabel="已复制"
           data-copy-button="true"
-          data-copied={copied ? "true" : undefined}
-          onClick={() => void copyDiff()}
-          title={copied ? "已复制差异" : `复制 ${label} 的差异`}
-          type="button"
+          errorLabel="复制失败"
+          iconOnly
+          label={`复制 ${label} 的差异`}
+          title={`复制 ${label} 的差异`}
+          value={diffText}
         >
-          {copied ? (
-            <CheckIcon aria-hidden="true" className="size-4" />
-          ) : (
-            <CopyIcon aria-hidden="true" className="size-4" />
-          )}
-        </button>
+          <svg
+            aria-hidden="true"
+            className="size-4"
+            fill="none"
+            viewBox="0 0 16 16"
+          >
+            <path
+              d="M6 5.5V4a1.5 1.5 0 0 1 1.5-1.5H12A1.5 1.5 0 0 1 13.5 4v4.5A1.5 1.5 0 0 1 12 10h-1.5"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.4"
+            />
+            <rect
+              height="7"
+              rx="1.5"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              width="7"
+              x="2.5"
+              y="6.5"
+            />
+          </svg>
+        </CopyButton>
       </div>
       <div className="max-h-[420px] overflow-auto font-mono text-xs leading-5">
         {lines.map((line, index) => (
@@ -165,7 +166,7 @@ export function FileChangeRow({
         <button
           aria-expanded={open}
           aria-label={`${open ? "收起" : "展开"} ${path} 的差异`}
-          className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setOpen((value) => !value)}
           type="button"
         >

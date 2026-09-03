@@ -11,9 +11,22 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { ExpandingSearch } from "@/components/interior/expanding-search";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadMore } from "@/components/interior/load-more";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { MarketplacePlugin, MarketplaceSource } from "@/domain/config";
 import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
@@ -59,6 +72,9 @@ export function MarketplaceSettings({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingSource, setDeletingSource] = useState(false);
+  const [pendingDeleteSource, setPendingDeleteSource] =
+    useState<MarketplaceSource>();
   const [busyPlugin, setBusyPlugin] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -66,6 +82,9 @@ export function MarketplaceSettings({
   const [marketplaceVisibleCount, setMarketplaceVisibleCount] = useState(
     MARKETPLACE_PAGE_SIZE,
   );
+  const [marketplaceSearchInput, setMarketplaceSearchInput] = useState("");
+  const [marketplaceQuery, setMarketplaceQuery] = useState("");
+  const [marketplaceSearchOpen, setMarketplaceSearchOpen] = useState(false);
   const { state: pluginActionState, run: runPluginOperation } =
     useAsyncOperation();
   const visibleError = pluginActionState.error ?? error;
@@ -127,27 +146,43 @@ export function MarketplaceSettings({
     marketplaceGroups.find((group) => group.key === activeMarketplaceKey) ??
     marketplaceGroups[0];
 
+  const visibleMarketplacePlugins = useMemo(() => {
+    if (!activeMarketplace) return [];
+    const normalized = marketplaceQuery.trim().toLocaleLowerCase();
+    if (!normalized) return activeMarketplace.plugins;
+    return activeMarketplace.plugins.filter((plugin) =>
+      [plugin.name, plugin.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(normalized),
+    );
+  }, [activeMarketplace, marketplaceQuery]);
+
   const loadedMarketplacePlugins = useMemo(
-    () => activeMarketplace?.plugins.slice(0, marketplaceVisibleCount) ?? [],
-    [activeMarketplace, marketplaceVisibleCount],
+    () => visibleMarketplacePlugins.slice(0, marketplaceVisibleCount),
+    [marketplaceVisibleCount, visibleMarketplacePlugins],
   );
-  const marketplaceHasMore = Boolean(
-    activeMarketplace &&
-    marketplaceVisibleCount < activeMarketplace.plugins.length,
-  );
+  const marketplaceHasMore = marketplaceVisibleCount < visibleMarketplacePlugins.length;
 
   const loadMoreMarketplacePlugins = useCallback(() => {
-    const total = activeMarketplace?.plugins.length ?? 0;
+    const total = visibleMarketplacePlugins.length;
     const nextCount = Math.min(
       marketplaceVisibleCount + MARKETPLACE_PAGE_SIZE,
       total,
     );
     setMarketplaceVisibleCount(nextCount);
     return nextCount < total;
-  }, [activeMarketplace, marketplaceVisibleCount]);
+  }, [marketplaceVisibleCount, visibleMarketplacePlugins.length]);
 
   useEffect(() => {
     setMarketplaceVisibleCount(MARKETPLACE_PAGE_SIZE);
+  }, [activeMarketplaceKey, marketplaceQuery]);
+
+  useEffect(() => {
+    setMarketplaceSearchInput("");
+    setMarketplaceQuery("");
+    setMarketplaceSearchOpen(false);
   }, [activeMarketplaceKey]);
 
   const load = useCallback(
@@ -164,6 +199,7 @@ export function MarketplaceSettings({
         setPlugins(nextPlugins);
       } catch (reason) {
         setError(toUserMessage(reason));
+        throw reason;
       } finally {
         setLoading(false);
       }
@@ -172,7 +208,7 @@ export function MarketplaceSettings({
   );
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   const openEditor = (source?: MarketplaceSource) => {
@@ -199,6 +235,7 @@ export function MarketplaceSettings({
       setNotice("Marketplace 已保存并完成插件扫描。");
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setSaving(false);
       setLoading(false);
@@ -206,6 +243,7 @@ export function MarketplaceSettings({
   };
 
   const remove = async (name: string) => {
+    setDeletingSource(true);
     setLoading(true);
     setError(undefined);
     setNotice(undefined);
@@ -213,10 +251,13 @@ export function MarketplaceSettings({
       const nextSources = await deleteMarketplaceSource(name);
       setSources(nextSources);
       setPlugins(await scanMarketplacePlugins(cwd));
+      setPendingDeleteSource(undefined);
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setLoading(false);
+      setDeletingSource(false);
     }
   };
 
@@ -239,8 +280,6 @@ export function MarketplaceSettings({
       });
       setPlugins(result.nextPlugins);
       setNotice(result.message);
-    } catch {
-      // The operation state owns the user-visible error.
     } finally {
       setBusyPlugin(undefined);
     }
@@ -259,19 +298,47 @@ export function MarketplaceSettings({
             从 Git 仓库或本地目录发现、安装和更新 Melody 插件。
           </p>
         </div>
-        <Button
-          disabled={loading}
-          onClick={() => void load(true)}
-          size="sm"
-          variant="outline"
-        >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-          刷新目录
-        </Button>
-        <Button onClick={() => openEditor()} size="sm">
-          <PlusIcon />
-          添加来源
-        </Button>
+        <div className="relative flex h-10 shrink-0 items-center pr-10">
+          <div
+            aria-hidden={marketplaceSearchOpen}
+            className={cn(
+              "flex items-center gap-2 transition-opacity",
+              marketplaceSearchOpen && "pointer-events-none opacity-0",
+            )}
+          >
+            <PressDepthButton onClick={() => openEditor()} size="sm">
+              <PlusIcon className="size-3.5" />
+              添加来源
+            </PressDepthButton>
+            <LoadingButton
+              disabled={loading}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={() => load(true)}
+              pendingLabel="刷新中…"
+              size="sm"
+              successLabel="已刷新"
+              variant="outline"
+            >
+              刷新目录
+            </LoadingButton>
+          </div>
+          <div className="absolute inset-y-0 right-0 z-10 flex w-60 items-center">
+            <ExpandingSearch
+              debounce={180}
+              disabled={!activeMarketplace}
+              label="搜索 Marketplace 插件"
+              onChange={setMarketplaceSearchInput}
+              onOpenChange={setMarketplaceSearchOpen}
+              onSearch={setMarketplaceQuery}
+              open={marketplaceSearchOpen}
+              placeholder="搜索插件"
+              resultCount={visibleMarketplacePlugins.length}
+              size="sm"
+              value={marketplaceSearchInput}
+            />
+          </div>
+        </div>
       </div>
 
       {visibleError ? (
@@ -284,9 +351,15 @@ export function MarketplaceSettings({
         </p>
       ) : null}
       {notice ? (
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-emerald-500/8 px-3 py-2 text-emerald-800 text-xs dark:text-emerald-300">
-          <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
-          <p className="whitespace-pre-wrap">{notice}</p>
+        <div className="pointer-events-none fixed right-6 bottom-6 z-40 max-w-[calc(100vw-3rem)]">
+          <div
+            aria-live="polite"
+            className="motion-success pointer-events-auto flex max-w-xl items-start gap-2 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-emerald-800 text-xs shadow-lg shadow-emerald-950/10 backdrop-blur-md dark:text-emerald-300"
+            role="status"
+          >
+            <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
+            <p className="whitespace-pre-wrap">{notice}</p>
+          </div>
         </div>
       ) : null}
 
@@ -322,7 +395,7 @@ export function MarketplaceSettings({
                   aria-controls={panelId}
                   aria-selected={selected}
                   className={cn(
-                    "inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                    "inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-[9px] px-3 py-2 text-sm transition-colors",
                     selected
                       ? "bg-background font-medium text-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
@@ -375,7 +448,9 @@ export function MarketplaceSettings({
                       : "索引"}
                   </Badge>
                   <span className="text-muted-foreground text-xs">
-                    {activeMarketplace.plugins.length} 个插件
+                    {marketplaceQuery.trim()
+                      ? `${visibleMarketplacePlugins.length}/${activeMarketplace.plugins.length} 个插件`
+                      : `${activeMarketplace.plugins.length} 个插件`}
                   </span>
                 </div>
                 {activeMarketplace.source ? (
@@ -406,7 +481,9 @@ export function MarketplaceSettings({
                   </Button>
                   <Button
                     aria-label={"删除 " + activeMarketplace.source.name}
-                    onClick={() => void remove(activeMarketplace.source.name)}
+                    onClick={() =>
+                      setPendingDeleteSource(activeMarketplace.source)
+                    }
                     size="icon-sm"
                     variant="ghost"
                   >
@@ -418,18 +495,19 @@ export function MarketplaceSettings({
             <div className="grid gap-1.5 p-2">
               {loadedMarketplacePlugins.map((plugin) => (
                 <MarketplacePluginRow
-                  busy={busyPlugin === marketplaceReference(plugin)}
                   disabled={busyPlugin !== undefined}
                   key={marketplaceReference(plugin)}
                   onAction={runPluginAction}
                   plugin={plugin}
                 />
               ))}
-              {!loading && activeMarketplace.plugins.length === 0 ? (
+              {!loading && visibleMarketplacePlugins.length === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <PackageIcon className="mx-auto mb-2 size-4 text-muted-foreground" />
                   <p className="text-muted-foreground text-xs">
-                    这个 Marketplace 中没有发现插件。
+                    {marketplaceQuery.trim()
+                      ? "没有匹配的插件。"
+                      : "这个 Marketplace 中没有发现插件。"}
                   </p>
                 </div>
               ) : null}
@@ -440,7 +518,7 @@ export function MarketplaceSettings({
                 </div>
               ) : null}
               {!loading &&
-              activeMarketplace.plugins.length > MARKETPLACE_PAGE_SIZE ? (
+              visibleMarketplacePlugins.length > MARKETPLACE_PAGE_SIZE ? (
                 <LoadMore
                   className="px-2 py-3"
                   hasMore={marketplaceHasMore}
@@ -463,7 +541,7 @@ export function MarketplaceSettings({
         draft={draft}
         error={error}
         onOpenChange={setDialogOpen}
-        onSave={() => void save()}
+        onSave={save}
         open={dialogOpen}
         originalName={originalName}
         saving={saving}
@@ -471,6 +549,49 @@ export function MarketplaceSettings({
         setSourceInput={setSourceInput}
         sourceInput={sourceInput}
       />
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !deletingSource) {
+            setPendingDeleteSource(undefined);
+          }
+        }}
+        open={Boolean(pendingDeleteSource)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 Marketplace 来源？</DialogTitle>
+            <DialogDescription>
+              “{pendingDeleteSource?.name ?? ""}”及其本地索引会从 Melody
+              中移除， 不会删除来源目录本身。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button disabled={deletingSource} variant="outline">
+                取消
+              </Button>
+            </DialogClose>
+            <HoldToConfirm
+              confirmLabel={deletingSource ? "删除中…" : "已删除"}
+              disabled={deletingSource}
+              onConfirm={() => {
+                if (pendingDeleteSource) {
+                  return remove(pendingDeleteSource.name);
+                }
+              }}
+              variant="destructive"
+            >
+              删除来源
+            </HoldToConfirm>
+          </DialogFooter>
+          {error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

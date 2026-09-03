@@ -37,26 +37,9 @@ pub(crate) enum ServerResponseAction {
 #[derive(Clone, Debug)]
 pub(crate) struct PendingServerRequest {
     method: String,
-    session_id: Option<String>,
-    title: String,
-    command: String,
     allow_option_ids: HashSet<String>,
     reject_option_ids: HashSet<String>,
     created_at: Instant,
-}
-
-impl PendingServerRequest {
-    pub(crate) fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
-    }
-
-    pub(crate) fn title(&self) -> &str {
-        &self.title
-    }
-
-    pub(crate) fn command(&self) -> &str {
-        &self.command
-    }
 }
 
 #[derive(Default)]
@@ -80,21 +63,6 @@ impl PendingServerRequests {
             return;
         };
         let params = message.get("params").and_then(Value::as_object);
-        let tool = params
-            .and_then(|params| params.get("toolCall").or_else(|| params.get("tool_call")))
-            .and_then(Value::as_object);
-        let title = tool
-            .and_then(|tool| tool.get("title"))
-            .and_then(Value::as_str)
-            .unwrap_or("工具调用")
-            .trim()
-            .to_string();
-        let command = tool
-            .and_then(|tool| tool.get("command"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
         let mut allow_option_ids = HashSet::new();
         let mut reject_option_ids = HashSet::new();
         if method == "session/request_permission"
@@ -124,8 +92,6 @@ impl PendingServerRequests {
                 }
             }
         }
-        let session_id = session_id(params).map(str::to_string);
-
         self.requests.retain(|_, request| {
             now.saturating_duration_since(request.created_at) < PENDING_SERVER_REQUEST_TTL
         });
@@ -142,9 +108,6 @@ impl PendingServerRequests {
             key,
             PendingServerRequest {
                 method: method.to_string(),
-                session_id,
-                title,
-                command,
                 allow_option_ids,
                 reject_option_ids,
                 created_at: now,

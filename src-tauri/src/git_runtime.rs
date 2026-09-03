@@ -1,10 +1,10 @@
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::State;
 use tokio::process::Command;
 
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 #[path = "git_runtime_worktrees.rs"]
 mod git_runtime_worktrees;
@@ -323,7 +323,6 @@ pub async fn git_branches(
 
 #[tauri::command]
 pub async fn git_stage(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     paths: Vec<String>,
@@ -335,12 +334,6 @@ pub async fn git_stage(
     for path in &paths {
         validate_relative_git_path(path)?;
     }
-    confirm_action(
-        &app,
-        "确认暂存 Git 更改",
-        format!("允许在 {} 暂存 {} 个文件吗？", cwd.display(), paths.len()),
-    )
-    .await?;
     let mut args = vec!["add".to_string(), "--".to_string()];
     args.extend(paths);
     run_git_dynamic(&cwd, &args).await.map(|_| ())
@@ -348,7 +341,6 @@ pub async fn git_stage(
 
 #[tauri::command]
 pub async fn git_unstage(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     paths: Vec<String>,
@@ -360,16 +352,6 @@ pub async fn git_unstage(
     for path in &paths {
         validate_relative_git_path(path)?;
     }
-    confirm_action(
-        &app,
-        "确认取消暂存 Git 更改",
-        format!(
-            "允许在 {} 取消暂存 {} 个文件吗？",
-            cwd.display(),
-            paths.len()
-        ),
-    )
-    .await?;
     let mut args = vec![
         "restore".to_string(),
         "--staged".to_string(),
@@ -381,7 +363,6 @@ pub async fn git_unstage(
 
 #[tauri::command]
 pub async fn git_commit(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     message: String,
@@ -391,12 +372,6 @@ pub async fn git_commit(
     if message.is_empty() {
         return Err("Commit message cannot be empty".to_string());
     }
-    confirm_action(
-        &app,
-        "确认创建 Git 提交",
-        format!("允许在 {} 创建以下提交吗？\n{}", cwd.display(), message),
-    )
-    .await?;
     run_git_dynamic(
         &cwd,
         &["commit".to_string(), "-m".to_string(), message.to_string()],
@@ -406,19 +381,12 @@ pub async fn git_commit(
 
 #[tauri::command]
 pub async fn git_checkout_branch(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     branch: String,
 ) -> Result<(), String> {
     let cwd = registry.authorize(&cwd)?;
     validate_branch_name(&cwd, &branch).await?;
-    confirm_action(
-        &app,
-        "确认切换 Git 分支",
-        format!("允许在 {} 切换到分支 {} 吗？", cwd.display(), branch),
-    )
-    .await?;
     run_git_dynamic(&cwd, &["checkout".to_string(), "--".to_string(), branch])
         .await
         .map(|_| ())
@@ -426,7 +394,6 @@ pub async fn git_checkout_branch(
 
 #[tauri::command]
 pub async fn git_create_branch(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     branch: String,
@@ -443,12 +410,6 @@ pub async fn git_create_branch(
             "--branch".to_string(),
             branch.to_string(),
         ],
-    )
-    .await?;
-    confirm_action(
-        &app,
-        "确认创建 Git 分支",
-        format!("允许在 {} 创建并切换到分支 {} 吗？", cwd.display(), branch),
     )
     .await?;
     run_git_dynamic(

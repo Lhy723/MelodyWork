@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,26 +49,22 @@ export function SkillDetailsView({
   } = useAsyncOperation();
   const loading = loadingState.phase === "pending";
   const error = loadingState.error;
-  const deleting = deleteState.phase === "pending";
   const deleteError = deleteState.error;
 
-  const load = useCallback(() => {
-    void runLoad(() => getMelodySkillDetails(cwd, skill), setDetails).catch(
-      () => undefined,
-    );
+  const load = useCallback(async () => {
+    await runLoad(() => getMelodySkillDetails(cwd, skill), setDetails);
   }, [cwd, runLoad, skill]);
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
-  const remove = () => {
-    void runDelete(async () => {
+  const remove = () =>
+    runDelete(async () => {
       await deleteMelodySkill(cwd, skill);
       setDeleteOpen(false);
       await onDeleted();
-    }).catch(() => undefined);
-  };
+    });
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -111,15 +109,20 @@ export function SkillDetailsView({
             {details?.description ?? "查看技能说明、包含的文件和安装位置。"}
           </p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新技能详情"
           disabled={loading}
-          onClick={() => void load()}
-          size="icon-sm"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={load}
+          pendingLabel="刷新中…"
+          size="sm"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新技能详情
+        </LoadingButton>
         {skill.deletable ? (
           <Button
             onClick={() => {
@@ -253,14 +256,18 @@ export function SkillDetailsView({
             </p>
           ) : null}
           <DialogFooter showCloseButton>
-            <Button
-              disabled={deleting}
-              onClick={() => void remove()}
+            <HoldToConfirm
+              aria-label={`确认删除技能 ${skill.name}`}
+              confirmLabel={
+                deleteState.phase === "pending" ? "正在删除…" : "已删除"
+              }
+              disabled={deleteState.phase === "pending"}
+              onConfirm={remove}
               variant="destructive"
             >
               <Trash2Icon />
-              {deleting ? "正在删除…" : "确认删除"}
-            </Button>
+              确认删除
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>

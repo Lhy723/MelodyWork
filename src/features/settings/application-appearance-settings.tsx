@@ -1,9 +1,19 @@
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { isMacOSRuntime, isTauriRuntime } from "@/lib/melody-bridge";
 import { cn } from "@/lib/utils";
 import {
+  DEFAULT_UI_FONT,
+  SYSTEM_UI_FONT,
   useAppSettingsStore,
   type AppSettings,
+  type UiFontPreset,
 } from "@/stores/app-settings-store";
 
 import {
@@ -95,9 +105,61 @@ export function ColorSetting({
   );
 }
 
+const uiFontPresetOptions: { value: UiFontPreset; label: string }[] = [
+  { value: "geist", label: "Geist（默认）" },
+  { value: "system", label: "系统字体" },
+  { value: "custom", label: "自定义" },
+];
+
+function UiFontPreference() {
+  const uiFont = useAppSettingsStore((state) => state.uiFont);
+  const uiFontPreset = useAppSettingsStore((state) => state.uiFontPreset);
+  const setSetting = useAppSettingsStore((state) => state.setSetting);
+
+  const setUiFontPreset = (preset: UiFontPreset) => {
+    setSetting("uiFontPreset", preset);
+    if (preset === "geist") {
+      setSetting("uiFont", DEFAULT_UI_FONT);
+    } else if (preset === "system") {
+      setSetting("uiFont", SYSTEM_UI_FONT);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <Select
+        onValueChange={(value) => setUiFontPreset(value as UiFontPreset)}
+        value={uiFontPreset}
+      >
+        <SelectTrigger aria-label="UI 字体预设" className="w-36">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {uiFontPresetOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {uiFontPreset === "custom" ? (
+        <Input
+          aria-label="自定义 UI 字体"
+          className="w-52"
+          onChange={(event) => {
+            setSetting("uiFont", event.target.value);
+            setSetting("uiFontPreset", "custom");
+          }}
+          placeholder="字体栈，例如 system-ui, sans-serif"
+          value={uiFont}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function AppearanceThemeGroup({ dark }: { dark: boolean }) {
   const prefix = dark ? "dark" : "light";
-  const uiFont = useAppSettingsStore((state) => state.uiFont);
   const codeFont = useAppSettingsStore((state) => state.codeFont);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   const showTranslucentSidebar = isTauriRuntime() && isMacOSRuntime();
@@ -121,12 +183,7 @@ export function AppearanceThemeGroup({ dark }: { dark: boolean }) {
         }
       />
       <PreferenceRow description="" label="UI 字体">
-        <Input
-          aria-label="UI 字体"
-          className="w-52"
-          onChange={(event) => setSetting("uiFont", event.target.value)}
-          value={uiFont}
-        />
+        <UiFontPreference />
       </PreferenceRow>
       <PreferenceRow description="" label="代码字体">
         <Input

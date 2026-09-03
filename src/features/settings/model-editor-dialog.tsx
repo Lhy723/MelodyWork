@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FloatingLabelInput } from "@/components/interior/floating-label";
 import {
   Dialog,
   DialogContent,
@@ -211,71 +212,53 @@ export function ModelEditorDialog({
             <section>
               <h4 className="mb-2 font-medium text-sm">基础信息</h4>
               <div className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs">
-                  <span className="font-medium">配置名称</span>
-                  <Input
-                    disabled={editing}
-                    onChange={(event) => setAlias(event.target.value)}
-                    placeholder="例如 gpt-work"
-                    value={alias}
-                  />
-                  <span
-                    className={
-                      nameConflict
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {nameConflict
+                <FloatingLabelInput
+                  className="text-xs"
+                  disabled={editing}
+                  hint={
+                    nameConflict
                       ? "该配置名称已经存在。"
-                      : "用于默认模型和代理路由。"}
-                  </span>
-                </label>
-                <label className="grid gap-1.5 text-xs">
-                  <span className="font-medium">显示名称</span>
-                  <Input
-                    onChange={(event) => setField("name", event.target.value)}
-                    placeholder="例如 GPT 工作模型"
-                    value={stringConfigValue(draft, "name")}
-                  />
-                </label>
-                <label className="grid gap-1.5 text-xs sm:col-span-2">
-                  <span className="font-medium">模型 ID</span>
-                  <Input
-                    onChange={(event) => setField("model", event.target.value)}
-                    placeholder="例如 gpt-5.2"
-                    value={modelId}
-                  />
-                  <span className="text-muted-foreground">
-                    发送给模型提供商的实际模型名称。
-                  </span>
-                </label>
-                <label className="grid gap-1.5 text-xs sm:col-span-2">
-                  <span className="font-medium">说明</span>
-                  <Input
-                    onChange={(event) =>
-                      setField("description", event.target.value)
-                    }
-                    placeholder="这个模型适合什么任务"
-                    value={stringConfigValue(draft, "description")}
-                  />
-                </label>
+                      : "用于默认模型和代理路由。"
+                  }
+                  invalid={nameConflict}
+                  label="配置名称"
+                  onChange={(value) => setAlias(value)}
+                  value={alias}
+                />
+                <FloatingLabelInput
+                  className="text-xs"
+                  hint="例如 GPT 工作模型"
+                  label="显示名称"
+                  onChange={(value) => setField("name", value)}
+                  value={stringConfigValue(draft, "name")}
+                />
+                <FloatingLabelInput
+                  className="text-xs sm:col-span-2"
+                  hint="发送给模型提供商的实际模型名称。"
+                  label="模型 ID"
+                  onChange={(value) => setField("model", value)}
+                  value={modelId}
+                />
+                <FloatingLabelInput
+                  className="text-xs sm:col-span-2"
+                  hint="这个模型适合什么任务"
+                  label="说明"
+                  onChange={(value) => setField("description", value)}
+                  value={stringConfigValue(draft, "description")}
+                />
               </div>
             </section>
 
             <section>
               <h4 className="mb-2 font-medium text-sm">连接与认证</h4>
               <div className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs sm:col-span-2">
-                  <span className="font-medium">接口地址</span>
-                  <Input
-                    onChange={(event) =>
-                      setField("base_url", event.target.value)
-                    }
-                    placeholder="https://api.example.com/v1"
-                    value={baseUrl}
-                  />
-                </label>
+                <FloatingLabelInput
+                  className="text-xs sm:col-span-2"
+                  hint="例如 https://api.example.com/v1"
+                  label="接口地址"
+                  onChange={(value) => setField("base_url", value)}
+                  value={baseUrl}
+                />
                 <label className="grid gap-1.5 text-xs">
                   <span className="font-medium">接口类型</span>
                   <Select
@@ -321,41 +304,36 @@ export function ModelEditorDialog({
                   </Select>
                 </label>
                 {authMode === "environment" ? (
-                  <label className="grid gap-1.5 text-xs sm:col-span-2">
-                    <span className="font-medium">密钥环境变量</span>
-                    <Input
-                      onChange={(event) =>
-                        setField(
-                          "env_key",
-                          event.target.value
-                            .split(",")
-                            .map((item) => item.trim())
-                            .filter(Boolean),
-                        )
-                      }
-                      placeholder="OPENAI_API_KEY"
-                      value={envKeys}
-                    />
-                  </label>
+                  <FloatingLabelInput
+                    className="text-xs sm:col-span-2"
+                    hint="例如 OPENAI_API_KEY，可填写多个变量"
+                    label="密钥环境变量"
+                    onChange={(value) =>
+                      setField(
+                        "env_key",
+                        value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                    value={envKeys}
+                  />
                 ) : (
-                  <label className="grid gap-1.5 text-xs sm:col-span-2">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <KeyRoundIcon className="size-3.5" />
-                      API Key
-                    </span>
-                    <Input
-                      autoComplete="off"
-                      onChange={(event) =>
-                        setField("api_key", event.target.value)
-                      }
-                      placeholder="输入密钥"
-                      type="password"
-                      value={stringConfigValue(draft, "api_key")}
-                    />
-                    <span className="text-muted-foreground">
-                      推荐使用环境变量，避免把密钥写入配置文件。
-                    </span>
-                  </label>
+                  <FloatingLabelInput
+                    autoComplete="off"
+                    className="text-xs sm:col-span-2"
+                    hint="推荐使用环境变量，避免把密钥写入配置文件。"
+                    label={
+                      <span className="flex items-center gap-1.5">
+                        <KeyRoundIcon aria-hidden className="size-3.5" />
+                        API Key
+                      </span>
+                    }
+                    onChange={(value) => setField("api_key", value)}
+                    type="password"
+                    value={stringConfigValue(draft, "api_key")}
+                  />
                 )}
               </div>
             </section>

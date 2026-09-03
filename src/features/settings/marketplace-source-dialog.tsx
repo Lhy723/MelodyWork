@@ -1,6 +1,9 @@
 import { FolderIcon, GitBranchIcon } from "lucide-react";
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { FloatingLabelInput } from "@/components/interior/floating-label";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import type { MarketplaceSource } from "@/domain/config";
 
 export const emptyMarketplaceSource: MarketplaceSource = {
@@ -23,7 +25,7 @@ export interface MarketplaceSourceDialogProps {
   draft: MarketplaceSource;
   error?: string;
   onOpenChange: (open: boolean) => void;
-  onSave: () => void;
+  onSave: () => unknown;
   open: boolean;
   originalName?: string;
   saving: boolean;
@@ -44,6 +46,8 @@ export function MarketplaceSourceDialog({
   setSourceInput,
   sourceInput,
 }: MarketplaceSourceDialogProps) {
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
@@ -67,19 +71,14 @@ export function MarketplaceSourceDialog({
 
         {originalName ? (
           <div className="grid gap-4">
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">名称</span>
-              <Input
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-                placeholder="例如 Team Plugins"
-                value={draft.name}
-              />
-            </label>
+            <FloatingLabelInput
+              hint="例如 Team Plugins"
+              label="名称"
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, name: value }))
+              }
+              value={draft.name}
+            />
             <div className="grid gap-1.5">
               <span className="font-medium text-xs">来源类型</span>
               <div className="grid grid-cols-2 gap-2">
@@ -102,74 +101,60 @@ export function MarketplaceSourceDialog({
                 ))}
               </div>
             </div>
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">
-                {draft.kind === "git" ? "Git 地址" : "目录路径"}
-              </span>
-              <Input
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    location: event.target.value,
-                  }))
-                }
-                placeholder={
-                  draft.kind === "git"
-                    ? "https://github.com/org/plugins.git"
-                    : "~/dev/plugins"
-                }
-                value={draft.location}
-              />
-            </label>
+            <FloatingLabelInput
+              hint={
+                draft.kind === "git"
+                  ? "例如 https://github.com/org/plugins.git"
+                  : "例如 ~/dev/plugins"
+              }
+              label={draft.kind === "git" ? "Git 地址" : "目录路径"}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, location: value }))
+              }
+              value={draft.location}
+            />
             {draft.kind === "git" ? (
-              <label className="grid gap-1.5">
-                <span className="font-medium text-xs">分支（可选）</span>
-                <Input
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      branch: event.target.value,
-                    }))
-                  }
-                  placeholder="main"
-                  value={draft.branch ?? ""}
-                />
-              </label>
+              <FloatingLabelInput
+                hint="可选，例如 main"
+                label="分支"
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, branch: value }))
+                }
+                value={draft.branch ?? ""}
+              />
             ) : null}
           </div>
         ) : (
-          <label className="grid gap-1.5">
-            <span className="font-medium text-xs">链接或路径</span>
-            <Input
-              autoFocus
-              onChange={(event) => setSourceInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && sourceInput.trim() && !saving) {
-                  event.preventDefault();
-                  onSave();
-                }
-              }}
-              placeholder="Git 链接、owner/repo 或本地目录"
-              value={sourceInput}
-            />
-            <span className="text-muted-foreground text-xs">
-              自动识别来源类型、名称和 GitHub 简写中的分支。
-            </span>
-          </label>
+          <FloatingLabelInput
+            autoFocus
+            hint="Git 链接、owner/repo 或本地目录；会自动识别来源类型"
+            label="链接或路径"
+            onChange={(value) => setSourceInput(value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && sourceInput.trim() && !saving) {
+                event.preventDefault();
+                saveButtonRef.current?.click();
+              }
+            }}
+            value={sourceInput}
+          />
         )}
 
         <DialogFooter showCloseButton>
-          <Button
+          <LoadingButton
             disabled={
-              saving ||
-              (originalName
+              originalName
                 ? !draft.name.trim() || !draft.location.trim()
-                : !sourceInput.trim())
+                : !sourceInput.trim()
             }
-            onClick={onSave}
+            errorLabel="重试"
+            onAction={onSave}
+            pendingLabel="正在保存并扫描…"
+            ref={saveButtonRef}
+            successLabel="已保存"
           >
-            {saving ? "正在保存并扫描…" : "保存并扫描"}
-          </Button>
+            保存并扫描
+          </LoadingButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

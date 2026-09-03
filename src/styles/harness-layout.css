@@ -445,21 +445,6 @@
     font-weight: 600;
   }
 
-  .harness-stats-context-track {
-    height: 5px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--harness-blue-soft) 60%, transparent);
-  }
-
-  .harness-stats-context-fill {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--harness-blue);
-    transition: width var(--motion-duration-base) var(--motion-ease-out);
-  }
-
   .harness-stats-context-caption {
     color: var(--harness-text-muted);
     font-family: var(--app-code-font, var(--font-mono));

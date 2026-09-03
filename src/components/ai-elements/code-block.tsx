@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/interior/copy-button";
 import {
   Select,
   SelectContent,
@@ -14,12 +14,10 @@ import {
   highlightCode,
   type TokenizedCode,
 } from "@/components/ai-elements/code-block-highlighting";
-import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, CSSProperties, HTMLAttributes } from "react";
 import {
   createContext,
   memo,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -327,7 +325,16 @@ export const CodeBlock = ({
   );
 };
 
-export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
+export type CodeBlockCopyButtonProps = Omit<
+  ComponentProps<typeof CopyButton>,
+  | "value"
+  | "label"
+  | "copiedLabel"
+  | "errorLabel"
+  | "timeout"
+  | "onCopy"
+  | "onError"
+> & {
   onCopy?: () => void;
   onError?: (error: Error) => void;
   timeout?: number;
@@ -339,60 +346,36 @@ export const CodeBlockCopyButton = ({
   timeout = 2000,
   children,
   className,
+  "aria-label": ariaLabel,
   ...props
 }: CodeBlockCopyButtonProps) => {
-  const [isCopied, setIsCopied] = useState(false);
-  const timeoutRef = useRef<number>(0);
   const { code } = useContext(CodeBlockContext);
-
-  const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
-      onError?.(new Error("Clipboard API not available"));
-      return;
-    }
-
-    try {
-      if (!isCopied) {
-        await navigator.clipboard.writeText(code);
-        setIsCopied(true);
-        onCopy?.();
-        timeoutRef.current = window.setTimeout(
-          () => setIsCopied(false),
-          timeout,
-        );
-      }
-    } catch (error) {
-      onError?.(error as Error);
-    }
-  }, [code, onCopy, onError, timeout, isCopied]);
-
-  useEffect(
-    () => () => {
-      window.clearTimeout(timeoutRef.current);
-    },
-    [],
-  );
-
-  const Icon = isCopied ? CheckIcon : CopyIcon;
-  const copyLabel = props["aria-label"] ?? "复制";
+  const copyLabel = ariaLabel ?? "复制";
   const copiedLabel = copyLabel.startsWith("复制")
     ? `已${copyLabel}`
     : "已复制";
 
   return (
-    <Button
-      className={cn("shrink-0", className)}
-      onClick={copyToClipboard}
-      size="icon"
-      variant="ghost"
+    <CopyButton
       {...props}
-      aria-label={isCopied ? copiedLabel : copyLabel}
-      data-copy-button="true"
-      data-copied={isCopied ? "true" : undefined}
-      title={isCopied ? copiedLabel : (props.title ?? copyLabel)}
+      className={cn("shrink-0", className)}
+      aria-label={copyLabel}
+      copiedLabel={copiedLabel}
+      errorLabel="复制失败"
+      label={copyLabel}
+      onCopy={() => onCopy?.()}
+      onError={(reason) =>
+        onError?.(
+          reason instanceof Error
+            ? reason
+            : new Error("Clipboard write failed"),
+        )
+      }
+      timeout={timeout}
+      value={code}
     >
-      {children ?? <Icon size={14} />}
-    </Button>
+      {children}
+    </CopyButton>
   );
 };
 

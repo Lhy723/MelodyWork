@@ -295,7 +295,7 @@ export const AttachmentRemove = ({
           "absolute top-2 right-2 size-6 rounded-full p-0",
           "bg-background/68 backdrop-blur-sm",
           "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
-          "hover:bg-background [&>svg]:size-3",
+          "[&>svg]:size-3",
         ],
         variant === "inline" && [
           "size-6 rounded p-0",

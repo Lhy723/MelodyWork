@@ -2,7 +2,6 @@ import {
   BookmarkIcon,
   ImportIcon,
   LibraryIcon,
-  LoaderCircleIcon,
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -10,7 +9,18 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { MOTION_EASE } from "@/components/motion/page-transition";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
@@ -33,7 +43,9 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
   const [error, setError] = useState<string>();
   const [warnings, setWarnings] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [pendingDeletePaper, setPendingDeletePaper] = useState<ResearchPaper>();
   const searchGateRef = useRef(new RequestGate());
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
   const visiblePapers = searchMode ? results : papers;
   const selected = visiblePapers.find((paper) => paper.id === selectedId);
   const selectedInLibrary = papers.find((paper) => paper.id === selectedId);
@@ -53,6 +65,7 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setError(toUserMessage(reason));
       setResults([]);
+      throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) {
         setLoading(false);
@@ -76,25 +89,25 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && query.trim() && !loading) {
                     event.preventDefault();
-                    void runSearch();
+                    searchButtonRef.current?.click();
                   }
                 }}
                 placeholder="搜索 Crossref、OpenAlex、arXiv、Semantic Scholar 与 PubMed"
                 value={query}
               />
             </div>
-            <Button
-              disabled={!query.trim() || loading}
-              onClick={() => void runSearch()}
+            <LoadingButton
+              disabled={!query.trim()}
+              errorLabel="重试"
+              icon={<SearchIcon />}
+              onAction={runSearch}
+              pendingLabel="正在检索…"
+              ref={searchButtonRef}
               size="sm"
+              successLabel="检索完成"
             >
-              {loading ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <SearchIcon />
-              )}
               检索
-            </Button>
+            </LoadingButton>
           </>
         ) : (
           <>
@@ -167,10 +180,7 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
               <PaperDetail
                 canDelete={!searchMode}
                 onClose={() => setSelectedId(undefined)}
-                onDelete={() => {
-                  removePaper(selected.id);
-                  setSelectedId(undefined);
-                }}
+                onDelete={() => setPendingDeletePaper(selected)}
                 onToggleSaved={() => {
                   if (selectedInLibrary) {
                     setPaperSaved(selected.id, !selectedInLibrary.saved);
@@ -211,6 +221,39 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         open={importOpen}
         setOpen={setImportOpen}
       />
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setPendingDeletePaper(undefined);
+        }}
+        open={Boolean(pendingDeletePaper)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>从文献库删除？</DialogTitle>
+            <DialogDescription>
+              “{pendingDeletePaper?.title ?? ""}
+              ”会从当前项目的文献库移除，原文链接不会受到影响。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">取消</Button>
+            </DialogClose>
+            <HoldToConfirm
+              onConfirm={() => {
+                if (pendingDeletePaper) {
+                  removePaper(pendingDeletePaper.id);
+                  setPendingDeletePaper(undefined);
+                  setSelectedId(undefined);
+                }
+              }}
+              variant="destructive"
+            >
+              删除论文
+            </HoldToConfirm>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

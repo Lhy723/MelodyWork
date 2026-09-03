@@ -28,6 +28,7 @@ import type {
 } from "@/features/sessions/app-sidebar";
 import type { SettingsPage } from "@/features/settings/settings-workspace";
 import type { WorkspaceTab } from "@/features/workspace/workspace-side-panel";
+import type { AppUpdateProgress, AppUpdateStatus } from "@/lib/melody-bridge";
 
 export interface AgentWorkspaceViewProps {
   activeProject?: ProjectRecord;
@@ -35,7 +36,8 @@ export interface AgentWorkspaceViewProps {
   activeWorkspaceTabId?: string;
   chatDockRef: RefObject<HTMLDivElement | null>;
   acpPhase: AcpSessionPhase;
-  appUpdate?: { available: boolean; channel?: string; version?: string };
+  appUpdate?: AppUpdateStatus;
+  appUpdateProgress?: AppUpdateProgress;
   availableModels: AgentModelOption[];
   canGoBack: boolean;
   canGoForward: boolean;
@@ -131,7 +133,7 @@ export interface AgentWorkspaceViewProps {
     entryId: string,
     outcome: AgentPlanDecision,
     feedback?: string,
-  ) => void;
+  ) => void | Promise<void>;
   resolveQuestion: (
     entryId: string,
     response: AgentQuestionResponse,

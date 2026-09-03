@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -398,15 +399,15 @@ export function ResearchOverviewWorkspace({
             >
               取消
             </Button>
-            <Button
-              onClick={() => {
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDeleteNote) removeResearchNote(pendingDeleteNote);
                 setPendingDeleteNote(undefined);
               }}
               variant="destructive"
             >
               删除记录
-            </Button>
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -438,7 +439,9 @@ export function ResearchOverviewWorkspace({
             >
               取消
             </Button>
-            <Button onClick={confirmImport}>导入并覆盖</Button>
+            <HoldToConfirm onConfirm={confirmImport} variant="destructive">
+              导入并覆盖
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>

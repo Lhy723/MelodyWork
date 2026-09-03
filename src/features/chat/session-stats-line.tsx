@@ -1,3 +1,4 @@
+import { ProgressBar } from "@/components/interior/progress-bar";
 import {
   Collapsible,
   CollapsibleContent,
@@ -135,19 +136,13 @@ export function SessionStatsLine({
                 <span>上下文用量</span>
                 <span>{contextPercent}%</span>
               </div>
-              <div
-                aria-label="上下文使用"
-                aria-valuemax={100}
-                aria-valuemin={0}
-                aria-valuenow={contextProgress}
-                className="harness-stats-context-track"
-                role="progressbar"
-              >
-                <span
-                  className="harness-stats-context-fill"
-                  style={{ width: `${contextProgress}%` }}
-                />
-              </div>
+              <ProgressBar
+                label="上下文用量"
+                max={100}
+                showLabel={false}
+                size="compact"
+                value={contextProgress ?? 0}
+              />
               <div className="harness-stats-context-caption">
                 {formatTokens(contextUsage?.usedTokens)} /{" "}
                 {formatTokens(contextUsage?.maxTokens)} tok

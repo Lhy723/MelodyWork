@@ -1,11 +1,7 @@
-import {
-  BookmarkIcon,
-  LoaderCircleIcon,
-  PlusIcon,
-  SearchIcon,
-} from "lucide-react";
+import { BookmarkIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
@@ -60,6 +56,7 @@ export function LibraryWorkspace({
       setImportOpen(false);
     } catch (reason) {
       setError(toUserMessage(reason));
+      throw reason;
     } finally {
       setImporting(false);
     }
@@ -115,23 +112,22 @@ export function LibraryWorkspace({
               onChange={(event) => setCandidate(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && candidate.trim() && !importing)
-                  void runImport();
+                  void runImport().catch(() => undefined);
               }}
               placeholder="arXiv 链接、doi.org 链接或 DOI"
               value={candidate}
             />
-            <Button
+            <LoadingButton
               disabled={!candidate.trim() || importing}
-              onClick={() => void runImport()}
+              errorLabel="重试"
+              icon={<PlusIcon />}
+              onAction={runImport}
+              pendingLabel="正在查询…"
               size="sm"
+              successLabel="已导入"
             >
-              {importing ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <PlusIcon />
-              )}
-              {importing ? "正在查询…" : "确认导入"}
-            </Button>
+              确认导入
+            </LoadingButton>
           </div>
         ) : null}
         {error ? (

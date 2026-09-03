@@ -173,27 +173,6 @@ fn validates_user_question_responses() {
 }
 
 #[test]
-fn remembers_wrapped_question_session_id() {
-    let mut pending = PendingServerRequests::default();
-    pending.remember(&json!({
-        "id": "wrapped-1",
-        "method": "_x.ai/ask_user_question",
-        "params": {
-            "method": "x.ai/ask_user_question",
-            "params": {
-                "sessionId": "session-wrapped",
-                "toolCallId": "question-wrapped",
-                "questions": [{ "question": "Continue?", "options": [] }]
-            }
-        }
-    }));
-    assert_eq!(
-        pending.take(&json!("wrapped-1")).unwrap().session_id(),
-        Some("session-wrapped")
-    );
-}
-
-#[test]
 fn pending_requests_expire_and_are_bounded() {
     let start = Instant::now();
     let mut pending = PendingServerRequests::default();

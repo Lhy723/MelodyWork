@@ -5,10 +5,10 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { AppReleaseHistoryItem } from "@/lib/melody-bridge";
-import { cn } from "@/lib/utils";
 
 import { PanelHeader } from "./about-ui";
 import { formatReleaseDate, releaseVersion } from "./about-types";
@@ -23,7 +23,7 @@ export function AboutHistoryPanel({
   currentVersion: string;
   releaseHistory: AppReleaseHistoryItem[];
   state: "idle" | "loading" | "ready" | "error";
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
   onOpenRelease: (url: string) => void;
 }) {
   return (
@@ -33,17 +33,18 @@ export function AboutHistoryPanel({
     >
       <PanelHeader
         action={
-          <Button
+          <LoadingButton
             disabled={state === "loading"}
-            onClick={onRefresh}
+            errorLabel="重试"
+            icon={<RefreshCwIcon />}
+            onAction={onRefresh}
+            pendingLabel="刷新中…"
             size="sm"
+            successLabel="已刷新"
             variant="secondary"
           >
-            <RefreshCwIcon
-              className={cn(state === "loading" && "animate-spin")}
-            />
             刷新
-          </Button>
+          </LoadingButton>
         }
         description="查看已发布版本和对应的更新说明。"
         title={

@@ -97,7 +97,7 @@ export function MessageCodeBlock({
           <CodeBlockFilename>{filename}</CodeBlockFilename>
         </CodeBlockTitle>
         <CodeBlockActions>
-          <CodeBlockCopyButton aria-label="复制代码" className="size-7" />
+          <CodeBlockCopyButton aria-label="复制代码" />
         </CodeBlockActions>
       </CodeBlockHeader>
     </CodeBlock>

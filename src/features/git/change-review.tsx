@@ -1,6 +1,7 @@
 import { FileCode2Icon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type { GitChange, GitDiff } from "@/domain/git";
@@ -14,7 +15,7 @@ interface ChangeReviewProps {
   error?: string;
   loading: boolean;
   onClose?: () => void;
-  onRefresh: () => void;
+  onRefresh: () => unknown;
 }
 
 const statusLabel = (status: string) => {
@@ -122,15 +123,20 @@ export function ChangeReview({
             {changes.length} 个已更改文件
           </p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新更改"
           disabled={loading}
-          onClick={onRefresh}
-          size="icon"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={onRefresh}
+          pendingLabel="刷新中…"
+          size="default"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新更改
+        </LoadingButton>
         {onClose ? (
           <Button
             aria-label="关闭更改"

@@ -27,13 +27,7 @@ export interface MelodyExtension {
   name: string;
   path: string;
   scope: MelodyConfigScope;
-  provider:
-    | "melody"
-    | "agents"
-    | "claude"
-    | "cursor"
-    | "plugin"
-    | string;
+  provider: "melody" | "agents" | "claude" | "cursor" | "plugin" | string;
   managed: boolean;
   enabled: boolean;
   description?: string;
@@ -58,6 +52,7 @@ export interface MarketplacePlugin {
   version?: string;
   installedVersion?: string;
   description?: string;
+  updateAvailable: boolean;
   skillCount: number;
   hasHooks: boolean;
   hasAgents: boolean;

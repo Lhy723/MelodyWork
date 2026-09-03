@@ -1,6 +1,8 @@
 import { BotIcon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,10 +49,10 @@ export function CustomModelManager({
             管理第三方提供商、自托管模型和模型专用参数。
           </p>
         </div>
-        <Button onClick={() => setEditingModel(null)} size="sm">
+        <PressDepthButton onClick={() => setEditingModel(null)} size="sm">
           <PlusIcon />
           添加模型
-        </Button>
+        </PressDepthButton>
       </div>
 
       {entries.length > 0 ? (
@@ -88,29 +90,30 @@ export function CustomModelManager({
                   </p>
                 </div>
                 {!isDefault ? (
-                  <Button
+                  <PressDepthButton
                     onClick={() => onChange(["models", "default"], name)}
                     size="sm"
                     variant="ghost"
                   >
                     设为默认
-                  </Button>
+                  </PressDepthButton>
                 ) : null}
-                <Button
+                <PressDepthButton
                   onClick={() => setEditingModel(name)}
                   size="sm"
                   variant="outline"
                 >
                   编辑
-                </Button>
-                <Button
+                </PressDepthButton>
+                <PressDepthButton
                   aria-label={`删除 ${displayName}`}
+                  className="size-7 p-0"
                   onClick={() => setPendingDelete(name)}
-                  size="icon-sm"
-                  variant="ghost"
+                  size="sm"
+                  variant="destructive"
                 >
                   <Trash2Icon />
-                </Button>
+                </PressDepthButton>
               </div>
             );
           })}
@@ -169,8 +172,8 @@ export function CustomModelManager({
             >
               取消
             </Button>
-            <Button
-              onClick={() => {
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDelete) {
                   onChange(["model", pendingDelete], null);
                   if (currentDefault === pendingDelete) {
@@ -182,7 +185,7 @@ export function CustomModelManager({
               variant="destructive"
             >
               删除
-            </Button>
+            </HoldToConfirm>
           </DialogFooter>
         </DialogContent>
       </Dialog>

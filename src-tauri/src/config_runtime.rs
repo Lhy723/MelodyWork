@@ -351,5 +351,78 @@ future_option = "preserved"
         assert!(plugins[0].has_mcp);
         assert_eq!(plugins[1].status, "installed");
         assert_eq!(plugins[1].installed_version.as_deref(), Some("0.4.0"));
+        assert!(!plugins[1].update_available);
+    }
+
+    #[test]
+    fn merges_installed_and_available_entries_before_marking_updates() {
+        let plugins = marketplace_plugins_from_json(
+            r#"[
+                {
+                    "status": "available",
+                    "name": "new-tools",
+                    "version": "2.0.0",
+                    "description": "New tools",
+                    "marketplace": "Official",
+                    "skill_count": 3,
+                    "has_hooks": true,
+                    "has_agents": false,
+                    "has_mcp": false
+                },
+                {
+                    "status": "installed",
+                    "name": "new-tools",
+                    "version": "1.4.0",
+                    "marketplace": "Official"
+                },
+                {
+                    "status": "available",
+                    "name": "same-tools",
+                    "version": "1.4.0",
+                    "marketplace": "Official"
+                },
+                {
+                    "status": "installed",
+                    "name": "same-tools",
+                    "version": "1.4.0",
+                    "marketplace": "Official"
+                },
+                {
+                    "status": "installed",
+                    "name": "unknown-tools",
+                    "version": null,
+                    "marketplace": "Official"
+                }
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(plugins.len(), 3);
+        assert_eq!(plugins[0].status, "installed");
+        assert_eq!(plugins[0].version.as_deref(), Some("2.0.0"));
+        assert_eq!(plugins[0].installed_version.as_deref(), Some("1.4.0"));
+        assert!(plugins[0].update_available);
+        assert_eq!(plugins[0].skill_count, 3);
+        assert!(!plugins[1].update_available);
+        assert!(!plugins[2].update_available);
+    }
+
+    #[test]
+    fn normalizes_plugin_update_messages_without_unknown_version_claims() {
+        assert_eq!(
+            format_plugin_update_message(
+                "agent-sdk-dev",
+                "agent-sdk-dev-df237656: updated (? -> ?)"
+            ),
+            "agent-sdk-dev 已完成同步；插件来源未提供版本号，暂时无法确认是否有版本变化。"
+        );
+        assert_eq!(
+            format_plugin_update_message("tools", "tools-abc: already up to date"),
+            "tools 已是最新版本。"
+        );
+        assert_eq!(
+            format_plugin_update_message("tools", ""),
+            "tools 已是最新版本。"
+        );
     }
 }

@@ -1,11 +1,11 @@
 use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::State;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use crate::config_io::TextFileStore;
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 pub(crate) const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
@@ -81,6 +81,10 @@ pub struct MarketplacePlugin {
     pub(crate) installed_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
+    /// Whether the marketplace catalog contains a version newer than the
+    /// installed plugin. A missing or non-semver version is deliberately
+    /// treated as unknown rather than as an update.
+    pub(crate) update_available: bool,
     pub(crate) skill_count: usize,
     pub(crate) has_hooks: bool,
     pub(crate) has_agents: bool,
@@ -325,26 +329,12 @@ pub(crate) fn apply_patch(
 
 #[tauri::command]
 pub async fn update_melody_config(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     scope: String,
     cwd: String,
     patches: Vec<MelodyConfigPatch>,
 ) -> Result<MelodyConfigDocument, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    let path = config_path(&scope, &cwd)?;
-    if !registry.config_write_approved(&path)? {
-        confirm_action(
-            &app,
-            "确认修改 Melody 配置",
-            format!(
-                "允许修改 {} 范围的 Melody 配置吗？本次确认后，当前运行期间后续设置修改将不再重复询问。",
-                scope
-            ),
-        )
-        .await?;
-        registry.approve_config_write(path)?;
-    }
     update_melody_config_inner(scope, cwd, patches)
 }
 

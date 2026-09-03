@@ -12,8 +12,18 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { ResearchPaper } from "@/domain/research";
 import { openExternalUrl } from "@/lib/melody-bridge";
@@ -53,6 +63,7 @@ export function InboxWorkspace({
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingTitle, setTrackingTitle] = useState("");
   const [matrixOpen, setMatrixOpen] = useState(false);
+  const [clearInboxOpen, setClearInboxOpen] = useState(false);
   const inboxCreatedAt = inbox?.createdAt;
   const selectedPapers =
     inbox?.papers.filter((paper) => checked.has(paper.id)) ?? [];
@@ -67,6 +78,7 @@ export function InboxWorkspace({
     setTrackingOpen(false);
     setTrackingTitle("");
     setMatrixOpen(false);
+    setClearInboxOpen(false);
   }, [inboxCreatedAt]);
 
   const saveSelected = (saved: boolean) => {
@@ -157,7 +169,11 @@ export function InboxWorkspace({
               <SearchIcon />
               新建检索
             </Button>
-            <Button onClick={clearResearchInbox} size="sm" variant="ghost">
+            <Button
+              onClick={() => setClearInboxOpen(true)}
+              size="sm"
+              variant="ghost"
+            >
               清空收件箱
             </Button>
           </div>
@@ -346,6 +362,31 @@ export function InboxWorkspace({
           />
         </section>
       </div>
+
+      <Dialog onOpenChange={setClearInboxOpen} open={clearInboxOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>清空研究收件箱？</DialogTitle>
+            <DialogDescription>
+              本次检索的候选论文和数据源结果会被移除，已经加入文献库的内容不会受到影响。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">取消</Button>
+            </DialogClose>
+            <HoldToConfirm
+              onConfirm={() => {
+                clearResearchInbox();
+                setClearInboxOpen(false);
+              }}
+              variant="destructive"
+            >
+              清空收件箱
+            </HoldToConfirm>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

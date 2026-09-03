@@ -4,10 +4,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use tauri::AppHandle;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use tokio::sync::oneshot;
-
 /// Renderer supplied paths are only accepted after the user has selected the
 /// directory through the native picker or the path has been restored from the
 /// trusted project database.  This registry is deliberately kept in Rust so a
@@ -16,7 +12,6 @@ use tokio::sync::oneshot;
 #[derive(Clone, Default)]
 pub struct WorkspaceRegistry {
     roots: Arc<RwLock<HashSet<PathBuf>>>,
-    approved_config_paths: Arc<RwLock<HashSet<PathBuf>>>,
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
@@ -68,58 +63,9 @@ impl WorkspaceRegistry {
         )
     }
 
-    /// Check whether settings writes to a config file have already been
-    /// approved during this application run.
-    pub fn config_write_approved(&self, path: &Path) -> Result<bool, String> {
-        self.approved_config_paths
-            .read()
-            .map_err(|_| "Config approval registry lock poisoned".to_string())
-            .map(|paths| paths.contains(path))
-    }
-
-    /// Remember an approved config file so subsequent setting changes do not
-    /// interrupt the user with another native confirmation dialog.
-    pub fn approve_config_write(&self, path: PathBuf) -> Result<(), String> {
-        self.approved_config_paths
-            .write()
-            .map_err(|_| "Config approval registry lock poisoned".to_string())?
-            .insert(path);
-        Ok(())
-    }
-
     #[cfg(test)]
     fn clear(&self) {
         self.roots.write().unwrap().clear();
-        self.approved_config_paths.write().unwrap().clear();
-    }
-}
-
-/// Ask through the native dialog for operations that can mutate the user's
-/// files, execute a process, or install code.  A renderer call alone cannot
-/// silently grant these operations after an XSS compromise.
-pub async fn confirm_action(
-    app: &AppHandle,
-    title: impl Into<String>,
-    message: impl Into<String>,
-) -> Result<(), String> {
-    let (sender, receiver) = oneshot::channel();
-    app.dialog()
-        .message(message)
-        .title(title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "允许".to_string(),
-            "取消".to_string(),
-        ))
-        .show(move |confirmed| {
-            let _ = sender.send(confirmed);
-        });
-    match receiver
-        .await
-        .map_err(|_| "Native confirmation dialog was closed unexpectedly".to_string())?
-    {
-        true => Ok(()),
-        false => Err("Operation was not approved".to_string()),
     }
 }
 
@@ -146,17 +92,5 @@ mod tests {
         assert!(registry.authorize("/").is_err());
         registry.clear();
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn config_write_approval_is_scoped_to_each_path() {
-        let registry = WorkspaceRegistry::default();
-        let user_config = PathBuf::from("/tmp/melody-user-config.toml");
-        let project_config = PathBuf::from("/tmp/melody-project-config.toml");
-
-        assert!(!registry.config_write_approved(&user_config).unwrap());
-        registry.approve_config_write(user_config.clone()).unwrap();
-        assert!(registry.config_write_approved(&user_config).unwrap());
-        assert!(!registry.config_write_approved(&project_config).unwrap());
     }
 }

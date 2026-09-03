@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
@@ -64,7 +65,6 @@ export function FileWorkspace({
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const editorTheme =
     typeof document !== "undefined" &&
@@ -121,7 +121,6 @@ export function FileWorkspace({
     if (!selectedPath || content === savedContent) {
       return;
     }
-    setSaving(true);
     setError(undefined);
     try {
       await writeWorkspaceFile(root, selectedPath, content);
@@ -129,8 +128,7 @@ export function FileWorkspace({
       await loadTree();
     } catch (reason) {
       setError(toUserMessage(reason));
-    } finally {
-      setSaving(false);
+      throw reason;
     }
   };
 
@@ -151,24 +149,32 @@ export function FileWorkspace({
           <h2 className="font-semibold text-base">文件</h2>
           <p className="truncate text-muted-foreground text-xs">{root}</p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新文件"
           disabled={loading}
-          onClick={() => void loadTree()}
-          size="icon"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={loadTree}
+          pendingLabel="刷新中…"
+          size="default"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新文件
+        </LoadingButton>
         {!onOpenFile ? (
-          <Button
-            disabled={!selectedPath || content === savedContent || saving}
-            onClick={() => void save()}
+          <LoadingButton
+            disabled={!selectedPath || content === savedContent}
+            errorLabel="重试"
+            icon={<SaveIcon />}
+            onAction={save}
+            pendingLabel="正在保存…"
+            successLabel="已保存"
             variant="outline"
           >
-            <SaveIcon />
-            {saving ? "正在保存" : "保存"}
-          </Button>
+            保存
+          </LoadingButton>
         ) : null}
         {onClose ? (
           <Button

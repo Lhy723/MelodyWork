@@ -1,6 +1,5 @@
 import { RefreshCwIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { LoadingButton } from "@/components/interior/loading-button";
 
 import {
   compatibilityGroups,
@@ -47,20 +46,19 @@ export function ConfigurationForm({
             </p>
           </div>
           {scope === "project" && onReload ? (
-            <Button
+            <LoadingButton
               aria-label="重新加载项目配置"
-              disabled={reloadDisabled}
-              onClick={onReload}
-              size="sm"
+              disabled={reloadDisabled || reloadLoading}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={onReload}
+              pendingLabel="正在加载…"
+              successLabel="已加载"
               title="重新加载项目配置"
-              type="button"
               variant="ghost"
             >
-              <RefreshCwIcon
-                className={cn("size-3.5", reloadLoading && "animate-spin")}
-              />
               重新加载
-            </Button>
+            </LoadingButton>
           ) : null}
         </div>
         <div className="mt-5">

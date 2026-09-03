@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, ipc::Channel};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -21,6 +21,21 @@ pub struct AppUpdateStatus {
     version: Option<String>,
     notes: Option<String>,
     installed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppUpdateProgressPhase {
+    Downloading,
+    Installing,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateProgress {
+    pub phase: AppUpdateProgressPhase,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
 }
 
 struct UpdateCandidate {
@@ -107,6 +122,7 @@ pub async fn check_app_update(
     app: AppHandle,
     channel: UpdateChannel,
     install: bool,
+    on_progress: Channel<AppUpdateProgress>,
 ) -> Result<AppUpdateStatus, String> {
     let Some(public_key) =
         option_env!("MELODYWORK_UPDATER_PUBKEY").filter(|value| !value.trim().is_empty())
@@ -165,9 +181,33 @@ pub async fn check_app_update(
     let version = Some(candidate.update.version.clone());
     let notes = candidate.update.body.clone();
     if install {
+        let _ = on_progress.send(AppUpdateProgress {
+            phase: AppUpdateProgressPhase::Downloading,
+            downloaded_bytes: 0,
+            total_bytes: None,
+        });
+        let download_progress = on_progress.clone();
+        let install_progress = on_progress;
+        let mut downloaded_bytes = 0_u64;
         candidate
             .update
-            .download_and_install(|_, _| {}, || {})
+            .download_and_install(
+                |chunk_length, content_length| {
+                    downloaded_bytes = downloaded_bytes.saturating_add(chunk_length as u64);
+                    let _ = download_progress.send(AppUpdateProgress {
+                        phase: AppUpdateProgressPhase::Downloading,
+                        downloaded_bytes,
+                        total_bytes: content_length,
+                    });
+                },
+                || {
+                    let _ = install_progress.send(AppUpdateProgress {
+                        phase: AppUpdateProgressPhase::Installing,
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                    });
+                },
+            )
             .await
             .map_err(|error| error.to_string())?;
     }
