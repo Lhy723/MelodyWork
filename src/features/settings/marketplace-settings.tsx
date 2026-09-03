@@ -417,7 +417,12 @@ export function MarketplaceSettings({
               刷新目录
             </LoadingButton>
           </div>
-          <div className="absolute inset-y-0 right-0 z-10 flex w-60 items-center">
+          <div
+            className={cn(
+              "absolute inset-y-0 right-0 z-10 flex items-center",
+              marketplaceSearchOpen ? "w-60" : "w-8",
+            )}
+          >
             <ExpandingSearch
               debounce={180}
               disabled={!activeMarketplace}
