@@ -15,6 +15,7 @@ import {
   isTauriRuntime,
   openExternalUrl,
   type AppReleaseHistoryItem,
+  type AppUpdateProgress,
   type EnvironmentCapability,
 } from "@/lib/melody-bridge";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
@@ -117,9 +118,23 @@ export function AboutPage() {
   const installUpdate = async () => {
     if (updateState.status !== "available") return;
     const channel = updateState.channel;
-    setUpdateState({ status: "installing", channel });
+    const initialProgress: AppUpdateProgress = {
+      phase: "downloading",
+      downloadedBytes: 0,
+      totalBytes: null,
+    };
+    setUpdateState({
+      status: "installing",
+      channel,
+      progress: initialProgress,
+      version: updateState.version,
+    });
     try {
-      await checkAppUpdate(channel, true);
+      await checkAppUpdate(channel, true, (progress) => {
+        setUpdateState((current) =>
+          current.status === "installing" ? { ...current, progress } : current,
+        );
+      });
       setUpdateState({ status: "installed" });
       await relaunch();
     } catch (reason) {

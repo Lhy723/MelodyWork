@@ -619,8 +619,7 @@
   }
 
   .harness-stats-card-content,
-  .harness-stats-card-chevron,
-  .harness-stats-context-fill {
+  .harness-stats-card-chevron {
     animation: none !important;
     transition: none !important;
   }

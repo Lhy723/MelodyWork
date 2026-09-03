@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
@@ -76,28 +76,18 @@ export function TrackingWorkspace({
             </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-[1fr_1.45fr_auto] lg:items-end">
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">主题名称</span>
-              <Input
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="例如：多模态 RAG 可复现性"
-                value={title}
-              />
-              <span className="text-muted-foreground text-[10px] leading-4">
-                这是侧栏和主题列表里显示的标题，方便你识别方向。
-              </span>
-            </label>
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">检索词</span>
-              <Input
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="例如：multimodal RAG evaluation reproducibility benchmark"
-                value={query}
-              />
-              <span className="text-muted-foreground text-[10px] leading-4">
-                刷新时会把这段关键词发送给已启用的数据源。
-              </span>
-            </label>
+            <FloatingLabelInput
+              hint="侧栏和主题列表中显示的标题"
+              label="主题名称"
+              onChange={(value) => setTitle(value)}
+              value={title}
+            />
+            <FloatingLabelInput
+              hint="刷新时发送给已启用的数据源"
+              label="检索词"
+              onChange={(value) => setQuery(value)}
+              value={query}
+            />
             <Button
               disabled={!title.trim() || !query.trim()}
               onClick={() => {

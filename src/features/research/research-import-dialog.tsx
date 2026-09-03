@@ -1,6 +1,7 @@
 import { ImportIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { LoadingButton } from "@/components/interior/loading-button";
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 
@@ -54,17 +54,17 @@ export function ImportPaperDialog({
             DOI。元信息来自真实学术索引，不会生成缺失字段。
           </DialogDescription>
         </DialogHeader>
-        <Input
+        <FloatingLabelInput
           autoFocus
-          aria-label="论文地址或 DOI"
-          onChange={(event) => setCandidate(event.target.value)}
+          hint="支持 arXiv、doi.org 链接或 DOI"
+          label="论文地址或 DOI"
+          onChange={(value) => setCandidate(value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && candidate.trim() && !loading) {
               event.preventDefault();
               importButtonRef.current?.click();
             }
           }}
-          placeholder="https://arxiv.org/abs/... 或 10.xxxx/..."
           value={candidate}
         />
         {error ? (

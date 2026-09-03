@@ -1,7 +1,8 @@
 # Interior component attribution
 
 The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`,
-`icon-morph.tsx`, and `press-depth.tsx`
+`icon-morph.tsx`, `press-depth.tsx`, `floating-label.tsx`, `expanding-search.tsx`,
+and `progress-bar.tsx`
 implementations in this directory are adapted from the Interior component
 library by ddoemonn, licensed under the MIT License.
 
@@ -12,6 +13,9 @@ library by ddoemonn, licensed under the MIT License.
 - Ripple source: https://www.interior.dev/docs/ripple
 - Icon Morph source: https://www.interior.dev/docs/icon-morph
 - Press Depth source: https://www.interior.dev/docs/press-depth
+- Floating Label source: https://www.interior.dev/docs/floating-label
+- Expanding Search source: https://www.interior.dev/docs/expanding-search
+- Progress Bar source: https://www.interior.dev/docs/progress-bar
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -30,3 +34,12 @@ MelodyWork buttons.
 The Press Depth adapter keeps the library's pointer-origin press depth while
 reusing MelodyWork's Button variants and preserving native button semantics;
 the hook is exposed separately to avoid nesting interactive elements.
+The Floating Label adapter keeps the library's reserved label slot, animated
+focus state, hint, validation, and character-count behavior while using
+MelodyWork's design tokens and controlled-input conventions.
+The Expanding Search adapter keeps the library's focus-managed disclosure,
+debounced search callbacks, result announcement, and reduced-motion behavior
+for compact local filtering surfaces.
+The Progress Bar adapter keeps the library's indeterminate-to-determinate
+handoff, spring-filled track, status labels, and progressbar semantics while
+adding a compact presentation for existing metric cards.

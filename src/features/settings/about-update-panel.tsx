@@ -1,6 +1,7 @@
 import { CheckCircleIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
 
 import { LoadingButton } from "@/components/interior/loading-button";
+import { ProgressBar } from "@/components/interior/progress-bar";
 import {
   Select,
   SelectContent,
@@ -113,13 +114,41 @@ export function AboutUpdatePanel({
                   发现{updateChannelLabel[updateState.channel]}新版本 v
                   {updateState.status === "available"
                     ? updateState.version
-                    : ""}
+                    : updateState.version}
                 </p>
               </div>
               {updateState.status === "available" && updateState.notes ? (
                 <p className="mt-2 whitespace-pre-wrap text-muted-foreground text-xs">
                   {updateState.notes}
                 </p>
+              ) : null}
+              {updateState.status === "installing" ? (
+                <ProgressBar
+                  className="mt-4"
+                  label={
+                    updateState.progress.phase === "downloading"
+                      ? "下载更新"
+                      : "安装更新"
+                  }
+                  pendingLabel={
+                    updateState.progress.phase === "downloading"
+                      ? "正在下载…"
+                      : "正在安装并重启…"
+                  }
+                  size="compact"
+                  value={
+                    updateState.progress.phase === "downloading" &&
+                    updateState.progress.totalBytes &&
+                    updateState.progress.totalBytes > 0
+                      ? Math.min(
+                          100,
+                          (updateState.progress.downloadedBytes /
+                            updateState.progress.totalBytes) *
+                            100,
+                        )
+                      : null
+                  }
+                />
               ) : null}
               <LoadingButton
                 className="mt-3"

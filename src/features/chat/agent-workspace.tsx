@@ -1,9 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentPromptAttachment } from "@/domain/acp";
 import { TaskLauncher } from "@/domain/task-launch";
@@ -26,6 +21,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
   isTauriRuntime,
+  type AppUpdateProgress,
   type AppUpdateStatus,
 } from "@/lib/melody-bridge";
 import { AgentComposer } from "./agent-composer";
@@ -165,6 +161,8 @@ export function AgentWorkspace() {
   const [settingsPage, setSettingsPage] =
     useState<SettingsPage>("configuration");
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>();
+  const [appUpdateProgress, setAppUpdateProgress] =
+    useState<AppUpdateProgress>();
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const sidebarWidthRef = useRef(sidebarWidth);
@@ -256,10 +254,20 @@ export function AgentWorkspace() {
       return;
     }
     setInstallingUpdate(true);
+    setAppUpdateProgress({
+      phase: "downloading",
+      downloadedBytes: 0,
+      totalBytes: null,
+    });
     try {
-      setAppUpdate(await checkAppUpdate(channel, true));
+      setAppUpdate(
+        await checkAppUpdate(channel, true, (progress) =>
+          setAppUpdateProgress(progress),
+        ),
+      );
     } finally {
       setInstallingUpdate(false);
+      setAppUpdateProgress(undefined);
     }
   };
 
@@ -379,6 +387,7 @@ export function AgentWorkspace() {
       activeWorkspaceTabId={activeWorkspaceTabId}
       acpPhase={acpPhase}
       appUpdate={appUpdate}
+      appUpdateProgress={appUpdateProgress}
       availableModels={availableModels}
       canGoBack={canGoBack}
       canGoForward={canGoForward}

@@ -19,6 +19,7 @@ import {
 import { useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { ProgressBar } from "@/components/interior/progress-bar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -311,12 +312,13 @@ export function ProgressRail({
           </div>
         </div>
         <div className="mt-4">
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full origin-left rounded-full bg-primary transition-transform"
-              style={{ transform: `scaleX(${progress / 100})` }}
-            />
-          </div>
+          <ProgressBar
+            label="本周进度"
+            max={100}
+            showLabel={false}
+            size="compact"
+            value={progress}
+          />
           <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
             <span>{tasks.length ? `${progress}% 完成` : "还没有任务"}</span>
             <span>{tasks.length} 项</span>

@@ -1,11 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AcpEnvelope, AgentStatus } from "@/domain/acp";
 import type { UsageStatistics } from "@/domain/statistics";
 import type { FileOpener, UpdateChannel } from "@/stores/app-settings-store";
-import { PREVIEW_AGENT_MESSAGE, PREVIEW_FIXTURE_VERSION } from "@/lib/preview-fixtures";
+import {
+  PREVIEW_AGENT_MESSAGE,
+  PREVIEW_FIXTURE_VERSION,
+} from "@/lib/preview-fixtures";
 
 declare global {
   interface Window {
@@ -20,6 +23,14 @@ export interface AppUpdateStatus {
   version?: string;
   notes?: string;
   installed: boolean;
+}
+
+export type AppUpdateProgressPhase = "downloading" | "installing";
+
+export interface AppUpdateProgress {
+  phase: AppUpdateProgressPhase;
+  downloadedBytes: number;
+  totalBytes: number | null;
 }
 
 export interface AppReleaseHistoryItem {
@@ -500,12 +511,24 @@ export const subscribeToAcp = async (
 export const checkAppUpdate = async (
   channel: UpdateChannel = "stable",
   install = false,
-): Promise<AppUpdateStatus> =>
-  isTauriRuntime()
-    ? invoke<AppUpdateStatus>("check_app_update", { channel, install })
-    : {
-        channel,
-        configured: false,
-        available: false,
-        installed: false,
-      };
+  onProgress?: (progress: AppUpdateProgress) => void,
+): Promise<AppUpdateStatus> => {
+  if (!isTauriRuntime()) {
+    return {
+      channel,
+      configured: false,
+      available: false,
+      installed: false,
+    };
+  }
+
+  const progressChannel = new Channel<AppUpdateProgress>();
+  if (onProgress) {
+    progressChannel.onmessage = onProgress;
+  }
+  return invoke<AppUpdateStatus>("check_app_update", {
+    channel,
+    install,
+    onProgress: progressChannel,
+  });
+};

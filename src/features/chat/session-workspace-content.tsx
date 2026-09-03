@@ -10,6 +10,7 @@ import {
   ICON_MORPH_SHAPES,
 } from "@/components/interior/icon-morph";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { ProgressBar } from "@/components/interior/progress-bar";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
 import { localizedSessionTitle } from "@/lib/localize";
@@ -32,6 +33,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     activeWorkspaceTabId,
     acpPhase,
     appUpdate,
+    appUpdateProgress,
     availableModels,
     chatDockRef,
     chatDockSpace,
@@ -78,6 +80,17 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     workspaceTabs,
     beginWorkspacePanelResize,
   } = props;
+
+  const appUpdateProgressValue =
+    appUpdateProgress?.phase === "downloading" &&
+    appUpdateProgress.totalBytes !== null &&
+    appUpdateProgress.totalBytes > 0
+      ? Math.min(
+          100,
+          (appUpdateProgress.downloadedBytes / appUpdateProgress.totalBytes) *
+            100,
+        )
+      : null;
 
   return (
     <>
@@ -131,18 +144,50 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                 </span>
               </Button>
               {appUpdate?.available ? (
-                <LoadingButton
-                  className="motion-view-enter"
-                  disabled={installingUpdate}
-                  errorLabel="重试"
-                  icon={<DownloadIcon />}
-                  onAction={installAppUpdate}
-                  pendingLabel="正在安装更新"
-                  successLabel="已检查更新"
-                  variant="outline"
+                <div
+                  className="motion-view-enter flex items-center gap-2"
+                  title={
+                    installingUpdate
+                      ? appUpdateProgress?.phase === "installing"
+                        ? "正在安装并重启…"
+                        : "正在下载更新…"
+                      : undefined
+                  }
                 >
-                  {`更新到 ${appUpdate.version}`}
-                </LoadingButton>
+                  <LoadingButton
+                    disabled={installingUpdate}
+                    errorLabel="重试"
+                    icon={<DownloadIcon />}
+                    onAction={installAppUpdate}
+                    pendingLabel={
+                      appUpdateProgress?.phase === "installing"
+                        ? "正在安装并重启…"
+                        : "正在下载更新…"
+                    }
+                    successLabel="更新完成"
+                    variant="outline"
+                  >
+                    {`更新到 ${appUpdate.version}`}
+                  </LoadingButton>
+                  {installingUpdate ? (
+                    <ProgressBar
+                      className="w-24 shrink-0"
+                      label={
+                        appUpdateProgress?.phase === "installing"
+                          ? "安装更新"
+                          : "下载更新"
+                      }
+                      pendingLabel={
+                        appUpdateProgress?.phase === "installing"
+                          ? "正在安装并重启…"
+                          : "正在下载…"
+                      }
+                      showLabel={false}
+                      size="compact"
+                      value={appUpdateProgressValue}
+                    />
+                  ) : null}
+                </div>
               ) : null}
               <Button
                 aria-label={sessionInfoOpen ? "收起会话信息" : "展开会话信息"}

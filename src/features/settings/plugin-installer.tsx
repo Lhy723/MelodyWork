@@ -1,6 +1,7 @@
 import { CheckCircle2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
+import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { PressDepthButton } from "@/components/interior/press-depth";
 import {
@@ -11,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { installMelodyPlugin } from "@/lib/melody-bridge";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
 
@@ -85,24 +85,19 @@ export function PluginInstaller({ cwd, onInstalled }: PluginInstallerProps) {
             </div>
           ) : (
             <>
-              <label className="grid gap-1.5">
-                <span className="font-medium text-xs">插件来源</span>
-                <Input
-                  autoFocus
-                  onChange={(event) => setSource(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && source.trim() && !installing) {
-                      event.preventDefault();
-                      void install();
-                    }
-                  }}
-                  placeholder="例如 sentry、owner/repo 或 ./my-plugin"
-                  value={source}
-                />
-                <span className="text-muted-foreground text-xs">
-                  已配置 Marketplace 时，可以直接填写其中的插件名。
-                </span>
-              </label>
+              <FloatingLabelInput
+                autoFocus
+                hint="例如 sentry、owner/repo 或 ./my-plugin；也可填写 Marketplace 插件名"
+                label="插件来源"
+                onChange={(value) => setSource(value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && source.trim() && !installing) {
+                    event.preventDefault();
+                    void install();
+                  }
+                }}
+                value={source}
+              />
 
               <div className="flex gap-2 rounded-xl bg-amber-500/8 p-3 text-amber-900 text-xs dark:text-amber-200">
                 <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />

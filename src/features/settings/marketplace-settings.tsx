@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { ExpandingSearch } from "@/components/interior/expanding-search";
 import { LoadingButton } from "@/components/interior/loading-button";
 import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
@@ -75,6 +76,9 @@ export function MarketplaceSettings({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [activeMarketplaceKey, setActiveMarketplaceKey] = useState<string>();
+  const [marketplaceSearchInput, setMarketplaceSearchInput] = useState("");
+  const [marketplaceQuery, setMarketplaceQuery] = useState("");
+  const [marketplaceSearchOpen, setMarketplaceSearchOpen] = useState(false);
   const { state: pluginActionState, run: runPluginOperation } =
     useAsyncOperation();
   const visibleError = pluginActionState.error ?? error;
@@ -135,6 +139,25 @@ export function MarketplaceSettings({
   const activeMarketplace =
     marketplaceGroups.find((group) => group.key === activeMarketplaceKey) ??
     marketplaceGroups[0];
+
+  const visibleMarketplacePlugins = useMemo(() => {
+    if (!activeMarketplace) return [];
+    const normalized = marketplaceQuery.trim().toLocaleLowerCase();
+    if (!normalized) return activeMarketplace.plugins;
+    return activeMarketplace.plugins.filter((plugin) =>
+      [plugin.name, plugin.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(normalized),
+    );
+  }, [activeMarketplace, marketplaceQuery]);
+
+  useEffect(() => {
+    setMarketplaceSearchInput("");
+    setMarketplaceQuery("");
+    setMarketplaceSearchOpen(false);
+  }, [activeMarketplaceKey]);
 
   const load = useCallback(
     async (refresh = false) => {
@@ -249,22 +272,47 @@ export function MarketplaceSettings({
             从 Git 仓库或本地目录发现、安装和更新 Melody 插件。
           </p>
         </div>
-        <PressDepthButton onClick={() => openEditor()} size="sm">
-          <PlusIcon className="size-3.5" />
-          添加来源
-        </PressDepthButton>
-        <LoadingButton
-          disabled={loading}
-          errorLabel="重试"
-          icon={<RefreshCwIcon />}
-          onAction={() => load(true)}
-          pendingLabel="刷新中…"
-          size="sm"
-          successLabel="已刷新"
-          variant="outline"
-        >
-          刷新目录
-        </LoadingButton>
+        <div className="relative flex h-10 shrink-0 items-center pr-10">
+          <div
+            aria-hidden={marketplaceSearchOpen}
+            className={cn(
+              "flex items-center gap-2 transition-opacity",
+              marketplaceSearchOpen && "pointer-events-none opacity-0",
+            )}
+          >
+            <PressDepthButton onClick={() => openEditor()} size="sm">
+              <PlusIcon className="size-3.5" />
+              添加来源
+            </PressDepthButton>
+            <LoadingButton
+              disabled={loading}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={() => load(true)}
+              pendingLabel="刷新中…"
+              size="sm"
+              successLabel="已刷新"
+              variant="outline"
+            >
+              刷新目录
+            </LoadingButton>
+          </div>
+          <div className="absolute inset-y-0 right-0 z-10 flex w-60 items-center">
+            <ExpandingSearch
+              debounce={180}
+              disabled={!activeMarketplace}
+              label="搜索 Marketplace 插件"
+              onChange={setMarketplaceSearchInput}
+              onOpenChange={setMarketplaceSearchOpen}
+              onSearch={setMarketplaceQuery}
+              open={marketplaceSearchOpen}
+              placeholder="搜索插件"
+              resultCount={visibleMarketplacePlugins.length}
+              size="sm"
+              value={marketplaceSearchInput}
+            />
+          </div>
+        </div>
       </div>
 
       {visibleError ? (
@@ -374,7 +422,9 @@ export function MarketplaceSettings({
                       : "索引"}
                   </Badge>
                   <span className="text-muted-foreground text-xs">
-                    {activeMarketplace.plugins.length} 个插件
+                    {marketplaceQuery.trim()
+                      ? `${visibleMarketplacePlugins.length}/${activeMarketplace.plugins.length} 个插件`
+                      : `${activeMarketplace.plugins.length} 个插件`}
                   </span>
                 </div>
                 {activeMarketplace.source ? (
@@ -417,7 +467,7 @@ export function MarketplaceSettings({
               ) : null}
             </header>
             <div className="grid gap-1.5 p-2">
-              {activeMarketplace.plugins.map((plugin) => (
+              {visibleMarketplacePlugins.map((plugin) => (
                 <MarketplacePluginRow
                   disabled={busyPlugin !== undefined}
                   key={marketplaceReference(plugin)}
@@ -425,11 +475,13 @@ export function MarketplaceSettings({
                   plugin={plugin}
                 />
               ))}
-              {!loading && activeMarketplace.plugins.length === 0 ? (
+              {!loading && visibleMarketplacePlugins.length === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <PackageIcon className="mx-auto mb-2 size-4 text-muted-foreground" />
                   <p className="text-muted-foreground text-xs">
-                    这个 Marketplace 中没有发现插件。
+                    {marketplaceQuery.trim()
+                      ? "没有匹配的插件。"
+                      : "这个 Marketplace 中没有发现插件。"}
                   </p>
                 </div>
               ) : null}
