@@ -183,6 +183,24 @@ body {
     font-size: var(--type-size-body);
     line-height: var(--type-leading-body);
   }
+
+  /* Interactive controls should not create a text selection while pressed.
+     Inputs, editors, articles, code, and paths remain selectable. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="slider"],
+  [role="separator"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
+  summary,
+  [data-tauri-drag-region] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
   html {
     font-family: var(--font-sans);
   }

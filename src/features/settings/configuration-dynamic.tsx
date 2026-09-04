@@ -271,7 +271,7 @@ export function DynamicSection({
               className="group overflow-hidden rounded-xl border bg-card"
               key={name}
             >
-              <summary className="flex h-11 cursor-pointer list-none items-center gap-2 px-4">
+              <summary className="flex h-11 cursor-pointer select-none list-none items-center gap-2 px-4">
                 <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
                 <span className="min-w-0 flex-1 truncate font-medium text-sm">
                   {name}

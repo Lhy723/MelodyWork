@@ -486,7 +486,7 @@ export function ContextMenu({
         aria-controls={isOpen ? menuId : undefined}
         aria-describedby={`${uid}-hint`}
         className={cn(
-          "block outline-none focus-visible:rounded-lg focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
+          "block select-none outline-none focus-visible:rounded-lg focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40",
           className,
         )}
       >

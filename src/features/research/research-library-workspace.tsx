@@ -205,6 +205,7 @@ export function LibraryWorkspace({
                   </>
                 }
                 description="粘贴 DOI 或 arXiv 链接即可拉取真实元信息；之后可以打开原文、收藏，并在知识资产中继续整理。"
+                reveal
                 steps={[
                   {
                     title: "粘贴链接",

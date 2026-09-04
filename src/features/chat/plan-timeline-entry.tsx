@@ -9,6 +9,7 @@ import {
   PlanTrigger,
 } from "@/components/ai-elements/plan";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { ShowMore } from "@/components/interior/show-more";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { AgentPlanDecision, TimelineEntry } from "@/domain/acp";
@@ -87,7 +88,18 @@ export const PlanTimelineEntry = memo(function PlanTimelineEntry({
           <PlanTrigger aria-label="展开或收起实施计划" />
         </PlanAction>
       </PlanHeader>
-      <PlanContent className="border-t pt-4">{renderedContent}</PlanContent>
+      <PlanContent className="border-t pt-4">
+        <ShowMore
+          defaultExpanded={entry.status === "streaming" || awaiting}
+          label="实施计划正文"
+          lessLabel="收起计划"
+          lines={8}
+          maxHeight={520}
+          moreLabel="显示完整计划"
+        >
+          {renderedContent}
+        </ShowMore>
+      </PlanContent>
       {awaiting ? (
         <PlanFooter className="flex-col items-stretch gap-3">
           {editingFeedback ? (

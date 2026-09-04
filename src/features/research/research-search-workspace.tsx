@@ -308,7 +308,7 @@ export function SearchWorkspace({
                 triggerClassName="h-7 rounded-md px-2 text-xs"
                 value={sort}
               />
-              <label className="flex min-h-6 items-center gap-1.5 px-2 text-xs">
+              <label className="flex min-h-6 select-none items-center gap-1.5 px-2 text-xs">
                 <input
                   checked={verifiedOnly}
                   className="accent-primary"

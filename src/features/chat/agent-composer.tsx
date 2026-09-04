@@ -49,6 +49,7 @@ import {
   PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTooltip,
   PromptInputTools,
   type PromptInputMessage,
   usePromptInputAttachments,
@@ -283,25 +284,27 @@ export function AgentComposer({
                 onOpenChange={setModelSelectorOpen}
                 open={modelSelectorOpen}
               >
-                <ModelSelectorTrigger asChild>
-                  <PromptInputButton
-                    aria-label="选择智能体模型"
-                    className="motion-view-enter max-w-56"
-                    disabled={modelChanging}
-                  >
-                    {modelChanging ? (
-                      <LoaderCircleIcon className="animate-spin" />
-                    ) : selectedModelProvider ? (
-                      <ModelProviderMark provider={selectedModelProvider} />
-                    ) : (
-                      <BotIcon />
-                    )}
-                    <span className="truncate">
-                      {selectedModel?.name ?? "选择模型"}
-                    </span>
-                    <ChevronDownIcon className="size-3.5" />
-                  </PromptInputButton>
-                </ModelSelectorTrigger>
+                <PromptInputTooltip tooltip="选择智能体模型">
+                  <ModelSelectorTrigger asChild>
+                    <PromptInputButton
+                      aria-label="选择智能体模型"
+                      className="motion-view-enter max-w-56"
+                      disabled={modelChanging}
+                    >
+                      {modelChanging ? (
+                        <LoaderCircleIcon className="animate-spin" />
+                      ) : selectedModelProvider ? (
+                        <ModelProviderMark provider={selectedModelProvider} />
+                      ) : (
+                        <BotIcon />
+                      )}
+                      <span className="truncate">
+                        {selectedModel?.name ?? "选择模型"}
+                      </span>
+                      <ChevronDownIcon className="size-3.5" />
+                    </PromptInputButton>
+                  </ModelSelectorTrigger>
+                </PromptInputTooltip>
                 <ModelSelectorContent
                   className="max-w-lg rounded-xl"
                   title="选择智能体模型"
@@ -355,25 +358,26 @@ export function AgentComposer({
             ) : null}
             {selectedSessionMode ? (
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <PromptInputButton
-                    aria-label="会话模式"
-                    className="max-w-36"
-                    disabled={sessionModeChanging}
-                    tooltip="会话模式"
-                  >
-                    {sessionModeChanging ? (
-                      <LoaderCircleIcon className="animate-spin" />
-                    ) : (
-                      <SessionModeIcon />
-                    )}
-                    <span className="truncate">
-                      {selectedSessionModeCopy?.label ??
-                        selectedSessionMode.name}
-                    </span>
-                    <ChevronDownIcon className="size-3.5" />
-                  </PromptInputButton>
-                </DropdownMenuTrigger>
+                <PromptInputTooltip tooltip="会话模式">
+                  <DropdownMenuTrigger asChild>
+                    <PromptInputButton
+                      aria-label="会话模式"
+                      className="max-w-36"
+                      disabled={sessionModeChanging}
+                    >
+                      {sessionModeChanging ? (
+                        <LoaderCircleIcon className="animate-spin" />
+                      ) : (
+                        <SessionModeIcon />
+                      )}
+                      <span className="truncate">
+                        {selectedSessionModeCopy?.label ??
+                          selectedSessionMode.name}
+                      </span>
+                      <ChevronDownIcon className="size-3.5" />
+                    </PromptInputButton>
+                  </DropdownMenuTrigger>
+                </PromptInputTooltip>
                 <DropdownMenuContent
                   align="start"
                   className="w-64 rounded-lg p-1"
@@ -413,22 +417,24 @@ export function AgentComposer({
               </DropdownMenu>
             ) : null}
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <PromptInputButton
-                  aria-label="权限模式"
-                  className={cn(
-                    "max-w-40",
-                    permissionMode === "always-approve" &&
-                      "text-orange-600 hover:text-orange-600",
-                  )}
-                >
-                  <PermissionIcon />
-                  <span className="truncate">
-                    {selectedPermissionMode.shortLabel}
-                  </span>
-                  <ChevronDownIcon className="size-3.5" />
-                </PromptInputButton>
-              </DropdownMenuTrigger>
+              <PromptInputTooltip tooltip="权限模式">
+                <DropdownMenuTrigger asChild>
+                  <PromptInputButton
+                    aria-label="权限模式"
+                    className={cn(
+                      "max-w-40",
+                      permissionMode === "always-approve" &&
+                        "text-orange-600 hover:text-orange-600",
+                    )}
+                  >
+                    <PermissionIcon />
+                    <span className="truncate">
+                      {selectedPermissionMode.shortLabel}
+                    </span>
+                    <ChevronDownIcon className="size-3.5" />
+                  </PromptInputButton>
+                </DropdownMenuTrigger>
+              </PromptInputTooltip>
               <DropdownMenuContent
                 align="start"
                 className="w-72 rounded-lg p-1"

@@ -183,7 +183,7 @@ export function Drawer({
                 transition={reducedMotion ? INSTANT : DRAWER_SPRING}
               >
                 <header
-                  className="relative flex shrink-0 cursor-grab items-start justify-between gap-4 px-6 pt-6 pb-4 active:cursor-grabbing"
+                  className="relative flex shrink-0 cursor-grab select-none items-start justify-between gap-4 px-6 pt-6 pb-4 active:cursor-grabbing"
                   onPointerDown={startHeaderDrag}
                 >
                   <div className="min-w-0 space-y-1.5 pr-8">

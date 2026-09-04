@@ -77,7 +77,7 @@ export function ColorSetting({
   return (
     <PreferenceRow description="" label={label}>
       <label
-        className="flex h-7 w-36 cursor-pointer items-center gap-2 rounded-lg border px-2 text-xs"
+        className="flex h-7 w-36 cursor-pointer select-none items-center gap-2 rounded-lg border px-2 text-xs"
         style={{
           backgroundColor: value,
           color:

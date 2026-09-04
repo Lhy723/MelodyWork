@@ -439,7 +439,7 @@ export function AppSidebar({
         aria-valuemax={420}
         aria-valuemin={224}
         aria-valuenow={Math.round(sidebarWidth)}
-        className="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onDoubleClick={onResetWidth}
         onKeyDown={(event) => {
           if (event.key === "ArrowLeft") {

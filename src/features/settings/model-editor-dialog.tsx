@@ -346,7 +346,7 @@ export function ModelEditorDialog({
           </section>
 
           <details className="group overflow-hidden rounded-xl border bg-card">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3">
+            <summary className="flex cursor-pointer select-none list-none items-center gap-2 px-4 py-3">
               <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-sm">高级设置</p>

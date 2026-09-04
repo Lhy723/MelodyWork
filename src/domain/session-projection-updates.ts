@@ -103,9 +103,23 @@ const toolOutput = (tool: JsonObject): string => {
   return contentText || stringifyValue(tool.rawOutput);
 };
 
+const uniqueTimelineId = (timeline: TimelineEntry[], base: string) => {
+  if (!timeline.some((entry) => entry.id === base)) {
+    return base;
+  }
+  let suffix = 2;
+  let candidate = `${base}-${suffix}`;
+  while (timeline.some((entry) => entry.id === candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+  return candidate;
+};
+
 const appendAgentChunk = (
   timeline: TimelineEntry[],
   text: string,
+  eventId?: string,
 ): TimelineEntry[] => {
   const now = Date.now();
   const last = timeline.at(-1);
@@ -115,6 +129,10 @@ const appendAgentChunk = (
       { ...last, content: `${last.content}${text}` },
     ];
   }
+  const messageId = uniqueTimelineId(
+    timeline,
+    eventId ? `assistant-${eventId}` : `assistant-${now}`,
+  );
   const settledTimeline = timeline.map((entry) =>
     entry.kind === "thought" && entry.streaming
       ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
@@ -123,7 +141,11 @@ const appendAgentChunk = (
   return [
     ...settledTimeline,
     {
-      id: `assistant-${now}`,
+      // ACP event ids are stable and unique within a session. Use them for
+      // the React key whenever a stream has to split around a tool/thought
+      // event; timestamp-only ids can collide when several chunks arrive in
+      // the same millisecond and cause later reveal nodes to be reused.
+      id: messageId,
       kind: "message",
       role: "assistant",
       content: text,
@@ -136,6 +158,7 @@ const appendAgentChunk = (
 const appendThoughtChunk = (
   timeline: TimelineEntry[],
   text: string,
+  eventId?: string,
 ): TimelineEntry[] => {
   const now = Date.now();
   const last = timeline.at(-1);
@@ -145,6 +168,10 @@ const appendThoughtChunk = (
       { ...last, content: `${last.content}${text}` },
     ];
   }
+  const thoughtId = uniqueTimelineId(
+    timeline,
+    eventId ? `thought-${eventId}` : `thought-${now}`,
+  );
   return [
     ...timeline.map((entry) =>
       entry.kind === "message" && entry.streaming
@@ -152,7 +179,7 @@ const appendThoughtChunk = (
         : entry,
     ),
     {
-      id: `thought-${now}`,
+      id: thoughtId,
       kind: "thought",
       content: text,
       startedAt: now,
@@ -649,14 +676,17 @@ export const applySessionUpdate = (
   if (updateType === "agent_message_chunk") {
     const text = textFromContent(update?.content);
     return text
-      ? { timeline: appendAgentChunk(timeline, text), streaming: true }
+      ? { timeline: appendAgentChunk(timeline, text, eventId), streaming: true }
       : { timeline };
   }
 
   if (updateType === "agent_thought_chunk") {
     const text = textFromContent(update?.content);
     return text
-      ? { timeline: appendThoughtChunk(timeline, text), streaming: true }
+      ? {
+          timeline: appendThoughtChunk(timeline, text, eventId),
+          streaming: true,
+        }
       : { timeline };
   }
 

@@ -3,23 +3,16 @@ import {
   CircleHelpIcon,
   LoaderCircleIcon,
 } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Popover } from "@/components/interior/popover";
+import { SliderDetents } from "@/components/interior/slider-detents";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { AgentReasoningEffortOption } from "@/domain/acp";
-import { cn } from "@/lib/utils";
 
 interface ReasoningEffortSliderProps {
   disabled: boolean;
@@ -29,12 +22,24 @@ interface ReasoningEffortSliderProps {
   value?: string;
 }
 
-const flickerPixels = Array.from({ length: 34 }, (_, index) => ({
-  delay: `${-((index * 0.23) % 2.7).toFixed(2)}s`,
-  duration: `${(1.45 + ((index * 17) % 11) * 0.13).toFixed(2)}s`,
-  left: `${3 + ((index * 29) % 94)}%`,
-  top: `${10 + ((index * 37) % 78)}%`,
-}));
+const reasoningEffortOrder: Record<string, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  xhigh: 3,
+};
+
+const orderReasoningOptions = (options: AgentReasoningEffortOption[]) =>
+  options
+    .map((option, index) => ({ index, option }))
+    .sort((left, right) => {
+      const leftOrder =
+        reasoningEffortOrder[left.option.value] ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder =
+        reasoningEffortOrder[right.option.value] ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ option }) => option);
 
 export function ReasoningEffortSlider({
   disabled,
@@ -43,27 +48,26 @@ export function ReasoningEffortSlider({
   options,
   value,
 }: ReasoningEffortSliderProps) {
+  const orderedOptions = useMemo(
+    () => orderReasoningOptions(options),
+    [options],
+  );
   const selectedIndex = Math.max(
     0,
-    options.findIndex((option) => option.value === value),
+    orderedOptions.findIndex((option) => option.value === value),
   );
-  const lastIndex = Math.max(0, options.length - 1);
-  const selectedProgress =
-    lastIndex === 0 ? 100 : (selectedIndex / lastIndex) * 100;
-  const [draftProgress, setDraftProgress] = useState(selectedProgress);
-  const draftProgressRef = useRef(selectedProgress);
+  const lastIndex = Math.max(0, orderedOptions.length - 1);
+  const [draftIndex, setDraftIndex] = useState(selectedIndex);
 
   useEffect(() => {
-    setDraftProgress(selectedProgress);
-    draftProgressRef.current = selectedProgress;
-  }, [selectedProgress]);
+    if (!loading) {
+      setDraftIndex(selectedIndex);
+    }
+  }, [loading, selectedIndex]);
 
-  const draftIndex =
-    lastIndex === 0 ? 0 : Math.round((draftProgress / 100) * lastIndex);
-  const selectedOption = options[draftIndex] ?? options[0];
-  const committedOption = options[selectedIndex] ?? options[0];
-  const isMaximum = options.length > 1 && draftProgress >= 100;
-  const fillWidth = `calc(${draftProgress}% + ${(26 * (1 - draftProgress / 100)).toFixed(2)}px)`;
+  const clampedDraftIndex = Math.min(lastIndex, Math.max(0, draftIndex));
+  const selectedOption = orderedOptions[clampedDraftIndex] ?? orderedOptions[0];
+  const committedOption = orderedOptions[selectedIndex] ?? orderedOptions[0];
   const helpText = useMemo(
     () =>
       selectedOption?.description ??
@@ -71,50 +75,27 @@ export function ReasoningEffortSlider({
     [selectedOption],
   );
 
-  const updateDraft = (nextProgress: number) => {
-    const clampedProgress = Math.min(100, Math.max(0, nextProgress));
-    draftProgressRef.current = clampedProgress;
-    setDraftProgress(clampedProgress);
+  const detents = useMemo(
+    () =>
+      orderedOptions.map((option, index) => ({
+        label: option.label,
+        value: index,
+      })),
+    [orderedOptions],
+  );
+
+  const formatSliderValue = (index: number) =>
+    orderedOptions[Math.round(index)]?.label ?? "未选择";
+
+  const handleSliderChange = (nextValue: number) => {
+    setDraftIndex(Math.min(lastIndex, Math.max(0, Math.round(nextValue))));
   };
 
-  const commitDraft = () => {
-    const nextIndex =
-      lastIndex === 0
-        ? 0
-        : Math.round((draftProgressRef.current / 100) * lastIndex);
-    const nextOption = options[nextIndex];
+  const handleSliderCommit = (nextValue: number) => {
+    const nextIndex = Math.min(lastIndex, Math.max(0, Math.round(nextValue)));
+    const nextOption = orderedOptions[nextIndex];
     if (nextOption && nextOption.value !== value) {
       onValueChange(nextOption.value);
-    }
-  };
-
-  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
-    updateDraft(Number(event.currentTarget.value));
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (lastIndex === 0) {
-      return;
-    }
-
-    const currentIndex = Math.round(
-      (draftProgressRef.current / 100) * lastIndex,
-    );
-    let nextIndex: number | undefined;
-
-    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
-      nextIndex = Math.max(0, currentIndex - 1);
-    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
-      nextIndex = Math.min(lastIndex, currentIndex + 1);
-    } else if (event.key === "Home") {
-      nextIndex = 0;
-    } else if (event.key === "End") {
-      nextIndex = lastIndex;
-    }
-
-    if (nextIndex !== undefined) {
-      event.preventDefault();
-      updateDraft((nextIndex / lastIndex) * 100);
     }
   };
 
@@ -165,58 +146,19 @@ export function ReasoningEffortSlider({
         <span>更聪明</span>
       </div>
 
-      <div
-        className={cn(
-          "reasoning-effort-track mt-1.5",
-          isMaximum && "is-maximum",
-        )}
-      >
-        <div
-          aria-hidden="true"
-          className="reasoning-effort-fill"
-          style={{ width: fillWidth }}
-        />
-        <div
-          aria-hidden="true"
-          className="reasoning-effort-grid"
-          style={{ width: fillWidth }}
-        />
-        <div
-          aria-hidden="true"
-          className="reasoning-effort-pixels"
-          style={{ width: fillWidth }}
-        >
-          {flickerPixels.map((pixel) => (
-            <span
-              className="reasoning-effort-pixel"
-              key={`${pixel.left}-${pixel.top}`}
-              style={{
-                animationDelay: pixel.delay,
-                animationDuration: pixel.duration,
-                left: pixel.left,
-                top: pixel.top,
-              }}
-            />
-          ))}
-        </div>
-        <input
-          aria-label="思考强度"
-          aria-valuetext={selectedOption?.label}
-          className="reasoning-effort-range"
-          disabled={disabled}
-          max={100}
-          min={0}
-          onBlur={commitDraft}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onKeyUp={commitDraft}
-          onPointerCancel={commitDraft}
-          onPointerUp={commitDraft}
-          step={1}
-          type="range"
-          value={draftProgress}
-        />
-      </div>
+      <SliderDetents
+        className="mt-1"
+        detents={detents}
+        disabled={disabled}
+        format={formatSliderValue}
+        haptic={false}
+        label="思考强度"
+        max={lastIndex}
+        onValueChange={handleSliderChange}
+        onValueCommit={handleSliderCommit}
+        showHeader={false}
+        value={clampedDraftIndex}
+      />
     </Popover>
   );
 }

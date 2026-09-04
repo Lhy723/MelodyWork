@@ -220,7 +220,7 @@ export function WorkspaceSidePanel({
         aria-valuemin={minPanelWidth}
         aria-valuenow={Math.round(panelWidth)}
         aria-valuetext={`${Math.round(panelWidth)} 像素`}
-        className="group absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onDoubleClick={onResetWidth}
         onKeyDown={(event) => {
           if (event.key === "ArrowLeft") {

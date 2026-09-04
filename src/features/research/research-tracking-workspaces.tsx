@@ -162,6 +162,7 @@ export function TrackingWorkspace({
                   </>
                 }
                 description="主题名称只是你在项目里看到的标题；检索词才会在刷新时发送给 Crossref、arXiv、PubMed 等学术索引。创建后会在独立详情页查看进展。"
+                reveal
                 steps={[
                   {
                     title: "命名方向",

@@ -121,6 +121,7 @@ export function InboxWorkspace({
               </>
             }
             description="完成一次真实检索后，结果会自动进入这里。你可以先批量加入文献库，再挑选值得长期保留的论文生成知识资产。"
+            reveal
             steps={[
               { title: "运行一次检索", description: "用白话描述研究问题。" },
               {

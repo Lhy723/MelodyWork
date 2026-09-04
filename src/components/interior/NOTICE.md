@@ -4,7 +4,8 @@ The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`
 `icon-morph.tsx`, `press-depth.tsx`, `floating-label.tsx`, `expanding-search.tsx`,
 `progress-bar.tsx`, `load-more.tsx`, `live-activity.tsx`, `collapsible-banner.tsx`,
 `presence-avatars.tsx`, `modal.tsx`, `popover.tsx`, `tooltip-group.tsx`,
-`drawer.tsx`, `context-menu.tsx`, `dropdown.tsx`, and `tabs.tsx` implementations in this
+`drawer.tsx`, `context-menu.tsx`, `dropdown.tsx`, `tabs.tsx`, `accordion.tsx`,
+`slider-detents.tsx`, and `text-reveal.tsx` implementations in this
 directory are
 adapted from the Interior component library by ddoemonn, licensed under the MIT
 License.
@@ -30,6 +31,10 @@ License.
 - Context Menu source: https://www.interior.dev/docs/context-menu
 - Dropdown source: https://www.interior.dev/docs/dropdown
 - Tabs source: https://www.interior.dev/docs/tabs
+- Accordion source: https://www.interior.dev/docs/accordion
+- Slider Detents source: https://www.interior.dev/docs/slider-detents
+- Text Reveal source: https://www.interior.dev/docs/text-reveal
+- Streaming Text source: https://www.interior.dev/docs/streaming-text
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -93,3 +98,14 @@ collision-aware popover placement while using MelodyWork's semantic tokens.
 The Tabs adapter keeps Interior's shared motion indicator, controlled or
 uncontrolled selection, keyboard activation modes, tablist semantics, and
 reduced-motion-aware panel transitions while using MelodyWork's semantic tokens.
+The Accordion adapter keeps Interior's measured auto-height panels, single or
+multiple open modes, keyboard navigation, inert closed content, and
+reduced-motion-aware transitions while using MelodyWork's semantic tokens.
+The Slider Detents adapter keeps Interior's detent snapping, keyboard stepping,
+pointer capture, spring carriage, and reduced-motion behavior while exposing a
+commit callback for draft-driven controls such as model reasoning effort.
+The Text Reveal adapter keeps Interior's reading-order reveal motion for short,
+static copy. Its streaming variant preserves the same visual treatment while
+animating only newly appended units during an active assistant stream; once a
+Markdown response settles, MelodyWork switches back to its Streamdown renderer
+to preserve formatting.

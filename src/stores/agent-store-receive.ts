@@ -22,6 +22,7 @@ import {
   questionEntryForRequest,
   stringValue,
   contextUsageForModel,
+  modelOptionsFromUpdate,
   wireValue,
 } from "./agent-store-parsing";
 import {
@@ -64,6 +65,59 @@ const promptCompleteUpdate = (params: Record<string, unknown> | undefined) => {
   };
 };
 
+const handleModelCatalogUpdate = (
+  store: AgentStoreAccess,
+  message: Parameters<AgentStore["receiveAcp"]>[0],
+) => {
+  const models = modelOptionsFromUpdate(message);
+  if (!models) {
+    return false;
+  }
+
+  const { get, set } = store;
+  const current = get();
+  const currentModelStillAvailable = current.selectedModelId
+    ? models.availableModels.some(
+        (model) => model.id === current.selectedModelId,
+      )
+    : false;
+  const updateSelectedModelStillAvailable = models.selectedModelId
+    ? models.availableModels.some(
+        (model) => model.id === models.selectedModelId,
+      )
+    : false;
+  // A catalog update carries the shell's default model. Keep an active
+  // session's explicit choice when it is still present; only fall back to the
+  // update's current model when the previous choice was removed.
+  const selectedModelId = currentModelStillAvailable
+    ? current.selectedModelId
+    : updateSelectedModelStillAvailable
+      ? models.selectedModelId
+      : models.availableModels[0]?.id;
+  const selectedModel = models.availableModels.find(
+    (model) => model.id === selectedModelId,
+  );
+  const modelChanged = selectedModelId !== current.selectedModelId;
+
+  set({
+    availableModels: models.availableModels,
+    selectedModelId,
+    selectedReasoningEffort: modelChanged
+      ? selectedModel?.reasoningEffort
+      : (current.selectedReasoningEffort ?? selectedModel?.reasoningEffort),
+    contextUsage: contextUsageForModel(
+      models.availableModels,
+      selectedModelId,
+      current.contextUsage,
+    ),
+    ...(current.pendingModelId &&
+    models.availableModels.some((model) => model.id === current.pendingModelId)
+      ? {}
+      : { pendingModelId: undefined }),
+  });
+  return true;
+};
+
 export const receiveAgentAcp = async (
   store: AgentStoreAccess,
   message: Parameters<AgentStore["receiveAcp"]>[0],
@@ -72,6 +126,10 @@ export const receiveAgentAcp = async (
 
   pruneTransientState();
   try {
+    if (handleModelCatalogUpdate(store, message)) {
+      return;
+    }
+
     if (isUserQuestionMethod(message.method) && message.id !== undefined) {
       const request = parseUserQuestionRequest(message, get().acpSessionId);
       if (!request) {

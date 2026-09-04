@@ -14,6 +14,7 @@ import { Dropdown } from "@/components/interior/dropdown";
 import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
 import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
+import { TextReveal } from "@/components/interior/text-reveal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -337,10 +338,20 @@ export function ResearchOverviewWorkspace({
             <div className="border-b py-14 text-center">
               <PenLineIcon className="mx-auto size-6 text-muted-foreground" />
               <h3 className="research-serif mt-3 font-semibold text-lg">
-                从一条研究记录开始
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={0.95}
+                  text="从一条研究记录开始"
+                />
               </h3>
               <p className="mx-auto mt-1 max-w-md text-muted-foreground text-xs leading-5">
-                先写下当前的想法、读论文后的判断或下一步实验；之后所有研究活动都会在这里形成连续脉络。
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={1.25}
+                  text="先写下当前的想法、读论文后的判断或下一步实验；之后所有研究活动都会在这里形成连续脉络。"
+                />
               </p>
               <div className="mt-4 flex justify-center gap-2">
                 <Button onClick={() => setCaptureMode("note")} size="sm">

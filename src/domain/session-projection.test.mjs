@@ -329,6 +329,36 @@ test("settles an assistant stream when thought projection starts", () => {
   );
 });
 
+test("keeps assistant message keys unique when a stream resumes after activity", () => {
+  const first = applySessionUpdate(
+    [],
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { text: "first" },
+    },
+    "message-1",
+  );
+  const withThought = applySessionUpdate(
+    first.timeline,
+    {
+      sessionUpdate: "agent_thought_chunk",
+      content: { text: "checking" },
+    },
+    "thought-1",
+  );
+  const resumed = applySessionUpdate(
+    withThought.timeline,
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { text: "second" },
+    },
+    "message-2",
+  );
+
+  assert.equal(resumed.timeline.at(-1).id, "assistant-message-2");
+  assert.notEqual(resumed.timeline[0].id, resumed.timeline.at(-1).id);
+});
+
 test("normalizes user chunks and honors projection metadata", () => {
   const visible = applySessionUpdate(
     [],
