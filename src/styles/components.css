@@ -78,6 +78,13 @@
     transform: translateY(-6px) scale(0.99);
   }
 
+  /* The sidebar owns its height/opacity motion with Motion; this class keeps
+   * the animated tree viewport clipped while it expands and collapses. */
+  .motion-tree-collapsible-content {
+    overflow: hidden;
+    transform-origin: top;
+  }
+
   .motion-layer,
   .motion-sheet-layer,
   .motion-banner {

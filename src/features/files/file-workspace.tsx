@@ -1,15 +1,22 @@
 import {
-  ChevronRightIcon,
   FileIcon,
   FolderIcon,
   RefreshCwIcon,
   SaveIcon,
   XIcon,
 } from "lucide-react";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { LoadingButton } from "@/components/interior/loading-button";
+import { TreeView, type TreeNode } from "@/components/interior/tree-view";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
@@ -52,6 +59,94 @@ const languageFor = (path: string) => {
   );
 };
 
+type WorkspaceTreeNode = TreeNode & {
+  isDirectory: boolean;
+  children?: WorkspaceTreeNode[];
+};
+
+type WorkspaceTreeModel = {
+  nodes: WorkspaceTreeNode[];
+  matchingDirectories: string[];
+};
+
+const parentPathFor = (path: string) => {
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? undefined : path.slice(0, separator);
+};
+
+function buildWorkspaceTree(
+  entries: WorkspaceEntry[],
+  filter = "",
+): WorkspaceTreeModel {
+  const nodeByPath = new Map<string, WorkspaceTreeNode>();
+  const roots: WorkspaceTreeNode[] = [];
+
+  for (const entry of entries) {
+    nodeByPath.set(entry.path, {
+      id: entry.path,
+      isDirectory: entry.isDirectory,
+      label: entry.name,
+      selectable: !entry.isDirectory,
+      icon: entry.isDirectory ? (
+        <FolderIcon className="size-3.5" />
+      ) : (
+        <FileIcon className="size-3.5" />
+      ),
+      ...(entry.isDirectory ? { children: [] } : {}),
+    });
+  }
+
+  for (const entry of entries) {
+    const node = nodeByPath.get(entry.path);
+    if (!node) continue;
+    const parentPath = parentPathFor(entry.path);
+    const parent = parentPath ? nodeByPath.get(parentPath) : undefined;
+    if (parent?.isDirectory) {
+      parent.children?.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  const query = filter.trim().toLowerCase();
+  if (!query) {
+    return { matchingDirectories: [], nodes: roots };
+  }
+
+  const included = new Set<string>();
+  for (const entry of entries) {
+    if (entry.isDirectory || !entry.path.toLowerCase().includes(query)) {
+      continue;
+    }
+    included.add(entry.path);
+    let parent = parentPathFor(entry.path);
+    while (parent) {
+      included.add(parent);
+      parent = parentPathFor(parent);
+    }
+  }
+
+  const prune = (nodes: WorkspaceTreeNode[]): WorkspaceTreeNode[] =>
+    nodes.flatMap((node) => {
+      if (!included.has(node.id)) return [];
+      const children = node.children ? prune(node.children) : undefined;
+      return [
+        {
+          ...node,
+          ...(node.children ? { children } : {}),
+        },
+      ];
+    });
+  const filteredNodes = prune(roots);
+
+  return {
+    matchingDirectories: [...included].filter(
+      (path) => nodeByPath.get(path)?.isDirectory,
+    ),
+    nodes: filteredNodes,
+  };
+}
+
 export function FileWorkspace({
   embedded = false,
   onOpenFile,
@@ -70,8 +165,10 @@ export function FileWorkspace({
   const [selectedPath, setSelectedPath] = useState<string>();
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
+  const [expandedPaths, setExpandedPaths] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const expandedRoot = useRef<string | undefined>(undefined);
   const editorTheme =
     typeof document !== "undefined" &&
     document.documentElement.classList.contains("dark")
@@ -91,6 +188,15 @@ export function FileWorkspace({
       try {
         const nextEntries = await getWorkspaceTree(root);
         setEntries(nextEntries);
+        if (expandedRoot.current !== root) {
+          expandedRoot.current = root;
+          const initialTree = buildWorkspaceTree(nextEntries);
+          setExpandedPaths(
+            initialTree.nodes
+              .filter((node) => node.children && node.children.length > 0)
+              .map((node) => node.id),
+          );
+        }
         if (announce) {
           succeedActivity({
             detail: `已读取 ${nextEntries.length} 个文件和目录。`,
@@ -122,34 +228,57 @@ export function FileWorkspace({
     void loadTree();
   }, [loadTree]);
 
-  const filteredEntries = useMemo(() => {
-    const query = filter.trim().toLowerCase();
-    return query
-      ? entries.filter(
-          (entry) =>
-            !entry.isDirectory && entry.path.toLowerCase().includes(query),
-        )
-      : entries;
-  }, [entries, filter]);
+  useEffect(() => {
+    setSelectedPath(undefined);
+    setContent("");
+    setSavedContent("");
+    setFilter("");
+    setExpandedPaths([]);
+    expandedRoot.current = undefined;
+  }, [root]);
 
-  const openFile = async (path: string) => {
-    if (onOpenFile) {
-      onOpenFile(path);
-      return;
-    }
-    setSelectedPath(path);
-    setLoading(true);
-    setError(undefined);
-    try {
-      const nextContent = await readWorkspaceFile(root, path);
-      setContent(nextContent);
-      setSavedContent(nextContent);
-    } catch (reason) {
-      setError(toUserMessage(reason));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const workspaceTree = useMemo(
+    () => buildWorkspaceTree(entries, filter),
+    [entries, filter],
+  );
+  const visibleExpandedPaths = useMemo(() => {
+    const query = filter.trim();
+    if (!query) return expandedPaths;
+    return [
+      ...new Set([...expandedPaths, ...workspaceTree.matchingDirectories]),
+    ];
+  }, [expandedPaths, filter, workspaceTree.matchingDirectories]);
+
+  const openFile = useCallback(
+    async (path: string) => {
+      setSelectedPath(path);
+      if (onOpenFile) {
+        onOpenFile(path);
+        return;
+      }
+      setLoading(true);
+      setError(undefined);
+      try {
+        const nextContent = await readWorkspaceFile(root, path);
+        setContent(nextContent);
+        setSavedContent(nextContent);
+      } catch (reason) {
+        setError(toUserMessage(reason));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onOpenFile, root],
+  );
+
+  const handleTreeSelection = useCallback(
+    (path: string) => {
+      const entry = entries.find((candidate) => candidate.path === path);
+      if (!entry || entry.isDirectory) return;
+      void openFile(path);
+    },
+    [entries, openFile],
+  );
 
   const save = async () => {
     if (!selectedPath || content === savedContent) {
@@ -267,36 +396,25 @@ export function FileWorkspace({
             aria-label="文件树"
             className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
           >
-            {filteredEntries.map((entry) => (
-              <button
-                className={cn(
-                  "flex h-8 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-xs hover:bg-muted/60",
-                  selectedPath === entry.path && "bg-muted text-foreground",
-                  entry.isDirectory
-                    ? "text-foreground"
-                    : "text-muted-foreground",
-                )}
-                disabled={entry.isDirectory}
-                key={entry.path}
-                onClick={() => void openFile(entry.path)}
-                style={{ paddingLeft: `${8 + entry.depth * 14}px` }}
-                title={entry.path}
-                type="button"
-              >
-                {entry.isDirectory ? (
-                  <>
-                    <ChevronRightIcon className="size-3 shrink-0 rotate-90" />
-                    <FolderIcon className="size-3.5 shrink-0" />
-                  </>
-                ) : (
-                  <>
-                    <span className="w-3 shrink-0" />
-                    <FileIcon className="size-3.5 shrink-0" />
-                  </>
-                )}
-                <span className="truncate">{entry.name}</span>
-              </button>
-            ))}
+            {loading && entries.length === 0 ? (
+              <p className="px-2 py-3 text-muted-foreground text-xs">
+                正在读取文件树…
+              </p>
+            ) : workspaceTree.nodes.length > 0 ? (
+              <TreeView
+                className="rounded-none border-0 bg-transparent p-0 shadow-none"
+                expanded={visibleExpandedPaths}
+                label="文件树"
+                onExpandedChange={setExpandedPaths}
+                onSelectedChange={handleTreeSelection}
+                selected={selectedPath ?? null}
+                nodes={workspaceTree.nodes}
+              />
+            ) : (
+              <p className="px-2 py-3 text-muted-foreground text-xs">
+                {filter.trim() ? "没有匹配的文件" : "工作区中没有可显示的文件"}
+              </p>
+            )}
           </nav>
         </aside>
 

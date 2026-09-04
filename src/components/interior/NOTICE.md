@@ -5,7 +5,7 @@ The `copy-button.tsx`, `loading-button.tsx`, `hold-to-confirm.tsx`, `ripple.tsx`
 `progress-bar.tsx`, `load-more.tsx`, `live-activity.tsx`, `collapsible-banner.tsx`,
 `presence-avatars.tsx`, `modal.tsx`, `popover.tsx`, `tooltip-group.tsx`,
 `drawer.tsx`, `context-menu.tsx`, `dropdown.tsx`, `tabs.tsx`, `accordion.tsx`,
-`slider-detents.tsx`, and `text-reveal.tsx` implementations in this
+`slider-detents.tsx`, `text-reveal.tsx`, and `tree-view.tsx` implementations in this
 directory are
 adapted from the Interior component library by ddoemonn, licensed under the MIT
 License.
@@ -35,6 +35,7 @@ License.
 - Slider Detents source: https://www.interior.dev/docs/slider-detents
 - Text Reveal source: https://www.interior.dev/docs/text-reveal
 - Streaming Text source: https://www.interior.dev/docs/streaming-text
+- Tree View source: https://www.interior.dev/docs/tree-view
 - Upstream commit: `46473ce9e0edcebc70702814dc3d59c504e06bac`
 - Copyright: © 2026 ozzy
 
@@ -109,3 +110,7 @@ static copy. Its streaming variant preserves the same visual treatment while
 animating only newly appended units during an active assistant stream; once a
 Markdown response settles, MelodyWork switches back to its Streamdown renderer
 to preserve formatting.
+The Tree View adapter keeps Interior's nested disclosure model, roving focus,
+keyboard navigation, selection and reduced-motion-aware transitions while
+adding icons, metadata and custom row slots for MelodyWork's workspace file
+browser, Git change review, and sidebar project/session navigation.

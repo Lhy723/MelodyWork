@@ -1,7 +1,8 @@
-import { FileCode2Icon, RefreshCwIcon, XIcon } from "lucide-react";
+import { FileCode2Icon, FolderIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { LoadingButton } from "@/components/interior/loading-button";
+import { TreeView, type TreeNode } from "@/components/interior/tree-view";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type { GitChange, GitDiff } from "@/domain/git";
@@ -24,6 +25,108 @@ const statusLabel = (status: string) => {
   }
   return status.trim() || "M";
 };
+
+type ChangeTreeNode = TreeNode & {
+  isDirectory: boolean;
+  fileCount?: number;
+  children?: ChangeTreeNode[];
+};
+
+const ancestorPathsFor = (path: string) => {
+  const segments = path.split("/").filter(Boolean);
+  const ancestors: string[] = [];
+  for (let index = 1; index < segments.length; index += 1) {
+    ancestors.push(segments.slice(0, index).join("/"));
+  }
+  return ancestors;
+};
+
+const changeMeta = (change: GitChange) => (
+  <span className="inline-flex items-center gap-1 font-mono text-[10px]">
+    <span className="text-emerald-700">+{change.additions}</span>
+    <span className="text-red-700">−{change.deletions}</span>
+    <span className="rounded bg-muted-foreground/10 px-1">
+      {statusLabel(change.status)}
+    </span>
+  </span>
+);
+
+function buildChangeTree(changes: GitChange[]): ChangeTreeNode[] {
+  const roots: ChangeTreeNode[] = [];
+  const nodeByPath = new Map<string, ChangeTreeNode>();
+
+  for (const change of changes) {
+    const segments = change.path.split("/").filter(Boolean);
+    if (segments.length === 0) continue;
+
+    let parentPath: string | undefined;
+    let siblings = roots;
+    segments.forEach((segment, index) => {
+      const isFile = index === segments.length - 1;
+      const path = parentPath ? `${parentPath}/${segment}` : segment;
+      let node = nodeByPath.get(path);
+
+      if (!node) {
+        node = isFile
+          ? {
+              id: path,
+              label: segment,
+              icon: <FileCode2Icon className="size-3.5" />,
+              meta: changeMeta(change),
+              selectable: true,
+              isDirectory: false,
+            }
+          : {
+              id: path,
+              label: segment,
+              icon: <FolderIcon className="size-3.5" />,
+              children: [],
+              selectable: false,
+              isDirectory: true,
+            };
+        nodeByPath.set(path, node);
+        siblings.push(node);
+      } else if (isFile) {
+        node.meta = changeMeta(change);
+      }
+
+      if (!isFile) {
+        parentPath = path;
+        siblings = node.children ?? [];
+        node.children = siblings;
+      }
+    });
+  }
+
+  const sortAndCount = (nodes: ChangeTreeNode[]): ChangeTreeNode[] =>
+    [...nodes]
+      .sort((left, right) => {
+        if (left.isDirectory !== right.isDirectory) {
+          return left.isDirectory ? -1 : 1;
+        }
+        return left.label.localeCompare(right.label, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      })
+      .map((node) => {
+        if (!node.isDirectory) return node;
+        const children = sortAndCount(node.children ?? []);
+        const fileCount = children.reduce(
+          (count, child) =>
+            count + (child.isDirectory ? (child.fileCount ?? 0) : 1),
+          0,
+        );
+        return {
+          ...node,
+          children,
+          fileCount,
+          meta: `${fileCount}`,
+        };
+      });
+
+  return sortAndCount(roots);
+}
 
 const DiffLine = ({ line }: { line: string }) => {
   const kind = line.startsWith("+")
@@ -58,6 +161,7 @@ export function ChangeReview({
   onRefresh,
 }: ChangeReviewProps) {
   const [selectedPath, setSelectedPath] = useState<string>();
+  const [expandedPaths, setExpandedPaths] = useState<string[]>([]);
   const [diff, setDiff] = useState<GitDiff>();
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string>();
@@ -70,6 +174,38 @@ export function ChangeReview({
       setSelectedPath(changes[0].path);
     }
   }, [changes, selectedPath]);
+
+  const changeTree = useMemo(() => buildChangeTree(changes), [changes]);
+
+  useEffect(() => {
+    const rootDirectories = changeTree
+      .filter((node) => node.isDirectory && node.children?.length)
+      .map((node) => node.id);
+    const availableDirectories = new Set<string>();
+    const collectDirectories = (nodes: ChangeTreeNode[]) => {
+      nodes.forEach((node) => {
+        if (!node.isDirectory) return;
+        availableDirectories.add(node.id);
+        collectDirectories(node.children ?? []);
+      });
+    };
+    collectDirectories(changeTree);
+    const selectedAncestors = selectedPath
+      ? ancestorPathsFor(selectedPath).filter((path) =>
+          availableDirectories.has(path),
+        )
+      : [];
+    setExpandedPaths((previous) => {
+      const retained = previous.filter((path) =>
+        availableDirectories.has(path),
+      );
+      const base =
+        retained.length > 0 || rootDirectories.length === 0
+          ? retained
+          : rootDirectories;
+      return [...new Set([...base, ...selectedAncestors])];
+    });
+  }, [changeTree, selectedPath]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -162,36 +298,19 @@ export function ChangeReview({
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="已更改文件"
-          className="w-56 shrink-0 overflow-y-auto border-r p-2"
+          className="w-64 shrink-0 overflow-y-auto border-r p-2"
         >
-          {changes.map((change) => (
-            <button
-              className={cn(
-                "flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors",
-                selectedPath === change.path
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-              )}
-              key={change.path}
-              onClick={() => setSelectedPath(change.path)}
-              type="button"
-            >
-              <FileCode2Icon className="mt-0.5 size-4 shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">
-                  {change.path.split("/").at(-1)}
-                </span>
-                <span className="block truncate text-xs">{change.path}</span>
-                <span className="mt-1 block text-xs">
-                  <span className="text-emerald-700">+{change.additions}</span>
-                  <span className="ml-2 text-red-700">−{change.deletions}</span>
-                </span>
-              </span>
-              <span className="rounded bg-muted-foreground/10 px-1.5 py-0.5 font-mono text-xs">
-                {statusLabel(change.status)}
-              </span>
-            </button>
-          ))}
+          {changeTree.length > 0 ? (
+            <TreeView
+              className="rounded-none border-0 bg-transparent p-0 shadow-none"
+              expanded={expandedPaths}
+              label="已更改文件"
+              nodes={changeTree}
+              onExpandedChange={setExpandedPaths}
+              onSelectedChange={setSelectedPath}
+              selected={selectedPath ?? null}
+            />
+          ) : null}
           {!loading && changes.length === 0 ? (
             <p className="px-3 py-8 text-center text-muted-foreground text-xs">
               工作树是干净的。
