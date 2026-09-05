@@ -1,0 +1,159 @@
+import { CheckCircleIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import type { UpdateChannel } from "@/stores/app-settings-store";
+import { cn } from "@/lib/utils";
+
+import { PanelHeader } from "./about-ui";
+import { type UpdateCheckState, updateChannelLabel } from "./about-types";
+
+interface AboutUpdatePanelProps {
+  autoCheckForUpdates: boolean;
+  updateChannel: UpdateChannel;
+  updateState: UpdateCheckState;
+  isBusy: boolean;
+  hasUpdateDetails: boolean;
+  onSetAutoCheck: (enabled: boolean) => void;
+  onSetChannel: (channel: UpdateChannel) => void;
+  onCheck: () => void;
+  onInstall: () => void;
+}
+
+export function AboutUpdatePanel({
+  autoCheckForUpdates,
+  updateChannel,
+  updateState,
+  isBusy,
+  hasUpdateDetails,
+  onSetAutoCheck,
+  onSetChannel,
+  onCheck,
+  onInstall,
+}: AboutUpdatePanelProps) {
+  return (
+    <section
+      aria-labelledby="about-update-title"
+      className="overflow-hidden rounded-xl border bg-card"
+    >
+      <PanelHeader
+        action={
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {updateState.status === "up-to-date" ? (
+              <span className="inline-flex items-center gap-1.5 text-emerald-500 text-sm">
+                <CheckCircleIcon className="size-4" />
+                已是最新版本
+              </span>
+            ) : null}
+            <Button
+              disabled={isBusy}
+              onClick={onCheck}
+              size="sm"
+              variant="secondary"
+            >
+              <RefreshCwIcon className={cn(isBusy && "animate-spin")} />
+              {updateState.status === "checking" ? "检查中…" : "检查更新"}
+            </Button>
+          </div>
+        }
+        description={`当前渠道：${updateChannelLabel[updateChannel]}。自动检查和渠道设置可在此处管理。`}
+        title={<span id="about-update-title">软件更新</span>}
+      />
+      <div className="divide-y border-b">
+        <div className="flex min-h-14 items-center gap-5 px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-sm">自动检查 MelodyWork 更新</p>
+            <p className="mt-0.5 text-muted-foreground text-xs leading-4">
+              启动时检查可用更新；发现新版本后由你确认安装。
+            </p>
+          </div>
+          <Switch
+            aria-label="自动检查 MelodyWork 更新"
+            checked={autoCheckForUpdates}
+            className="data-[state=checked]:bg-blue-500"
+            onCheckedChange={onSetAutoCheck}
+          />
+        </div>
+        <div className="flex min-h-14 items-center gap-5 px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-sm">检测更新渠道</p>
+            <p className="mt-0.5 text-muted-foreground text-xs leading-4">
+              正式版更稳定；测试版会更早提供新功能，可能包含未解决的问题。
+            </p>
+          </div>
+          <Select
+            onValueChange={(next) => onSetChannel(next as UpdateChannel)}
+            value={updateChannel}
+          >
+            <SelectTrigger aria-label="检测更新渠道" className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="stable">正式版</SelectItem>
+              <SelectItem value="beta">测试版</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {hasUpdateDetails ? (
+        <div className="p-5">
+          {updateState.status === "available" ||
+          updateState.status === "installing" ? (
+            <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 p-4">
+              <div className="flex items-center gap-2">
+                <InfoIcon className="size-4 text-blue-500" />
+                <p className="font-medium text-sm">
+                  发现{updateChannelLabel[updateState.channel]}新版本 v
+                  {updateState.status === "available"
+                    ? updateState.version
+                    : ""}
+                </p>
+              </div>
+              {updateState.status === "available" && updateState.notes ? (
+                <p className="mt-2 whitespace-pre-wrap text-muted-foreground text-xs">
+                  {updateState.notes}
+                </p>
+              ) : null}
+              <Button
+                className="mt-3"
+                disabled={updateState.status === "installing"}
+                onClick={onInstall}
+                size="sm"
+              >
+                {updateState.status === "installing" ? (
+                  <>
+                    <RefreshCwIcon className="animate-spin" />
+                    正在下载并安装…
+                  </>
+                ) : (
+                  "安装更新并重启"
+                )}
+              </Button>
+            </div>
+          ) : null}
+          {updateState.status === "error" ? (
+            <div
+              aria-live="assertive"
+              className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive text-sm"
+              role="alert"
+            >
+              检查更新失败：{updateState.message}
+            </div>
+          ) : null}
+          {updateState.status === "not-configured" ? (
+            <div className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3 text-muted-foreground text-sm">
+              当前运行环境未配置更新服务。
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}

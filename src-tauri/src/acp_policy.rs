@@ -342,6 +342,7 @@ pub(crate) fn inspect_server_response(
                 Err("Plan response outcome is invalid".to_string())
             }
         }
+        "x.ai/ask_user_question" | "_x.ai/ask_user_question" => inspect_question_response(object),
         method => Err(format!(
             "Responses to ACP method {method} are not supported"
         )),
@@ -358,131 +359,85 @@ fn value_bool(object: Option<&serde_json::Map<String, Value>>, names: &[&str]) -
 }
 
 fn session_id(params: Option<&serde_json::Map<String, Value>>) -> Option<&str> {
+    let params = params?;
     params
-        .and_then(|params| params.get("sessionId").or_else(|| params.get("session_id")))
+        .get("sessionId")
+        .or_else(|| params.get("session_id"))
         .and_then(Value::as_str)
+        .or_else(|| {
+            params
+                .get("params")
+                .and_then(Value::as_object)
+                .and_then(|nested| nested.get("sessionId").or_else(|| nested.get("session_id")))
+                .and_then(Value::as_str)
+        })
+}
+
+fn inspect_question_response(
+    object: &serde_json::Map<String, Value>,
+) -> Result<ServerResponseAction, String> {
+    if object.contains_key("error") {
+        return Ok(ServerResponseAction::None);
+    }
+    let result = object
+        .get("result")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Question response result is invalid".to_string())?;
+    let outcome = result
+        .get("outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Question response outcome is missing".to_string())?;
+    match outcome {
+        "accepted" => {
+            let answers = result
+                .get("answers")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "Question response answers are missing".to_string())?;
+            for answer in answers.values() {
+                let valid = answer.as_str().is_some()
+                    || answer
+                        .as_array()
+                        .is_some_and(|values| values.iter().all(Value::is_string));
+                if !valid {
+                    return Err("Question response answers must be strings".to_string());
+                }
+            }
+            if let Some(annotations) = result.get("annotations") {
+                let Some(annotations) = annotations.as_object() else {
+                    return Err("Question response annotations are invalid".to_string());
+                };
+                for annotation in annotations.values() {
+                    let Some(annotation) = annotation.as_object() else {
+                        return Err("Question response annotation is invalid".to_string());
+                    };
+                    for key in ["preview", "notes"] {
+                        if let Some(value) = annotation.get(key)
+                            && !value.is_string()
+                        {
+                            return Err("Question response annotation text is invalid".to_string());
+                        }
+                    }
+                }
+            }
+            Ok(ServerResponseAction::None)
+        }
+        "chat_about_this" | "skip_interview" => {
+            if let Some(partial_answers) = result
+                .get("partial_answers")
+                .or_else(|| result.get("partialAnswers"))
+                && !partial_answers
+                    .as_object()
+                    .is_some_and(|answers| answers.values().all(Value::is_string))
+            {
+                return Err("Question response partial answers are invalid".to_string());
+            }
+            Ok(ServerResponseAction::None)
+        }
+        "cancelled" => Ok(ServerResponseAction::None),
+        _ => Err("Question response outcome is invalid".to_string()),
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn permission_request(id: usize) -> Value {
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": "session/request_permission",
-            "params": {
-                "sessionId": "session-1",
-                "toolCall": { "title": "Run tests", "command": "pnpm test" },
-                "options": [
-                    { "optionId": "allow-once", "kind": "allow_once" },
-                    { "optionId": "reject-once", "kind": "reject_once" }
-                ]
-            }
-        })
-    }
-
-    #[test]
-    fn validates_session_bound_requests_and_blocks_mcp_injection() {
-        assert!(
-            inspect_outgoing_message(&json!({
-                "method": "session/cancel",
-                "params": { "sessionId": "session-1" }
-            }))
-            .is_ok()
-        );
-        assert!(inspect_outgoing_message(&json!({ "method": "session/cancel" })).is_err());
-        assert!(
-            inspect_outgoing_message(&json!({
-                "method": "session/new",
-                "params": { "cwd": "/tmp/project", "mcpServers": [{ "name": "other" }] }
-            }))
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn reports_host_actions_for_privileged_modes() {
-        assert_eq!(
-            inspect_outgoing_message(&json!({
-                "method": "session/new",
-                "params": { "cwd": "/tmp/project", "_meta": { "yoloMode": true } }
-            }))
-            .unwrap(),
-            OutgoingMessage::Request(ClientRequestAction::OpenSession {
-                cwd: "/tmp/project".to_string(),
-                elevated_mode: Some("always-approve".to_string()),
-            })
-        );
-        assert_eq!(
-            inspect_outgoing_message(&json!({
-                "method": "x.ai/yolo_mode_changed",
-                "params": { "permission_mode": "ask" }
-            }))
-            .unwrap(),
-            OutgoingMessage::Request(ClientRequestAction::ChangePermissionMode {
-                mode: "ask".to_string(),
-                requires_confirmation: false,
-            })
-        );
-    }
-
-    #[test]
-    fn only_allows_known_permission_choices() {
-        let mut pending = PendingServerRequests::default();
-        pending.remember(&permission_request(1));
-        let request = pending.take(&json!(1)).unwrap();
-
-        assert_eq!(
-            inspect_server_response(
-                &json!({
-                    "result": { "outcome": { "outcome": "selected", "optionId": "allow-once" } }
-                }),
-                &request,
-            )
-            .unwrap(),
-            ServerResponseAction::ConfirmPermission
-        );
-        assert_eq!(
-            inspect_server_response(
-                &json!({
-                    "result": { "outcome": { "outcome": "selected", "optionId": "reject-once" } }
-                }),
-                &request,
-            )
-            .unwrap(),
-            ServerResponseAction::None
-        );
-        assert!(
-            inspect_server_response(
-                &json!({
-                    "result": { "outcome": { "outcome": "selected", "optionId": "unknown" } }
-                }),
-                &request,
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn pending_requests_expire_and_are_bounded() {
-        let start = Instant::now();
-        let mut pending = PendingServerRequests::default();
-        pending.remember_at(&permission_request(0), start);
-        pending.remember_at(&permission_request(1), start + PENDING_SERVER_REQUEST_TTL);
-        assert!(pending.take(&json!(0)).is_none());
-
-        pending.clear();
-        pending.remember_at(&permission_request(1), start);
-        for id in 2..=MAX_PENDING_SERVER_REQUESTS + 2 {
-            pending.remember_at(
-                &permission_request(id),
-                start + Duration::from_millis(id as u64),
-            );
-        }
-        assert_eq!(pending.requests.len(), MAX_PENDING_SERVER_REQUESTS);
-        assert!(pending.take(&json!(1)).is_none());
-    }
-}
+#[path = "acp_policy_tests.rs"]
+mod tests;

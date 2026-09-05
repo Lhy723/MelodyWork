@@ -6,6 +6,13 @@ use tokio::process::Command;
 
 use crate::workspace_access::{WorkspaceRegistry, confirm_action};
 
+#[path = "git_runtime_worktrees.rs"]
+mod git_runtime_worktrees;
+
+#[cfg(test)]
+pub(crate) use git_runtime_worktrees::parse_worktrees;
+pub use git_runtime_worktrees::*;
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChange {
@@ -452,101 +459,6 @@ pub async fn git_create_branch(
     .map(|_| ())
 }
 
-fn parse_worktrees(output: &str) -> Vec<GitWorktree> {
-    output
-        .split("\n\n")
-        .filter_map(|block| {
-            let mut worktree = GitWorktree::default();
-            for line in block.lines() {
-                if let Some(path) = line.strip_prefix("worktree ") {
-                    worktree.path = path.to_string();
-                } else if let Some(head) = line.strip_prefix("HEAD ") {
-                    worktree.head = Some(head.to_string());
-                } else if let Some(branch) = line.strip_prefix("branch ") {
-                    worktree.branch = Some(
-                        branch
-                            .strip_prefix("refs/heads/")
-                            .unwrap_or(branch)
-                            .to_string(),
-                    );
-                } else if line == "bare" {
-                    worktree.bare = true;
-                } else if line == "detached" {
-                    worktree.detached = true;
-                }
-            }
-            (!worktree.path.is_empty()).then_some(worktree)
-        })
-        .collect()
-}
-
-#[tauri::command]
-pub async fn git_worktrees(
-    registry: State<'_, WorkspaceRegistry>,
-    cwd: String,
-) -> Result<Vec<GitWorktree>, String> {
-    let cwd = registry.authorize(&cwd)?;
-    let output = run_git(&cwd, &["worktree", "list", "--porcelain"]).await?;
-    Ok(parse_worktrees(&output))
-}
-
-#[tauri::command]
-pub async fn git_create_worktree(
-    app: AppHandle,
-    registry: State<'_, WorkspaceRegistry>,
-    cwd: String,
-    path: String,
-    branch: String,
-    create_branch: bool,
-) -> Result<(), String> {
-    let cwd = registry.authorize(&cwd)?;
-    if path.trim().is_empty() || branch.trim().is_empty() {
-        return Err("Worktree path and branch cannot be empty".to_string());
-    }
-    if create_branch {
-        validate_branch_name(&cwd, &branch).await?;
-    }
-    confirm_action(
-        &app,
-        "确认创建 Git 工作树",
-        format!(
-            "允许从 {} 创建工作树到以下路径吗？\n{}",
-            cwd.display(),
-            path
-        ),
-    )
-    .await?;
-    let mut args = vec!["worktree".to_string(), "add".to_string()];
-    if create_branch {
-        args.extend(["-b".to_string(), branch, path]);
-    } else {
-        args.extend([path, branch]);
-    }
-    run_git_dynamic(&cwd, &args).await.map(|_| ())
-}
-
-#[tauri::command]
-pub async fn git_remove_worktree(
-    app: AppHandle,
-    registry: State<'_, WorkspaceRegistry>,
-    cwd: String,
-    path: String,
-) -> Result<(), String> {
-    let cwd = registry.authorize(&cwd)?;
-    if path.trim().is_empty() {
-        return Err("Worktree path cannot be empty".to_string());
-    }
-    confirm_action(
-        &app,
-        "确认移除 Git 工作树",
-        format!("允许从 {} 移除以下工作树吗？\n{}", cwd.display(), path),
-    )
-    .await?;
-    run_git_dynamic(&cwd, &["worktree".to_string(), "remove".to_string(), path])
-        .await
-        .map(|_| ())
-}
-
 async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<(), String> {
     let branch = branch.trim();
     if branch.is_empty() {
@@ -565,82 +477,5 @@ async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::process::Command;
-
-    fn create_untracked_repo() -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("melody-git-review-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).expect("create temporary git repository");
-        let status = Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(&root)
-            .status()
-            .expect("start git init");
-        assert!(status.success(), "git init should succeed");
-        fs::write(root.join("notes.txt"), "first line\nsecond line\n")
-            .expect("write untracked file");
-        root
-    }
-
-    #[test]
-    fn parses_numstat_and_ignores_binary_counts() {
-        let parsed = parse_numstat("4\t2\tsrc/app.ts\n-\t-\timage.png\n");
-        assert_eq!(parsed.get("src/app.ts"), Some(&(4, 2)));
-        assert_eq!(parsed.get("image.png"), Some(&(0, 0)));
-    }
-
-    #[test]
-    fn parses_porcelain_worktrees() {
-        let worktrees = parse_worktrees(
-            "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n\
-             worktree /repo-feature\nHEAD def\nbranch refs/heads/feature\n\n",
-        );
-        assert_eq!(worktrees.len(), 2);
-        assert_eq!(worktrees[1].branch.as_deref(), Some("feature"));
-    }
-
-    #[tokio::test]
-    async fn includes_untracked_text_files_in_review_stats_and_diff() {
-        let root = create_untracked_repo();
-        let root_string = root.to_string_lossy().into_owned();
-
-        let changes = git_changes_at(Path::new(&root_string))
-            .await
-            .expect("read git changes");
-        let change = changes
-            .iter()
-            .find(|change| change.path == "notes.txt")
-            .expect("untracked file should be listed");
-        assert_eq!(change.status, "??");
-        assert_eq!(change.additions, 2);
-        assert_eq!(change.deletions, 0);
-
-        let diff = git_diff_at(Path::new(&root_string), "notes.txt")
-            .await
-            .expect("read untracked file diff");
-        assert!(!diff.binary);
-        assert!(diff.content.contains("new file mode"));
-        assert!(diff.content.contains("+first line"));
-        assert!(diff.content.contains("+second line"));
-
-        fs::remove_dir_all(root).expect("remove temporary git repository");
-    }
-
-    #[tokio::test]
-    async fn preserves_unicode_and_space_paths_from_porcelain_status() {
-        let root = create_untracked_repo();
-        let path = "中文 notes.txt";
-        fs::write(root.join(path), "first line\n").expect("unicode fixture should be written");
-
-        let changes = git_changes_at(&root).await.expect("read git changes");
-
-        assert!(
-            changes.iter().any(|change| change.path == path),
-            "git status should return the original path, got: {changes:?}"
-        );
-
-        fs::remove_dir_all(root).expect("remove temporary git repository");
-    }
-}
+#[path = "git_runtime_tests.rs"]
+mod tests;

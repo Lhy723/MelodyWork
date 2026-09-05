@@ -14,7 +14,11 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import type { AgentPlanDecision, TimelineEntry } from "@/domain/acp";
+import type {
+  AgentPlanDecision,
+  AgentQuestionResponse,
+  TimelineEntry,
+} from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
 import { groupTurnActivity } from "@/domain/timeline-groups";
 import { MessageCitations } from "@/features/chat/message-citations";
@@ -33,6 +37,11 @@ interface AgentTimelineProps {
     outcome: AgentPlanDecision,
     feedback?: string,
   ) => void;
+  onQuestion: (
+    entryId: string,
+    response: AgentQuestionResponse,
+  ) => void | Promise<void>;
+  onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   projectRoot: string;
   turnRunning?: boolean;
@@ -43,6 +52,8 @@ export function AgentTimeline({
   entries,
   onPermission,
   onPlanDecision,
+  onQuestion,
+  onOpenFile,
   onOpenProjectReference,
   projectRoot,
   turnRunning = false,
@@ -147,6 +158,8 @@ export function AgentTimeline({
                 endedAt={entry.endedAt}
                 items={entry.items}
                 onPermission={onPermission}
+                onQuestion={onQuestion}
+                onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
                 running={entry.running}
                 startedAt={entry.startedAt}

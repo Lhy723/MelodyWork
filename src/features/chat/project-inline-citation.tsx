@@ -66,7 +66,11 @@ export function ProjectInlineCitation({
     <InlineCitation>
       <InlineCitationText>
         <button
-          aria-label={`在侧边栏中打开 ${reference.displayPath}`}
+          aria-label={
+            reference.kind === "folder"
+              ? `在侧边栏中打开文件夹 ${reference.displayPath}`
+              : `打开文件 ${reference.displayPath}`
+          }
           className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onOpenReference?.(reference)}
           type="button"

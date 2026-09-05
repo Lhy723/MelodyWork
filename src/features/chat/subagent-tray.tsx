@@ -76,9 +76,9 @@ export function SubagentTray({
       <Popover>
         <PopoverTrigger asChild>
           <Button
-            className="gap-1.5 rounded-full bg-background/90 shadow-sm backdrop-blur"
+            className="harness-subagent-trigger gap-1.5 rounded-full bg-background/58 shadow-none backdrop-blur"
             size="sm"
-            variant="outline"
+            variant="ghost"
           >
             <BotIcon />
             <span>Subagents</span>

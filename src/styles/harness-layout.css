@@ -1,0 +1,510 @@
+@layer components {
+  .harness-window-titlebar {
+    height: var(--harness-window-titlebar-height);
+    min-height: var(--harness-window-titlebar-height);
+  }
+
+  .harness-session-header {
+    min-height: var(--harness-window-titlebar-height);
+    background: var(--harness-bg-base);
+    color: var(--harness-label-primary);
+  }
+
+  .harness-session-title-row {
+    display: flex;
+    height: var(--harness-window-titlebar-height);
+    min-height: var(--harness-window-titlebar-height);
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 0;
+  }
+
+  .harness-session-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--harness-label-tertiary);
+    font-size: var(--type-size-caption);
+    line-height: var(--type-leading-caption);
+    white-space: nowrap;
+  }
+
+  .harness-session-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .harness-session-actions button {
+    border-color: var(--harness-border-2);
+    background: transparent;
+    color: var(--harness-label-secondary);
+  }
+
+  .harness-session-actions button:hover {
+    background: var(--harness-bg-layer-2);
+    color: var(--harness-label-primary);
+  }
+
+  .harness-session-tabs {
+    display: flex;
+    gap: 32px;
+    height: 34px;
+    align-items: end;
+    padding-left: 8px;
+  }
+
+  .harness-session-surface {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--harness-bg-base);
+  }
+
+  .harness-session-tab {
+    position: relative;
+    height: 34px;
+    padding: 0 0 10px;
+    border: 0;
+    background: transparent;
+    color: var(--harness-label-tertiary);
+    cursor: pointer;
+    font-size: var(--type-size-label);
+    line-height: var(--type-leading-label);
+    font-weight: 500;
+  }
+
+  .harness-session-tab::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: transparent;
+    content: "";
+  }
+
+  .harness-session-tab:hover,
+  .harness-session-tab.is-active {
+    color: var(--harness-blue);
+  }
+
+  .harness-session-tab.is-active::after {
+    background: var(--harness-blue);
+  }
+
+  .harness-chat-scroll {
+    background: var(--harness-bg-base);
+  }
+
+  .harness-chat-content {
+    padding-top: 26px;
+    padding-bottom: 0 !important;
+  }
+
+  .harness-chat-scroll-viewport {
+    /* The dock floats above the viewport, so keep the final message out of
+       its hit area while preserving the overlay/underlay relationship. */
+    padding-bottom: var(--harness-chat-dock-space) !important;
+    transition: padding-inline-end var(--motion-duration-base)
+      var(--motion-ease-drawer);
+  }
+
+  .harness-chat-layout[data-session-info-layout-open="true"]
+    .harness-chat-scroll-viewport {
+    /* Keep the scroll viewport full width so its scrollbar stays at the far
+       edge, while reserving the floating session panel's gutter for messages. */
+    padding-inline-end: calc(var(--harness-session-info-width) + 32px);
+  }
+
+  .harness-chat-bottom-dock {
+    /* Keep the composer floating over the transcript so the latest message
+       can continue underneath it instead of being pushed above the dock. */
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .harness-chat-bottom-dock > * {
+    pointer-events: auto;
+  }
+
+  .harness-chat-layout {
+    --harness-session-info-width: clamp(260px, 30%, 21rem);
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    background: var(--harness-bg-base);
+  }
+
+  .harness-session-info-panel {
+    display: flex;
+    height: fit-content;
+    width: var(--harness-session-info-width);
+    max-height: calc(100% - var(--harness-chat-dock-space, 0px) - 12px);
+    min-width: 260px;
+    position: absolute;
+    inset-block-start: 12px;
+    inset-inline-end: 16px;
+    z-index: 30;
+    flex: none;
+    flex-direction: column;
+    margin: 0;
+    overflow: visible;
+    contain: layout;
+  }
+
+  .harness-session-info-panel[data-layout-open="false"] {
+    width: 0;
+    min-width: 0;
+    flex-basis: 0;
+    margin-right: 0;
+    pointer-events: none;
+  }
+
+  .harness-session-info-surface {
+    display: flex;
+    width: 100%;
+    max-height: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid
+      color-mix(in srgb, var(--harness-border-2) 62%, transparent);
+    border-radius: 16px;
+    background: var(--harness-bg-layer-1);
+    contain: paint;
+    opacity: 1;
+    transform: translateX(0);
+    transition:
+      opacity 160ms ease-out,
+      transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .harness-session-info-surface[data-open="false"] {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(18px);
+  }
+
+  .harness-session-info-header {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px 0 16px;
+    color: var(--harness-text-strong);
+    font-size: var(--type-size-title);
+    line-height: var(--type-leading-title);
+    font-weight: 600;
+  }
+
+  .harness-session-info-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .harness-session-info-body--ledger {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 8px;
+  }
+
+  .harness-session-info-body--ledger .harness-session-info-section:first-child {
+    border: 0;
+    background: transparent;
+    padding: 0 2px;
+  }
+
+  .harness-session-info-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  .harness-session-info-section {
+    overflow: hidden;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    padding: 10px;
+  }
+
+  .harness-session-info-section + .harness-session-info-section {
+    margin-top: 4px;
+  }
+
+  .harness-subagent-trigger {
+    color: var(--harness-text-strong);
+  }
+
+  .harness-subagent-trigger:hover {
+    background: color-mix(in srgb, var(--harness-bg-layer-2) 76%, transparent);
+  }
+
+  .harness-stats-card {
+    display: block;
+    min-width: 0;
+  }
+
+  .harness-stats-card-trigger {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--harness-text-strong);
+    cursor: pointer;
+    font: inherit;
+    padding: 2px;
+    text-align: left;
+    transition:
+      background-color var(--motion-duration-fast) var(--motion-ease-out),
+      color var(--motion-duration-fast) var(--motion-ease-out);
+  }
+
+  .harness-stats-card-trigger:hover {
+    background: color-mix(in srgb, var(--harness-bg-layer-2) 68%, transparent);
+  }
+
+  .harness-stats-card-trigger:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--harness-blue) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  .harness-stats-card-heading {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    color: var(--harness-text-strong);
+    font-size: var(--type-size-label);
+    line-height: var(--type-leading-label);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .harness-stats-card-icon {
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--harness-blue-soft) 62%, transparent);
+    color: var(--harness-blue);
+  }
+
+  .harness-stats-card-summary {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--harness-text-muted);
+    font-family: var(--app-code-font, var(--font-mono));
+    font-size: var(--type-size-caption);
+    line-height: var(--type-leading-caption);
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .harness-stats-card-chevron {
+    flex: none;
+    color: var(--harness-text-muted);
+    transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+  }
+
+  .harness-stats-card-trigger[aria-expanded="true"]
+    .harness-stats-card-chevron {
+    transform: rotate(180deg);
+  }
+
+  .harness-stats-card-content {
+    overflow: hidden;
+  }
+
+  .harness-stats-card-content[data-state="open"] {
+    animation: harness-stats-card-expand var(--motion-duration-base)
+      var(--motion-ease-out);
+  }
+
+  .harness-stats-card-content[data-state="closed"] {
+    animation: harness-stats-card-collapse var(--motion-duration-exit)
+      var(--motion-ease-leave);
+  }
+
+  .harness-stats-card-content-inner {
+    display: grid;
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .harness-stats-metric-grid,
+  .harness-stats-duration-grid {
+    display: grid;
+    gap: 6px;
+  }
+
+  .harness-stats-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .harness-stats-duration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .harness-stats-metric {
+    min-width: 0;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--harness-bg-layer-2) 68%, transparent);
+    padding: 7px 8px;
+  }
+
+  .harness-stats-metric > span {
+    display: block;
+    overflow: hidden;
+    color: var(--harness-text-muted);
+    font-size: 0.6875rem;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .harness-stats-metric > strong {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--harness-text-strong);
+    font-family: var(--app-code-font, var(--font-mono));
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .harness-stats-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 2px 0;
+    color: var(--harness-text-muted);
+    font-size: var(--type-size-caption);
+    line-height: var(--type-leading-caption);
+  }
+
+  .harness-stats-meta-row > :last-child {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--harness-text-strong);
+    font-family: var(--app-code-font, var(--font-mono));
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .harness-stats-context {
+    display: grid;
+    gap: 6px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--harness-bg-layer-2) 68%, transparent);
+    padding: 8px 9px;
+  }
+
+  .harness-stats-context-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--harness-text-muted);
+    font-size: var(--type-size-caption);
+    line-height: var(--type-leading-caption);
+  }
+
+  .harness-stats-context-heading > :last-child {
+    color: var(--harness-text-strong);
+    font-family: var(--app-code-font, var(--font-mono));
+    font-weight: 600;
+  }
+
+  .harness-stats-context-track {
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--harness-blue-soft) 60%, transparent);
+  }
+
+  .harness-stats-context-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--harness-blue);
+    transition: width var(--motion-duration-base) var(--motion-ease-out);
+  }
+
+  .harness-stats-context-caption {
+    color: var(--harness-text-muted);
+    font-family: var(--app-code-font, var(--font-mono));
+    font-size: 0.6875rem;
+    line-height: 1.25;
+  }
+
+  @keyframes harness-stats-card-expand {
+    from {
+      height: 0;
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes harness-stats-card-collapse {
+    from {
+      height: var(--radix-collapsible-content-height);
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      height: 0;
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  @media (max-width: 720px) {
+    .harness-session-info-panel {
+      width: min(19rem, 42%);
+      min-width: 220px;
+      flex-basis: min(19rem, 42%);
+      margin-right: 12px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .harness-session-info-surface {
+      transition: none;
+    }
+  }
+}

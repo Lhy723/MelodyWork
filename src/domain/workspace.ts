@@ -1,9 +1,22 @@
+export const INDEPENDENT_PROJECT_ID = "__melody_independent__";
+
 export interface ProjectRecord {
   id: string;
   name: string;
   path: string;
   lastOpenedAt: number;
+  archived: boolean;
+  /** Reserved project whose root is managed by MelodyWork for isolated chats. */
+  isIndependent?: boolean;
 }
+
+export interface ProjectDeleteResult {
+  deleted: boolean;
+  error?: string;
+}
+
+export const isIndependentProject = (project?: ProjectRecord) =>
+  project?.isIndependent === true || project?.id === INDEPENDENT_PROJECT_ID;
 
 export interface SessionRecord {
   id: string;

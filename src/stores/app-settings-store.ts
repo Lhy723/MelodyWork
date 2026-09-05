@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type UpdateChannel = "stable" | "beta";
+export type FileOpener = "system" | "vscode" | "cursor";
+
 export interface AppSettings {
   theme: "system" | "light" | "dark";
   lightAccent: string;
@@ -16,22 +19,18 @@ export interface AppSettings {
   reducedMotion: "system" | "on" | "off";
   uiFontSize: number;
   codeFontSize: number;
-  diffMarker: "color" | "sign";
   fontSmoothing: boolean;
   defaultPermissionMode: "ask" | "auto" | "always-approve";
   autoCheckForUpdates: boolean;
-  defaultFileOpener: "system" | "vscode" | "cursor";
+  updateChannel: UpdateChannel;
+  defaultFileOpener: FileOpener;
   language: "auto" | "zh-CN" | "en";
   showInMenuBar: boolean;
-  showBottomPanel: boolean;
-  terminalPosition: "bottom" | "right";
   preventSystemSleep: boolean;
-  suggestions: boolean;
   showContextUsage: boolean;
   sendShortcut: "enter" | "mod-enter";
   followUpBehavior: "queue" | "steer";
-  popupShortcut: string;
-  allowUntitledTasks: boolean;
+  defaultIndependentChat: boolean;
   completionNotification: "unfocused" | "always" | "never";
   permissionNotifications: boolean;
   questionNotifications: boolean;
@@ -61,22 +60,18 @@ const defaultSettings: AppSettings = {
   reducedMotion: "system",
   uiFontSize: 16,
   codeFontSize: 12,
-  diffMarker: "color",
   fontSmoothing: true,
   defaultPermissionMode: "ask",
   autoCheckForUpdates: true,
+  updateChannel: "stable",
   defaultFileOpener: "vscode",
   language: "auto",
   showInMenuBar: true,
-  showBottomPanel: true,
-  terminalPosition: "bottom",
   preventSystemSleep: true,
-  suggestions: true,
   showContextUsage: true,
   sendShortcut: "enter",
   followUpBehavior: "queue",
-  popupShortcut: "",
-  allowUntitledTasks: false,
+  defaultIndependentChat: false,
   completionNotification: "unfocused",
   permissionNotifications: true,
   questionNotifications: true,
@@ -100,11 +95,24 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
           "autoReview",
           "lightContrast",
           "darkContrast",
+          "diffMarker",
+          "showBottomPanel",
+          "terminalPosition",
+          "suggestions",
+          "popupShortcut",
         ]) {
           Reflect.deleteProperty(persistedSettings, key);
         }
         const legacyFullAccess = persistedSettings.fullAccess;
         Reflect.deleteProperty(persistedSettings, "fullAccess");
+        const legacyAllowUntitledTasks = persistedSettings.allowUntitledTasks;
+        Reflect.deleteProperty(persistedSettings, "allowUntitledTasks");
+        if (
+          typeof persistedSettings.defaultIndependentChat !== "boolean" &&
+          typeof legacyAllowUntitledTasks === "boolean"
+        ) {
+          persistedSettings.defaultIndependentChat = legacyAllowUntitledTasks;
+        }
         if (typeof persistedSettings.uiFontSize === "number") {
           persistedSettings.uiFontSize = Math.min(
             18,
@@ -122,6 +130,17 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
               : legacyFullAccess === true
                 ? "always-approve"
                 : currentState.defaultPermissionMode,
+          updateChannel:
+            persistedSettings.updateChannel === "stable" ||
+            persistedSettings.updateChannel === "beta"
+              ? persistedSettings.updateChannel
+              : currentState.updateChannel,
+          defaultFileOpener:
+            persistedSettings.defaultFileOpener === "system" ||
+            persistedSettings.defaultFileOpener === "vscode" ||
+            persistedSettings.defaultFileOpener === "cursor"
+              ? persistedSettings.defaultFileOpener
+              : currentState.defaultFileOpener,
         } as AppSettingsStore;
       },
       partialize: (settings) => {

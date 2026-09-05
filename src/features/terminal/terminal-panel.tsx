@@ -7,6 +7,7 @@ import {
   closeTerminalSession,
   createTerminalSession,
   isTauriRuntime,
+  resizeTerminalSession,
   subscribeToTerminal,
   writeTerminalInput,
 } from "@/lib/melody-bridge";
@@ -101,6 +102,13 @@ export function TerminalPanel({
           }
           lastTerminalSize = { cols, rows };
           terminal.resize(cols, rows);
+          const terminalId = terminalIdRef.current;
+          if (terminalId && isTauriRuntime()) {
+            void resizeTerminalSession(terminalId, cols, rows).catch(() => {
+              // The shell may exit between layout measurement and the resize
+              // request; its exit event will clean up the session.
+            });
+          }
         });
       };
       fit();
@@ -131,8 +139,9 @@ export function TerminalPanel({
           return;
         }
         terminalIdRef.current = terminalId;
-        terminal.write(`MelodyWork 终端\r\n${cwd}\r\n\r\n${PROMPT}`);
         setPhase("ready");
+        lastTerminalSize = { cols: 0, rows: 0 };
+        fit();
         terminal.focus();
       } catch (reason) {
         terminal.write(
@@ -142,6 +151,21 @@ export function TerminalPanel({
       }
 
       dataDisposable = terminal.onData((data) => {
+        const terminalId = terminalIdRef.current;
+        if (isTauriRuntime()) {
+          if (!terminalId) {
+            terminal.write("\r\n[终端尚未就绪]\r\n");
+            return;
+          }
+          void writeTerminalInput(terminalId, data).catch((reason) => {
+            terminal.write(
+              `\r\n${toUserMessage(reason, "终端写入失败，请稍后重试。")}`,
+            );
+            setPhase("error");
+          });
+          return;
+        }
+
         for (const character of data) {
           if (character === "\r" || character === "\n") {
             const command = lineBufferRef.current;
@@ -223,32 +247,34 @@ export function TerminalPanel({
           : "absolute inset-x-4 bottom-4 z-30 flex h-[28rem] flex-col overflow-hidden rounded-2xl border bg-background"
       }
     >
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <TerminalSquareIcon className="size-4 text-muted-foreground" />
-        <h2 className="font-medium text-sm">终端</h2>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-          {cwd}
-        </span>
-        <span className="text-muted-foreground text-[11px]">
-          {phase === "starting"
-            ? "正在启动…"
-            : phase === "ready"
-              ? "可输入"
-              : phase === "closed"
-                ? "已退出"
-                : "连接错误"}
-        </span>
-        {onClose ? (
-          <Button
-            aria-label="关闭终端"
-            onClick={onClose}
-            size="icon"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        ) : null}
-      </header>
+      {!embedded ? (
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <TerminalSquareIcon className="size-4 text-muted-foreground" />
+          <h2 className="font-medium text-sm">终端</h2>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+            {cwd}
+          </span>
+          <span className="text-muted-foreground text-[11px]">
+            {phase === "starting"
+              ? "正在启动…"
+              : phase === "ready"
+                ? "可输入"
+                : phase === "closed"
+                  ? "已退出"
+                  : "连接错误"}
+          </span>
+          {onClose ? (
+            <Button
+              aria-label="关闭终端"
+              onClick={onClose}
+              size="icon"
+              variant="ghost"
+            >
+              <XIcon />
+            </Button>
+          ) : null}
+        </header>
+      ) : null}
       <div
         aria-label="终端输入"
         className="min-h-0 flex-1 bg-[var(--harness-bg-base)] p-3"
