@@ -22,7 +22,6 @@ export const useAgentBridge = (
   const beginSession = useAgentStore((state) => state.beginSession);
   const sessionId = session?.id;
   const sessionCwd = session?.cwd;
-  const sessionAcpId = session?.acpSessionId;
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -87,7 +86,7 @@ export const useAgentBridge = (
           await beginSession(
             sessionCwd,
             sessionId,
-            sessionAcpId,
+            currentSession.acpSessionId,
             currentSession.timelineJson,
             currentSession.acpCursor,
             archiveReadFailed ? 0 : currentSession.timelineVersion,
@@ -115,7 +114,9 @@ export const useAgentBridge = (
     appendStderr,
     beginSession,
     receiveAcp,
-    sessionAcpId,
+    // Do not depend on session.acpSessionId here. The backend writes that
+    // value while opening a session; reconnecting at that moment can create
+    // a short unsubscribe gap and drop later streaming update events.
     sessionCwd,
     sessionId,
     resetSessionView,

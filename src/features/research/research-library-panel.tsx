@@ -2,13 +2,17 @@ import {
   BookmarkIcon,
   ImportIcon,
   LibraryIcon,
-  LoaderCircleIcon,
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
+import { CollapsibleBanner } from "@/components/interior/collapsible-banner";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { MOTION_EASE } from "@/components/motion/page-transition";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
@@ -22,6 +26,7 @@ import { PaperDetail, PaperList } from "./research-paper-ui";
 import { useResearchStore } from "./research-store";
 
 export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
+  const liveActivity = useGlobalLiveActivity();
   const papers = useResearchStore((state) => state.papers);
   const addPapers = useResearchStore((state) => state.addPapers);
   const removePaper = useResearchStore((state) => state.removePaper);
@@ -33,26 +38,71 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
   const [error, setError] = useState<string>();
   const [warnings, setWarnings] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [pendingDeletePaper, setPendingDeletePaper] = useState<ResearchPaper>();
   const searchGateRef = useRef(new RequestGate());
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
   const visiblePapers = searchMode ? results : papers;
   const selected = visiblePapers.find((paper) => paper.id === selectedId);
   const selectedInLibrary = papers.find((paper) => paper.id === selectedId);
 
-  const runSearch = async () => {
+  const runSearch = async (nextQuery = query) => {
+    const normalized = nextQuery.trim();
+    if (!normalized) return;
     const requestToken = searchGateRef.current.begin();
     setLoading(true);
     setError(undefined);
     setWarnings([]);
+    liveActivity.start({
+      detail: "正在查询文献数据源…",
+      progress: 0,
+      title: "检索文献",
+    });
     try {
-      const response = await searchResearchPapers(query);
+      const response = await searchResearchPapers(
+        normalized,
+        undefined,
+        (progress) => {
+          if (!searchGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "检索文献",
+          });
+        },
+      );
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setResults(response.papers);
       setWarnings(response.warnings);
       setSelectedId(response.papers[0]?.id);
+      liveActivity.succeed({
+        detail: `找到 ${response.papers.length} 篇文献${
+          response.warnings.length
+            ? `，${response.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "文献检索完成",
+      });
     } catch (reason) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
       setResults([]);
+      liveActivity.fail(
+        { detail: message, title: "文献检索失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runSearch(normalized).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) {
         setLoading(false);
@@ -76,25 +126,25 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && query.trim() && !loading) {
                     event.preventDefault();
-                    void runSearch();
+                    searchButtonRef.current?.click();
                   }
                 }}
                 placeholder="搜索 Crossref、OpenAlex、arXiv、Semantic Scholar 与 PubMed"
                 value={query}
               />
             </div>
-            <Button
-              disabled={!query.trim() || loading}
-              onClick={() => void runSearch()}
+            <LoadingButton
+              disabled={!query.trim()}
+              errorLabel="重试"
+              icon={<SearchIcon />}
+              onAction={runSearch}
+              pendingLabel="正在检索…"
+              ref={searchButtonRef}
               size="sm"
+              successLabel="检索完成"
             >
-              {loading ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <SearchIcon />
-              )}
               检索
-            </Button>
+            </LoadingButton>
           </>
         ) : (
           <>
@@ -125,14 +175,22 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         </p>
       ) : null}
       {warnings.length > 0 ? (
-        <div
-          aria-live="polite"
-          className="flex gap-2 border-b bg-amber-500/8 px-3 py-2 text-amber-800 text-xs dark:text-amber-200"
+        <CollapsibleBanner
+          ariaLive="polite"
+          className="mx-3 my-2"
+          defaultState="folded"
+          dismissible={false}
+          icon={<TriangleAlertIcon className="size-3.5" />}
           role="status"
+          title={`部分数据源未响应 · ${warnings.length} 项`}
+          tone="warning"
         >
-          <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-          <span>{warnings.join("；")}</span>
-        </div>
+          <ul className="space-y-1 text-muted-foreground text-xs leading-5">
+            {warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </CollapsibleBanner>
       ) : null}
       <div
         className={cn(
@@ -167,10 +225,7 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
               <PaperDetail
                 canDelete={!searchMode}
                 onClose={() => setSelectedId(undefined)}
-                onDelete={() => {
-                  removePaper(selected.id);
-                  setSelectedId(undefined);
-                }}
+                onDelete={() => setPendingDeletePaper(selected)}
                 onToggleSaved={() => {
                   if (selectedInLibrary) {
                     setPaperSaved(selected.id, !selectedInLibrary.saved);
@@ -210,6 +265,34 @@ export function LibraryPanel({ searchMode }: { searchMode: boolean }) {
         }}
         open={importOpen}
         setOpen={setImportOpen}
+      />
+      <Modal
+        description={`“${pendingDeletePaper?.title ?? ""}”会从当前项目的文献库移除，原文链接不会受到影响。`}
+        footer={
+          <>
+            <Button
+              onClick={() => setPendingDeletePaper(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
+            <HoldToConfirm
+              onConfirm={() => {
+                if (pendingDeletePaper) {
+                  removePaper(pendingDeletePaper.id);
+                  setPendingDeletePaper(undefined);
+                  setSelectedId(undefined);
+                }
+              }}
+              variant="destructive"
+            >
+              删除论文
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setPendingDeletePaper(undefined)}
+        open={Boolean(pendingDeletePaper)}
+        title="从文献库删除？"
       />
     </div>
   );

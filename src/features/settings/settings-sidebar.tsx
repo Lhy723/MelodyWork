@@ -4,8 +4,8 @@ import {
   InfoIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { useRef } from "react";
 
+import { Tabs } from "@/components/interior/tabs";
 import { Button } from "@/components/ui/button";
 import type { MelodyConfigScope } from "@/domain/config";
 import type { ConfigurationNavigationItem } from "./configuration-form";
@@ -47,12 +47,6 @@ export function SettingsSidebar({
   scope,
   scopeLocked,
 }: SettingsSidebarProps) {
-  const scopeTabRefs = useRef<
-    Record<MelodyConfigScope, HTMLButtonElement | null>
-  >({
-    user: null,
-    project: null,
-  });
   return (
     <aside
       className="settings-sidebar-scroll flex w-56 shrink-0 flex-col overflow-y-auto border-r"
@@ -80,40 +74,21 @@ export function SettingsSidebar({
           <p className="px-1 pb-2 font-semibold text-muted-foreground text-xs tracking-[0.04em]">
             配置范围
           </p>
-          <div
-            aria-label="配置范围"
-            className="settings-scope-switcher"
-            role="radiogroup"
-          >
-            {(["user", "project"] as const).map((item) => (
-              <Button
-                aria-checked={scope === item}
-                className="settings-scope-button h-8 w-full justify-center px-2 text-xs"
-                data-selected={scope === item ? "true" : undefined}
-                disabled={scopeLocked}
-                key={item}
-                onClick={() => onChangeScope(item)}
-                onKeyDown={(event) => {
-                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-                    return;
-                  }
-                  event.preventDefault();
-                  const nextScope = item === "user" ? "project" : "user";
-                  onChangeScope(nextScope);
-                  scopeTabRefs.current[nextScope]?.focus();
-                }}
-                ref={(element) => {
-                  scopeTabRefs.current[item] = element;
-                }}
-                role="radio"
-                tabIndex={scope === item ? 0 : -1}
-                type="button"
-                variant="ghost"
-              >
-                {item === "user" ? "应用" : "当前项目"}
-              </Button>
-            ))}
-          </div>
+          <Tabs
+            activation="automatic"
+            className="w-full"
+            disabled={scopeLocked}
+            items={[
+              { label: "应用", value: "user" },
+              { label: "当前项目", value: "project" },
+            ]}
+            label="配置范围"
+            onValueChange={(value) => {
+              onChangeScope(value as MelodyConfigScope);
+            }}
+            value={scope}
+            variant="segmented"
+          />
         </div>
         <nav aria-label="设置分类">
           <button

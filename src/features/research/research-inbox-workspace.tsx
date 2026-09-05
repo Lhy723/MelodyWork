@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +55,7 @@ export function InboxWorkspace({
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingTitle, setTrackingTitle] = useState("");
   const [matrixOpen, setMatrixOpen] = useState(false);
+  const [clearInboxOpen, setClearInboxOpen] = useState(false);
   const inboxCreatedAt = inbox?.createdAt;
   const selectedPapers =
     inbox?.papers.filter((paper) => checked.has(paper.id)) ?? [];
@@ -67,6 +70,7 @@ export function InboxWorkspace({
     setTrackingOpen(false);
     setTrackingTitle("");
     setMatrixOpen(false);
+    setClearInboxOpen(false);
   }, [inboxCreatedAt]);
 
   const saveSelected = (saved: boolean) => {
@@ -117,6 +121,7 @@ export function InboxWorkspace({
               </>
             }
             description="完成一次真实检索后，结果会自动进入这里。你可以先批量加入文献库，再挑选值得长期保留的论文生成知识资产。"
+            reveal
             steps={[
               { title: "运行一次检索", description: "用白话描述研究问题。" },
               {
@@ -157,7 +162,11 @@ export function InboxWorkspace({
               <SearchIcon />
               新建检索
             </Button>
-            <Button onClick={clearResearchInbox} size="sm" variant="ghost">
+            <Button
+              onClick={() => setClearInboxOpen(true)}
+              size="sm"
+              variant="ghost"
+            >
               清空收件箱
             </Button>
           </div>
@@ -346,6 +355,29 @@ export function InboxWorkspace({
           />
         </section>
       </div>
+
+      <Modal
+        description="本次检索的候选论文和数据源结果会被移除，已经加入文献库的内容不会受到影响。"
+        footer={
+          <>
+            <Button onClick={() => setClearInboxOpen(false)} variant="outline">
+              取消
+            </Button>
+            <HoldToConfirm
+              onConfirm={() => {
+                clearResearchInbox();
+                setClearInboxOpen(false);
+              }}
+              variant="destructive"
+            >
+              清空收件箱
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setClearInboxOpen(false)}
+        open={clearInboxOpen}
+        title="清空研究收件箱？"
+      />
     </div>
   );
 }

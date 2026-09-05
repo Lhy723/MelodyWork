@@ -17,10 +17,9 @@ use tokio::{
 use crate::{
     acp_policy::{
         ClientRequestAction, OutgoingMessage, PendingServerRequest, PendingServerRequests,
-        ServerResponseAction, inspect_outgoing_message, inspect_server_response,
+        inspect_outgoing_message, inspect_server_response,
     },
-    database::AppDatabase,
-    workspace_access::{WorkspaceRegistry, confirm_action},
+    workspace_access::WorkspaceRegistry,
 };
 
 const ACP_MESSAGE_EVENT: &str = "melody://acp-message";
@@ -311,44 +310,8 @@ pub async fn start_agent(
     Ok(running_status)
 }
 
-async fn confirm_permission_response(
-    app: &AppHandle,
-    database: Option<&AppDatabase>,
-    pending: &PendingServerRequest,
-) -> Result<(), String> {
-    let trusted_rule = pending
-        .session_id()
-        .map(|session_id| {
-            database
-                .map(|database| {
-                    database.has_allow_permission_for_acp_session(
-                        session_id,
-                        pending.title(),
-                        pending.command(),
-                    )
-                })
-                .unwrap_or(Ok(false))
-        })
-        .transpose()?
-        .unwrap_or(false);
-    if trusted_rule {
-        return Ok(());
-    }
-    confirm_action(
-        app,
-        "确认执行 Melody 工具",
-        format!(
-            "Melody 请求执行以下操作：\n{}\n{}",
-            pending.title(),
-            pending.command()
-        ),
-    )
-    .await
-}
-
 #[tauri::command]
 pub async fn send_acp(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     runtime: State<'_, AgentRuntime>,
     message: Value,
@@ -356,33 +319,10 @@ pub async fn send_acp(
     let outgoing = inspect_outgoing_message(&message)?;
     if let OutgoingMessage::Request(action) = outgoing {
         match action {
-            ClientRequestAction::OpenSession { cwd, elevated_mode } => {
+            ClientRequestAction::OpenSession { cwd, .. } => {
                 registry.authorize(&cwd)?;
-                if let Some(mode) = elevated_mode {
-                    confirm_action(
-                        &app,
-                        "确认高权限 Melody 会话",
-                        format!("允许在 {} 以“{}”权限模式打开会话吗？", cwd, mode),
-                    )
-                    .await?;
-                }
             }
-            ClientRequestAction::ChangePermissionMode {
-                mode,
-                requires_confirmation: true,
-            } => {
-                confirm_action(
-                    &app,
-                    "确认切换 Melody 权限模式",
-                    format!("允许将权限模式切换为“{}”吗？", mode),
-                )
-                .await?;
-            }
-            ClientRequestAction::None
-            | ClientRequestAction::ChangePermissionMode {
-                requires_confirmation: false,
-                ..
-            } => {}
+            ClientRequestAction::None | ClientRequestAction::ChangePermissionMode { .. } => {}
         }
         return runtime.write_json(&message).await;
     }
@@ -394,16 +334,7 @@ pub async fn send_acp(
         .take_server_request(&id)
         .await
         .ok_or_else(|| "ACP response does not match a pending server request".to_string())?;
-    let validation = async {
-        if inspect_server_response(&message, &pending)? == ServerResponseAction::ConfirmPermission {
-            let database = app.try_state::<AppDatabase>();
-            confirm_permission_response(&app, database.as_deref(), &pending).await
-        } else {
-            Ok(())
-        }
-    }
-    .await;
-    if let Err(error) = validation {
+    if let Err(error) = inspect_server_response(&message, &pending) {
         runtime.put_server_request(&id, pending).await;
         return Err(error);
     }

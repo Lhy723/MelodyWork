@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { RippleLayer, useRipple } from "@/components/interior/ripple";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ResearchPaper } from "@/domain/research";
@@ -23,6 +24,55 @@ export function PaperMetadata({ paper }: { paper: ResearchPaper }) {
         <span>· {paper.citationCount.toLocaleString()} 次引用</span>
       ) : null}
     </div>
+  );
+}
+
+function PaperListRow({
+  onSelect,
+  paper,
+  selected,
+}: {
+  onSelect: (paper: ResearchPaper) => void;
+  paper: ResearchPaper;
+  selected: boolean;
+}) {
+  const { bindings, fadeDuration, ripples } = useRipple({ max: 2 });
+
+  return (
+    <button
+      className={cn(
+        "relative isolate w-full overflow-hidden px-3 py-3 text-left transition-colors hover:bg-muted/40",
+        selected && "bg-muted/60",
+      )}
+      onClick={() => onSelect(paper)}
+      style={{
+        WebkitTapHighlightColor: "transparent",
+        touchAction: "manipulation",
+      }}
+      type="button"
+      {...bindings}
+    >
+      <RippleLayer fadeDuration={fadeDuration} ripples={ripples} />
+      <span className="relative z-10 block">
+        <div className="flex items-start gap-2">
+          <p className="line-clamp-2 min-w-0 flex-1 font-medium text-sm leading-5">
+            {paper.title}
+          </p>
+          {paper.verified ? (
+            <CheckCircle2Icon
+              aria-label="已通过多源核验"
+              className="mt-0.5 size-3.5 shrink-0 text-emerald-600"
+            />
+          ) : null}
+        </div>
+        <p className="mt-1 truncate text-muted-foreground text-xs">
+          {paper.authors.join(" · ") || "作者信息未收录"}
+        </p>
+        <div className="mt-1">
+          <PaperMetadata paper={paper} />
+        </div>
+      </span>
+    </button>
   );
 }
 
@@ -50,33 +100,12 @@ export function PaperList({
   return (
     <div className="divide-y">
       {papers.map((paper) => (
-        <button
-          className={cn(
-            "w-full px-3 py-3 text-left transition-colors hover:bg-muted/40",
-            paper.id === selectedId && "bg-muted/60",
-          )}
+        <PaperListRow
           key={paper.id}
-          onClick={() => onSelect(paper)}
-          type="button"
-        >
-          <div className="flex items-start gap-2">
-            <p className="line-clamp-2 min-w-0 flex-1 font-medium text-sm leading-5">
-              {paper.title}
-            </p>
-            {paper.verified ? (
-              <CheckCircle2Icon
-                aria-label="已通过多源核验"
-                className="mt-0.5 size-3.5 shrink-0 text-emerald-600"
-              />
-            ) : null}
-          </div>
-          <p className="mt-1 truncate text-muted-foreground text-xs">
-            {paper.authors.join(" · ") || "作者信息未收录"}
-          </p>
-          <div className="mt-1">
-            <PaperMetadata paper={paper} />
-          </div>
-        </button>
+          onSelect={onSelect}
+          paper={paper}
+          selected={paper.id === selectedId}
+        />
       ))}
     </div>
   );

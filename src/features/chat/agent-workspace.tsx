@@ -1,11 +1,7 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentPromptAttachment } from "@/domain/acp";
+import { toUserMessage } from "@/domain/app-error";
 import { TaskLauncher } from "@/domain/task-launch";
 import type { ResearchSection } from "@/features/sessions/app-sidebar";
 import type { WorkspaceMode } from "@/features/sessions/sidebar-types";
@@ -26,8 +22,10 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
   isTauriRuntime,
+  type AppUpdateProgress,
   type AppUpdateStatus,
 } from "@/lib/melody-bridge";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { AgentComposer } from "./agent-composer";
 import { useAgentWorkspaceActions } from "./agent-workspace-actions";
 import { useAgentWorkspaceLayout } from "./agent-workspace-layout";
@@ -47,6 +45,7 @@ export function AgentWorkspace() {
   useAppearanceSettings();
   useAgentNotifications();
   useWorkspace();
+  const liveActivity = useGlobalLiveActivity();
 
   const projects = useWorkspaceStore((state) => state.projects);
   const sessionsByProject = useWorkspaceStore(
@@ -165,6 +164,8 @@ export function AgentWorkspace() {
   const [settingsPage, setSettingsPage] =
     useState<SettingsPage>("configuration");
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>();
+  const [appUpdateProgress, setAppUpdateProgress] =
+    useState<AppUpdateProgress>();
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const sidebarWidthRef = useRef(sidebarWidth);
@@ -252,14 +253,68 @@ export function AgentWorkspace() {
 
   const installAppUpdate = async () => {
     const channel = appUpdate?.channel;
-    if (!channel) {
+    const version = appUpdate?.version;
+    if (!channel || !version) {
       return;
     }
+    liveActivity.start({
+      detail: "正在获取更新包…",
+      progress: 0,
+      title: `下载 MelodyWork v${version}`,
+    });
     setInstallingUpdate(true);
+    setAppUpdateProgress({
+      phase: "downloading",
+      downloadedBytes: 0,
+      totalBytes: null,
+    });
     try {
-      setAppUpdate(await checkAppUpdate(channel, true));
+      const result = await checkAppUpdate(channel, true, (progress) => {
+        setAppUpdateProgress(progress);
+        const measuredProgress =
+          progress.phase === "downloading" &&
+          progress.totalBytes !== null &&
+          progress.totalBytes > 0
+            ? Math.min(1, progress.downloadedBytes / progress.totalBytes)
+            : null;
+        liveActivity.update({
+          detail:
+            progress.phase === "installing"
+              ? "安装完成后会重启应用。"
+              : "正在下载更新包…",
+          progress: measuredProgress,
+          title:
+            progress.phase === "installing"
+              ? "安装 MelodyWork 更新"
+              : `下载 MelodyWork v${version}`,
+        });
+      });
+      if (!result.installed) {
+        throw new Error("更新已不可用，请重新检查更新。");
+      }
+      setAppUpdate(result);
+      liveActivity.succeed({
+        detail: `v${result.version ?? version} 已安装，应用即将重启。`,
+        title: "MelodyWork 更新完成",
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason, "安装更新失败，请稍后重试。");
+      liveActivity.fail(
+        {
+          detail: message,
+          title: "MelodyWork 更新失败",
+        },
+        {
+          label: "重试",
+          onClick: () => {
+            void installAppUpdate().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       setInstallingUpdate(false);
+      setAppUpdateProgress(undefined);
     }
   };
 
@@ -379,6 +434,7 @@ export function AgentWorkspace() {
       activeWorkspaceTabId={activeWorkspaceTabId}
       acpPhase={acpPhase}
       appUpdate={appUpdate}
+      appUpdateProgress={appUpdateProgress}
       availableModels={availableModels}
       canGoBack={canGoBack}
       canGoForward={canGoForward}

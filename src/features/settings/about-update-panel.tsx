@@ -1,16 +1,10 @@
 import { CheckCircleIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dropdown } from "@/components/interior/dropdown";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { ProgressBar } from "@/components/interior/progress-bar";
 import { Switch } from "@/components/ui/switch";
 import type { UpdateChannel } from "@/stores/app-settings-store";
-import { cn } from "@/lib/utils";
 
 import { PanelHeader } from "./about-ui";
 import { type UpdateCheckState, updateChannelLabel } from "./about-types";
@@ -19,19 +13,17 @@ interface AboutUpdatePanelProps {
   autoCheckForUpdates: boolean;
   updateChannel: UpdateChannel;
   updateState: UpdateCheckState;
-  isBusy: boolean;
   hasUpdateDetails: boolean;
   onSetAutoCheck: (enabled: boolean) => void;
   onSetChannel: (channel: UpdateChannel) => void;
-  onCheck: () => void;
-  onInstall: () => void;
+  onCheck: () => unknown;
+  onInstall: () => unknown;
 }
 
 export function AboutUpdatePanel({
   autoCheckForUpdates,
   updateChannel,
   updateState,
-  isBusy,
   hasUpdateDetails,
   onSetAutoCheck,
   onSetChannel,
@@ -52,15 +44,18 @@ export function AboutUpdatePanel({
                 已是最新版本
               </span>
             ) : null}
-            <Button
-              disabled={isBusy}
-              onClick={onCheck}
+            <LoadingButton
+              disabled={updateState.status === "installing"}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={onCheck}
+              pendingLabel="检查中…"
+              successLabel="检查完成"
               size="sm"
               variant="secondary"
             >
-              <RefreshCwIcon className={cn(isBusy && "animate-spin")} />
-              {updateState.status === "checking" ? "检查中…" : "检查更新"}
-            </Button>
+              检查更新
+            </LoadingButton>
           </div>
         }
         description={`当前渠道：${updateChannelLabel[updateChannel]}。自动检查和渠道设置可在此处管理。`}
@@ -88,18 +83,16 @@ export function AboutUpdatePanel({
               正式版更稳定；测试版会更早提供新功能，可能包含未解决的问题。
             </p>
           </div>
-          <Select
-            onValueChange={(next) => onSetChannel(next as UpdateChannel)}
+          <Dropdown
+            className="w-28"
+            items={[
+              { label: "正式版", value: "stable" },
+              { label: "测试版", value: "beta" },
+            ]}
+            label="检测更新渠道"
+            onChange={(next) => onSetChannel(next as UpdateChannel)}
             value={updateChannel}
-          >
-            <SelectTrigger aria-label="检测更新渠道" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="stable">正式版</SelectItem>
-              <SelectItem value="beta">测试版</SelectItem>
-            </SelectContent>
-          </Select>
+          />
         </div>
       </div>
       {hasUpdateDetails ? (
@@ -113,7 +106,7 @@ export function AboutUpdatePanel({
                   发现{updateChannelLabel[updateState.channel]}新版本 v
                   {updateState.status === "available"
                     ? updateState.version
-                    : ""}
+                    : updateState.version}
                 </p>
               </div>
               {updateState.status === "available" && updateState.notes ? (
@@ -121,21 +114,44 @@ export function AboutUpdatePanel({
                   {updateState.notes}
                 </p>
               ) : null}
-              <Button
+              {updateState.status === "installing" ? (
+                <ProgressBar
+                  className="mt-4"
+                  label={
+                    updateState.progress.phase === "downloading"
+                      ? "下载更新"
+                      : "安装更新"
+                  }
+                  pendingLabel={
+                    updateState.progress.phase === "downloading"
+                      ? "正在下载…"
+                      : "正在安装并重启…"
+                  }
+                  size="compact"
+                  value={
+                    updateState.progress.phase === "downloading" &&
+                    updateState.progress.totalBytes &&
+                    updateState.progress.totalBytes > 0
+                      ? Math.min(
+                          100,
+                          (updateState.progress.downloadedBytes /
+                            updateState.progress.totalBytes) *
+                            100,
+                        )
+                      : null
+                  }
+                />
+              ) : null}
+              <LoadingButton
                 className="mt-3"
-                disabled={updateState.status === "installing"}
-                onClick={onInstall}
+                errorLabel="重试"
+                onAction={onInstall}
+                pendingLabel="正在下载并安装…"
+                successLabel="已安装"
                 size="sm"
               >
-                {updateState.status === "installing" ? (
-                  <>
-                    <RefreshCwIcon className="animate-spin" />
-                    正在下载并安装…
-                  </>
-                ) : (
-                  "安装更新并重启"
-                )}
-              </Button>
+                安装更新并重启
+              </LoadingButton>
             </div>
           ) : null}
           {updateState.status === "error" ? (

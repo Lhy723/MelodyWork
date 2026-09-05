@@ -1,6 +1,7 @@
 import {
   appendSessionError,
   projectPermissionRequest,
+  stampLatestTurnContextUsage,
 } from "@/domain/session-projection";
 import {
   markPromptResponseReceived,
@@ -83,6 +84,13 @@ export const handlePromptResponse = async (
       );
       if (promptUsage) {
         set((state) => ({
+          backgroundTimelines: {
+            ...state.backgroundTimelines,
+            [promptSessionId]: stampLatestTurnContextUsage(
+              state.backgroundTimelines[promptSessionId] ?? [],
+              promptUsage,
+            ),
+          },
           backgroundContextUsage: {
             ...state.backgroundContextUsage,
             [promptSessionId]: promptUsage,
@@ -117,7 +125,10 @@ export const handlePromptResponse = async (
       markPromptResponseReceived(pendingPrompt, Date.now()),
     );
     if (promptUsage) {
-      set({ contextUsage: promptUsage });
+      set((state) => ({
+        timeline: stampLatestTurnContextUsage(state.timeline, promptUsage),
+        contextUsage: promptUsage,
+      }));
     }
     return true;
   }
@@ -212,7 +223,9 @@ export const handlePermissionRequest = async (
 /** Clear a completed prompt from the queue for either the active or background session. */
 export const clearCompletedPrompt = (sessionId: string, promptId?: string) => {
   const pending = promptId
-    ? [...pendingPrompts.entries()].find(([, value]) => value.promptId === promptId)
+    ? [...pendingPrompts.entries()].find(
+        ([, value]) => value.promptId === promptId,
+      )
     : pendingPromptForSession(sessionId);
   if (pending) {
     removePendingPrompt(pending[0]);

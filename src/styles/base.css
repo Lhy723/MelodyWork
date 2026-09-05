@@ -18,6 +18,7 @@ body {
   overflow: hidden;
 }
 
+/* ui-font-check: allow — research content intentionally uses a serif face */
 .research-serif {
   font-family:
     Georgia, "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
@@ -182,8 +183,26 @@ body {
     font-size: var(--type-size-body);
     line-height: var(--type-leading-body);
   }
+
+  /* Interactive controls should not create a text selection while pressed.
+     Inputs, editors, articles, code, and paths remain selectable. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="slider"],
+  [role="separator"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
+  summary,
+  [data-tauri-drag-region] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
   html {
-    @apply font-sans;
+    font-family: var(--font-sans);
   }
   code,
   pre,

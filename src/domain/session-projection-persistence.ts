@@ -1,4 +1,4 @@
-import type { TimelineEntry } from "./acp.ts";
+import type { AgentContextUsage, TimelineEntry } from "./acp.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -39,6 +39,12 @@ export interface NotificationMetadata {
   eventId?: string;
   isReplay: boolean;
   promptId?: string;
+  /**
+   * Melody Build includes the cumulative context size on every persisted
+   * session update. Keeping it in the projection metadata lets a client
+   * restore usage even when the update itself does not carry a usage_update.
+   */
+  totalTokens?: number;
 }
 
 export type TimelineProjectionReadStatus = "missing" | "valid" | "corrupt";
@@ -135,6 +141,72 @@ export const parseTimelineProjection = (
   timelineJson?: string,
 ): TimelineEntry[] => readTimelineProjection(timelineJson).timeline;
 
+const validContextUsage = (
+  value: AgentContextUsage | undefined,
+): AgentContextUsage | undefined =>
+  value &&
+  Number.isFinite(value.usedTokens) &&
+  value.usedTokens >= 0 &&
+  Number.isFinite(value.maxTokens) &&
+  value.maxTokens > 0
+    ? value
+    : undefined;
+
+/**
+ * Read the last context usage attached to a projected message.
+ * `tokenUsage` is part of the timeline projection, so this survives closing
+ * and reopening a session without requiring another ACP request. A user
+ * message is also accepted as a fallback for turns that ended before an
+ * assistant message was emitted (for example, a cancellation or error).
+ */
+export const contextUsageFromTimeline = (
+  timeline: TimelineEntry[],
+): AgentContextUsage | undefined => {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index];
+    if (entry?.kind !== "message") {
+      continue;
+    }
+    const usage = validContextUsage(
+      entry.tokenUsage
+        ? {
+            usedTokens: entry.tokenUsage.usedTokens,
+            maxTokens: entry.tokenUsage.maxTokens,
+          }
+        : undefined,
+    );
+    if (usage) {
+      return usage;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Convert the cumulative token count emitted by replay metadata into the
+ * context usage shape used by the UI. The model-derived max is intentionally
+ * supplied by the caller because older sidecars only emitted totalTokens.
+ */
+export const contextUsageFromTotalTokens = (
+  totalTokens: number | undefined,
+  fallback: AgentContextUsage | undefined,
+): AgentContextUsage | undefined => {
+  if (
+    totalTokens === undefined ||
+    !Number.isFinite(totalTokens) ||
+    totalTokens < 0 ||
+    !fallback ||
+    !Number.isFinite(fallback.maxTokens) ||
+    fallback.maxTokens <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    ...fallback,
+    usedTokens: totalTokens,
+  };
+};
+
 export const usableTimelineProjection = ({
   timelineJson,
   cursor,
@@ -182,12 +254,20 @@ export const notificationMetadata = (
     const value = meta?.[camelCase] ?? meta?.[snakeCase];
     return typeof value === "string" ? value : undefined;
   };
+  const totalTokensValue = meta?.totalTokens ?? meta?.total_tokens;
+  const totalTokens =
+    typeof totalTokensValue === "number" &&
+    Number.isFinite(totalTokensValue) &&
+    totalTokensValue >= 0
+      ? totalTokensValue
+      : undefined;
   return {
     eventId: stringField("eventId", "event_id"),
     isReplay: meta?.isReplay === true || meta?.is_replay === true,
     ...(stringField("promptId", "prompt_id")
       ? { promptId: stringField("promptId", "prompt_id") }
       : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
   };
 };
 

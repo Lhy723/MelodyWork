@@ -1,16 +1,18 @@
 import { PlusIcon, RadarIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import { RequestGate } from "@/domain/request-gate";
-import { cn } from "@/lib/utils";
 
 import { searchResearchPapers } from "./research-api";
 import { useResearchStore } from "./research-store";
 
 export function TrackingPanel() {
+  const liveActivity = useGlobalLiveActivity();
   const topics = useResearchStore((state) => state.trackingTopics);
   const addTrackingTopic = useResearchStore((state) => state.addTrackingTopic);
   const refreshTrackingTopic = useResearchStore(
@@ -28,13 +30,54 @@ export function TrackingPanel() {
     const requestToken = gate.begin();
     setRefreshing(id);
     setError(undefined);
+    liveActivity.start({
+      detail: `正在刷新“${topicQuery}”…`,
+      progress: 0,
+      title: "刷新科研追踪",
+    });
     try {
-      const result = await searchResearchPapers(topicQuery);
+      const result = await searchResearchPapers(
+        topicQuery,
+        undefined,
+        (progress) => {
+          if (!gate.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "刷新科研追踪",
+          });
+        },
+      );
       if (!gate.isCurrent(requestToken)) return;
       refreshTrackingTopic(id, result.papers);
+      liveActivity.succeed({
+        detail: `已更新 ${result.papers.length} 条结果${
+          result.warnings.length
+            ? `，${result.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "科研追踪已刷新",
+      });
     } catch (reason) {
       if (!gate.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "科研追踪刷新失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void refresh(id, topicQuery).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       if (gate.isCurrent(requestToken)) {
         setRefreshing((current) => (current === id ? undefined : current));
@@ -112,17 +155,20 @@ export function TrackingPanel() {
                     : "尚未检索"}
                 </p>
               </div>
-              <Button
+              <LoadingButton
                 aria-label={`刷新 ${topic.title}`}
                 disabled={refreshing !== undefined}
-                onClick={() => void refresh(topic.id, topic.query)}
-                size="icon-sm"
+                errorLabel="重试"
+                icon={<RefreshCwIcon />}
+                iconOnly
+                onAction={() => refresh(topic.id, topic.query)}
+                pendingLabel="刷新中…"
+                size="sm"
+                successLabel="已刷新"
                 variant="outline"
               >
-                <RefreshCwIcon
-                  className={cn(refreshing === topic.id && "animate-spin")}
-                />
-              </Button>
+                刷新
+              </LoadingButton>
             </div>
           ))}
         </div>

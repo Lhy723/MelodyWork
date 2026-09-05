@@ -1,6 +1,6 @@
-use tauri::{AppHandle, State};
+use tauri::State;
 
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 
 use super::{GitWorktree, run_git, run_git_dynamic, validate_branch_name};
 
@@ -44,7 +44,6 @@ pub async fn git_worktrees(
 
 #[tauri::command]
 pub async fn git_create_worktree(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     path: String,
@@ -58,16 +57,6 @@ pub async fn git_create_worktree(
     if create_branch {
         validate_branch_name(&cwd, &branch).await?;
     }
-    confirm_action(
-        &app,
-        "确认创建 Git 工作树",
-        format!(
-            "允许从 {} 创建工作树到以下路径吗？\n{}",
-            cwd.display(),
-            path
-        ),
-    )
-    .await?;
     let mut args = vec!["worktree".to_string(), "add".to_string()];
     if create_branch {
         args.extend(["-b".to_string(), branch, path]);
@@ -79,7 +68,6 @@ pub async fn git_create_worktree(
 
 #[tauri::command]
 pub async fn git_remove_worktree(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     path: String,
@@ -88,12 +76,6 @@ pub async fn git_remove_worktree(
     if path.trim().is_empty() {
         return Err("Worktree path cannot be empty".to_string());
     }
-    confirm_action(
-        &app,
-        "确认移除 Git 工作树",
-        format!("允许从 {} 移除以下工作树吗？\n{}", cwd.display(), path),
-    )
-    .await?;
     run_git_dynamic(&cwd, &["worktree".to_string(), "remove".to_string(), path])
         .await
         .map(|_| ())

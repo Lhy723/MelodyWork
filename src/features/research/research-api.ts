@@ -46,6 +46,15 @@ export const DEFAULT_RESEARCH_SEARCH_SOURCES: ResearchSource[] = [
   "PubMed",
 ];
 
+export type ResearchSearchProgress = {
+  source: ResearchSource;
+  status: "running" | "success" | "error";
+  completed: number;
+  total: number;
+  resultCount?: number;
+  message?: string;
+};
+
 const researchSourceClient = new ResearchSourceClient();
 
 const fetchSourceResource = (
@@ -282,6 +291,7 @@ const sourceRequestQuery = (source: ResearchSource, query: string) =>
 export const searchResearchPapers = async (
   query: string,
   requestedSources: ResearchSource[] = DEFAULT_RESEARCH_SEARCH_SOURCES,
+  onProgress?: (progress: ResearchSearchProgress) => void,
 ): Promise<ResearchSearchResult> => {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -302,8 +312,34 @@ export const searchResearchPapers = async (
   if (enabledAdapters.length === 0) {
     throw new Error("请至少选择一个文献数据源。");
   }
+  let completed = 0;
+  const total = enabledAdapters.length;
   const attempts = await Promise.allSettled(
-    enabledAdapters.map(([, search]) => search(trimmed)),
+    enabledAdapters.map(async ([source, search]) => {
+      onProgress?.({ source, status: "running", completed, total });
+      try {
+        const papers = await search(trimmed);
+        completed += 1;
+        onProgress?.({
+          source,
+          status: "success",
+          completed,
+          total,
+          resultCount: papers.length,
+        });
+        return papers;
+      } catch (reason) {
+        completed += 1;
+        onProgress?.({
+          source,
+          status: "error",
+          completed,
+          total,
+          message: reason instanceof Error ? reason.message : String(reason),
+        });
+        throw reason;
+      }
+    }),
   );
   const sources: ResearchSource[] = [];
   const warnings: string[] = [];

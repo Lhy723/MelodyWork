@@ -18,6 +18,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
+import { ProgressBar } from "@/components/interior/progress-bar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -258,6 +261,7 @@ export function ProgressRail({
     (state) => state.removeResearchTask,
   );
   const [taskDraft, setTaskDraft] = useState("");
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<ResearchTask>();
   const completed = tasks.filter((task) => task.completed).length;
   const progress = tasks.length
     ? Math.round((completed / tasks.length) * 100)
@@ -300,12 +304,13 @@ export function ProgressRail({
           </div>
         </div>
         <div className="mt-4">
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full origin-left rounded-full bg-primary transition-transform"
-              style={{ transform: `scaleX(${progress / 100})` }}
-            />
-          </div>
+          <ProgressBar
+            label="本周进度"
+            max={100}
+            showLabel={false}
+            size="compact"
+            value={progress}
+          />
           <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
             <span>{tasks.length ? `${progress}% 完成` : "还没有任务"}</span>
             <span>{tasks.length} 项</span>
@@ -336,14 +341,15 @@ export function ProgressRail({
                 <span className="min-w-0 flex-1 text-xs leading-5">
                   {task.title}
                 </span>
-                <button
+                <Button
                   aria-label={`删除任务：${task.title}`}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:relative focus-visible:z-10 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring hover:text-destructive"
-                  onClick={() => removeResearchTask(task.id)}
-                  type="button"
+                  className="size-7 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:relative focus-visible:z-10 focus-visible:opacity-100 hover:text-destructive"
+                  onClick={() => setPendingDeleteTask(task)}
+                  size="icon-xs"
+                  variant="ghost"
                 >
                   <Trash2Icon className="size-3.5" />
-                </button>
+                </Button>
               </div>
             ))
           ) : (
@@ -465,6 +471,32 @@ export function ProgressRail({
           <ArrowRightIcon />
         </Button>
       </section>
+
+      <Modal
+        description={`“${pendingDeleteTask?.title ?? ""}”会从当前项目的下一步列表中移除。`}
+        footer={
+          <>
+            <Button
+              onClick={() => setPendingDeleteTask(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
+            <HoldToConfirm
+              onConfirm={() => {
+                if (pendingDeleteTask) removeResearchTask(pendingDeleteTask.id);
+                setPendingDeleteTask(undefined);
+              }}
+              variant="destructive"
+            >
+              删除任务
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setPendingDeleteTask(undefined)}
+        open={Boolean(pendingDeleteTask)}
+        title="删除研究任务？"
+      />
     </aside>
   );
 }

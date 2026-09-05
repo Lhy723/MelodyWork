@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::workspace_access::{WorkspaceRegistry, confirm_action};
+use crate::workspace_access::WorkspaceRegistry;
 use serde::Serialize;
 use tauri::{AppHandle, State, ipc::Response};
 use tauri_plugin_dialog::DialogExt;
@@ -222,7 +222,6 @@ pub(crate) fn read_workspace_binary_bytes(
 
 #[tauri::command]
 pub async fn write_workspace_file(
-    app: AppHandle,
     registry: State<'_, WorkspaceRegistry>,
     root: String,
     path: String,
@@ -233,12 +232,6 @@ pub async fn write_workspace_file(
     }
     let root = registry.authorize(&root)?;
     let path = safe_write_path(&root, &path)?;
-    confirm_action(
-        &app,
-        "确认写入工作区文件",
-        format!("允许 MelodyWork 写入以下文件吗？\n{}", path.display()),
-    )
-    .await?;
     write_file_no_follow(&path, &content)
 }
 

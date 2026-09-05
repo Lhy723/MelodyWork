@@ -1,3 +1,4 @@
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,7 @@ interface SettingsExtensionPageProps {
   extensionKind: MelodyExtensionKind;
   kindExtensions: MelodyExtension[];
   loading: boolean;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
   onSelectedPluginChange: (extension?: MelodyExtension) => void;
   onSkillQueryChange: (query: string) => void;
   onSkillStatusChange: (status: "all" | "enabled" | "disabled") => void;
@@ -110,14 +111,17 @@ export function SettingsExtensionPage({
               {extensionKind === "plugins" ? (
                 <PluginInstaller cwd={cwd} onInstalled={onRefresh} />
               ) : null}
-              <Button
+              <LoadingButton
                 disabled={loading}
-                onClick={() => void onRefresh()}
+                errorLabel="重试"
+                icon={<RefreshCwIcon />}
+                onAction={onRefresh}
+                pendingLabel="刷新中…"
+                successLabel="已刷新"
                 variant="outline"
               >
-                <RefreshCwIcon className={cn(loading && "animate-spin")} />
                 刷新
-              </Button>
+              </LoadingButton>
             </div>
 
             {extensionKind === "skills" ? (

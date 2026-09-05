@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import appPackage from "../../../package.json";
 import appIcon from "../../../src-tauri/icons/128x128.png";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
@@ -15,9 +16,13 @@ import {
   isTauriRuntime,
   openExternalUrl,
   type AppReleaseHistoryItem,
+  type AppUpdateProgress,
   type EnvironmentCapability,
 } from "@/lib/melody-bridge";
-import { useAppSettingsStore } from "@/stores/app-settings-store";
+import {
+  useAppSettingsStore,
+  type UpdateChannel,
+} from "@/stores/app-settings-store";
 
 import { AboutEnvironmentPanel } from "./about-environment-panel";
 import { AboutHistoryPanel } from "./about-history-panel";
@@ -30,6 +35,7 @@ import {
 } from "./about-types";
 
 export function AboutPage() {
+  const liveActivity = useGlobalLiveActivity();
   const [currentVersion, setCurrentVersion] = useState(appPackage.version);
   const autoCheckForUpdates = useAppSettingsStore(
     (state) => state.autoCheckForUpdates,
@@ -53,8 +59,6 @@ export function AboutPage() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
 
-  const isBusy =
-    updateState.status === "checking" || updateState.status === "installing";
   const hasUpdateDetails =
     updateState.status === "available" ||
     updateState.status === "installing" ||
@@ -68,9 +72,10 @@ export function AboutPage() {
         releases.length > 0 ? releases : fallbackReleaseHistory,
       );
       setReleaseHistoryState("ready");
-    } catch {
+    } catch (reason) {
       setReleaseHistory(fallbackReleaseHistory);
       setReleaseHistoryState("error");
+      throw reason;
     }
   }, []);
 
@@ -111,22 +116,87 @@ export function AboutPage() {
         status: "error",
         message: toUserMessage(reason, "检查更新失败，请稍后重试。"),
       });
+      throw reason;
     }
   };
 
-  const installUpdate = async () => {
-    if (updateState.status !== "available") return;
-    const channel = updateState.channel;
-    setUpdateState({ status: "installing", channel });
+  const installUpdate = async (retryUpdate?: {
+    channel: UpdateChannel;
+    version: string;
+  }) => {
+    const availableUpdate =
+      updateState.status === "available"
+        ? { channel: updateState.channel, version: updateState.version }
+        : retryUpdate;
+    if (!availableUpdate) return;
+    const { channel, version } = availableUpdate;
+    const initialProgress: AppUpdateProgress = {
+      phase: "downloading",
+      downloadedBytes: 0,
+      totalBytes: null,
+    };
+    liveActivity.start({
+      detail: "正在获取更新包…",
+      progress: 0,
+      title: `下载 MelodyWork v${version}`,
+    });
+    setUpdateState({
+      status: "installing",
+      channel,
+      progress: initialProgress,
+      version,
+    });
     try {
-      await checkAppUpdate(channel, true);
+      const result = await checkAppUpdate(channel, true, (progress) => {
+        setUpdateState((current) =>
+          current.status === "installing" ? { ...current, progress } : current,
+        );
+        const measuredProgress =
+          progress.phase === "downloading" &&
+          progress.totalBytes !== null &&
+          progress.totalBytes > 0
+            ? Math.min(1, progress.downloadedBytes / progress.totalBytes)
+            : null;
+        liveActivity.update({
+          detail:
+            progress.phase === "installing"
+              ? "安装完成后会重启应用。"
+              : "正在下载更新包…",
+          progress: measuredProgress,
+          title:
+            progress.phase === "installing"
+              ? "安装 MelodyWork 更新"
+              : `下载 MelodyWork v${version}`,
+        });
+      });
+      if (!result.installed) {
+        throw new Error("更新已不可用，请重新检查更新。");
+      }
       setUpdateState({ status: "installed" });
+      liveActivity.succeed({
+        detail: `v${version} 已安装，应用即将重启。`,
+        title: "MelodyWork 更新完成",
+      });
       await relaunch();
     } catch (reason) {
+      const message = toUserMessage(reason, "安装更新失败，请稍后重试。");
       setUpdateState({
         status: "error",
-        message: toUserMessage(reason, "安装更新失败，请稍后重试。"),
+        message,
       });
+      liveActivity.fail(
+        {
+          detail: message,
+          title: "MelodyWork 更新失败",
+        },
+        {
+          label: "重试",
+          onClick: () => {
+            void installUpdate({ channel, version }).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     }
   };
 
@@ -155,7 +225,7 @@ export function AboutPage() {
   }, []);
 
   useEffect(() => {
-    void refreshReleaseHistory();
+    void refreshReleaseHistory().catch(() => undefined);
     void refreshEnvironmentCapabilities();
   }, [refreshEnvironmentCapabilities, refreshReleaseHistory]);
 
@@ -227,9 +297,8 @@ export function AboutPage() {
         <AboutUpdatePanel
           autoCheckForUpdates={autoCheckForUpdates}
           hasUpdateDetails={hasUpdateDetails}
-          isBusy={isBusy}
-          onCheck={() => void checkForUpdate()}
-          onInstall={() => void installUpdate()}
+          onCheck={checkForUpdate}
+          onInstall={installUpdate}
           onSetAutoCheck={(enabled) =>
             setAppSetting("autoCheckForUpdates", enabled)
           }
@@ -250,7 +319,7 @@ export function AboutPage() {
         <AboutHistoryPanel
           currentVersion={currentVersion}
           onOpenRelease={(url) => void openExternalUrl(url)}
-          onRefresh={() => void refreshReleaseHistory()}
+          onRefresh={refreshReleaseHistory}
           releaseHistory={releaseHistory}
           state={releaseHistoryState}
         />

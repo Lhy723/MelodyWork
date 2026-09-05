@@ -26,7 +26,68 @@ import { MessageCodeBlock } from "@/features/chat/message-code-block";
 import { PlanTimelineEntry } from "@/features/chat/plan-timeline-entry";
 import { ProjectInlineCitation } from "@/features/chat/project-inline-citation";
 import { TurnActivityGroup } from "@/features/chat/turn-activity-group";
-import { useMemo, type ComponentProps } from "react";
+import { useEffect, useMemo, useRef, type ComponentProps } from "react";
+
+const CJK = /[\u2e80-\u9fff]/u;
+const STREAMING_REVEAL_RECENT_COMPLETION_MS = 2_000;
+
+type AssistantMessageEntry = Extract<TimelineEntry, { kind: "message" }>;
+
+type AssistantMessageTextProps = {
+  components: ComponentProps<typeof MessageResponse>["components"];
+  entry: AssistantMessageEntry;
+  turnRunning: boolean;
+};
+
+function AssistantMessageText({
+  components,
+  entry,
+  turnRunning,
+}: AssistantMessageTextProps) {
+  const recentlyCompleted =
+    !entry.streaming &&
+    entry.completedAt !== undefined &&
+    Date.now() - entry.completedAt <= STREAMING_REVEAL_RECENT_COMPLETION_MS;
+  const previousContentRef = useRef(entry.content);
+  const contentGrew =
+    entry.content.length > previousContentRef.current.length &&
+    entry.content.startsWith(previousContentRef.current);
+  const hasStreamedRef = useRef(Boolean(entry.streaming) || recentlyCompleted);
+  const isAnimating =
+    Boolean(entry.streaming) ||
+    contentGrew ||
+    recentlyCompleted ||
+    (turnRunning && hasStreamedRef.current);
+
+  const separator: "word" | "char" = CJK.test(entry.content) ? "char" : "word";
+  const animated = useMemo(
+    () => ({
+      animation: "text-reveal" as const,
+      duration: 600,
+      easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+      sep: separator,
+      stagger: separator === "char" ? 28 : 55,
+    }),
+    [separator],
+  );
+
+  useEffect(() => {
+    if (isAnimating) {
+      hasStreamedRef.current = true;
+    }
+    previousContentRef.current = entry.content;
+  }, [entry.content, isAnimating]);
+
+  return (
+    <MessageResponse
+      animated={animated}
+      components={components}
+      isAnimating={isAnimating}
+    >
+      {entry.content}
+    </MessageResponse>
+  );
+}
 
 interface AgentTimelineProps {
   cwd: string;
@@ -36,7 +97,7 @@ interface AgentTimelineProps {
     entryId: string,
     outcome: AgentPlanDecision,
     feedback?: string,
-  ) => void;
+  ) => void | Promise<void>;
   onQuestion: (
     entryId: string,
     response: AgentQuestionResponse,
@@ -110,9 +171,17 @@ export function AgentTimeline({
                       ))}
                     </Attachments>
                   ) : null}
-                  <MessageResponse components={messageComponents}>
-                    {entry.content}
-                  </MessageResponse>
+                  {entry.role === "assistant" ? (
+                    <AssistantMessageText
+                      components={messageComponents}
+                      entry={entry}
+                      turnRunning={turnRunning}
+                    />
+                  ) : (
+                    <MessageResponse components={messageComponents}>
+                      {entry.content}
+                    </MessageResponse>
+                  )}
                   {entry.streaming ? (
                     <span
                       aria-hidden="true"

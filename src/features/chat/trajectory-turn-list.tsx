@@ -1,6 +1,4 @@
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotIcon,
@@ -8,6 +6,10 @@ import {
   ListTreeIcon,
 } from "lucide-react";
 
+import {
+  IconMorphIcon,
+  ICON_MORPH_SHAPES,
+} from "@/components/interior/icon-morph";
 import { cn } from "@/lib/utils";
 
 import {
@@ -64,11 +66,13 @@ export function TrajectoryTurnList({
                 onClick={() => onToggleTurn(turn.id)}
                 type="button"
               >
-                {collapsed ? (
-                  <ChevronRightIcon className="size-3.5" />
-                ) : (
-                  <ChevronDownIcon className="size-3.5" />
-                )}
+                <IconMorphIcon
+                  active={!collapsed}
+                  className="size-3.5"
+                  shapes={ICON_MORPH_SHAPES.chevronRightDown}
+                  size={14}
+                  strokeWidth={1.9}
+                />
                 <strong>Turn {turn.number}</strong>
                 <span>{turn.rows.length} 个事件</span>
                 <span className="harness-trajectory-turn-time">

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { LoadingButton } from "@/components/interior/loading-button";
 import type { UsageStatistics } from "@/domain/statistics";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
 import { getUsageStatistics, listMelodySkills } from "@/lib/melody-bridge";
@@ -36,8 +36,8 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
   const loading = loadState.phase === "pending";
   const error = loadState.error;
 
-  const load = useCallback(() => {
-    void runLoad(
+  const load = useCallback(async () => {
+    await runLoad(
       () => Promise.all([getUsageStatistics(), listMelodySkills(cwd)]),
       ([nextStatistics, extensions]) => {
         setStatistics(nextStatistics);
@@ -45,11 +45,11 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
           extensions.filter((extension) => extension.enabled).length,
         );
       },
-    ).catch(() => undefined);
+    );
   }, [cwd, runLoad]);
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
   const topMetrics = [
@@ -90,15 +90,20 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
               了解你的任务活跃度、Token 使用和 Melody 扩展使用情况。
             </p>
           </div>
-          <Button
+          <LoadingButton
             aria-label="刷新统计"
             disabled={loading}
-            onClick={() => void load()}
-            size="icon-sm"
+            errorLabel="重试"
+            icon={<RefreshCwIcon />}
+            iconOnly
+            onAction={load}
+            pendingLabel="刷新中…"
+            size="sm"
+            successLabel="已刷新"
             variant="ghost"
           >
-            <RefreshCwIcon className={cn(loading && "animate-spin")} />
-          </Button>
+            刷新统计
+          </LoadingButton>
         </div>
 
         {error ? (

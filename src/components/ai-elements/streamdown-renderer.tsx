@@ -1,5 +1,7 @@
 import type { StreamdownProps } from "streamdown";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { StreamdownTable } from "./streamdown-table";
 
 type StreamdownRuntime = {
   Streamdown: typeof import("streamdown").Streamdown;
@@ -54,13 +56,25 @@ export const StreamdownRenderer = ({
     };
   }, []);
 
+  const components = useMemo(
+    () => ({
+      ...props.components,
+      table: props.components?.table ?? StreamdownTable,
+    }),
+    [props.components],
+  );
+
   if (!runtime) {
     return <div className={props.className}>{children}</div>;
   }
 
   const Component = runtime.Streamdown;
   return (
-    <Component {...props} plugins={plugins ?? runtime.plugins}>
+    <Component
+      {...props}
+      components={components}
+      plugins={plugins ?? runtime.plugins}
+    >
       {children}
     </Component>
   );

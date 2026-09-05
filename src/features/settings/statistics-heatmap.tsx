@@ -9,7 +9,11 @@ import {
   dateKey,
   type ActivityView,
 } from "./statistics-utils";
-import { echartsLoader, readThemeColor } from "./statistics-charts";
+import {
+  echartsLoader,
+  readThemeColor,
+  readThemeFont,
+} from "./statistics-charts";
 
 export function ActivityHeatmap({
   activity,
@@ -81,6 +85,7 @@ export function ActivityHeatmap({
         const chartBorder = readThemeColor("--harness-chart-border", "#dfe2e5");
         const chartBackground = readThemeColor("--harness-bg-base", "#ffffff");
         const chartText = readThemeColor("--harness-label-caption", "#707276");
+        const chartFont = readThemeFont();
         const chartTooltip = readThemeColor("--harness-bg-layer-1", "#ffffff");
         const chartTooltipText = readThemeColor(
           "--harness-label-primary",
@@ -96,6 +101,9 @@ export function ActivityHeatmap({
         );
         chart.setOption({
           animationDuration: 240,
+          textStyle: {
+            fontFamily: chartFont,
+          },
           calendar: {
             range: [
               series[0]?.value[0] ?? dateKey(new Date()),
@@ -117,6 +125,7 @@ export function ActivityHeatmap({
             dayLabel: { show: false },
             monthLabel: {
               color: chartText,
+              fontFamily: chartFont,
               fontSize: 11,
               margin: 8,
               nameMap: "ZH",
@@ -129,6 +138,7 @@ export function ActivityHeatmap({
             borderWidth: 1,
             textStyle: {
               color: chartTooltipText,
+              fontFamily: chartFont,
               fontSize: 12,
             },
             formatter: (params: {

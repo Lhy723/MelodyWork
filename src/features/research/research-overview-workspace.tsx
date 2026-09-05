@@ -10,15 +10,11 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
+import { Dropdown } from "@/components/interior/dropdown";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { TextReveal } from "@/components/interior/text-reveal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -290,20 +286,16 @@ export function ResearchOverviewWorkspace({
                 </Button>
               ) : null}
             </div>
-            <select
-              aria-label="筛选研究活动"
-              className="h-8 border bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-              onChange={(event) =>
-                setActivityFilter(event.target.value as ActivityFilter)
-              }
+            <Dropdown
+              className="shrink-0"
+              items={Object.entries(ACTIVITY_FILTER_LABELS).map(
+                ([value, label]) => ({ value, label }),
+              )}
+              label="筛选研究活动"
+              onChange={(value) => setActivityFilter(value as ActivityFilter)}
+              triggerClassName="h-8 px-2 text-xs"
               value={activityFilter}
-            >
-              {Object.entries(ACTIVITY_FILTER_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           {activities.length ? (
@@ -346,10 +338,20 @@ export function ResearchOverviewWorkspace({
             <div className="border-b py-14 text-center">
               <PenLineIcon className="mx-auto size-6 text-muted-foreground" />
               <h3 className="research-serif mt-3 font-semibold text-lg">
-                从一条研究记录开始
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={0.95}
+                  text="从一条研究记录开始"
+                />
               </h3>
               <p className="mx-auto mt-1 max-w-md text-muted-foreground text-xs leading-5">
-                先写下当前的想法、读论文后的判断或下一步实验；之后所有研究活动都会在这里形成连续脉络。
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={1.25}
+                  text="先写下当前的想法、读论文后的判断或下一步实验；之后所有研究活动都会在这里形成连续脉络。"
+                />
               </p>
               <div className="mt-4 flex justify-center gap-2">
                 <Button onClick={() => setCaptureMode("note")} size="sm">
@@ -378,57 +380,36 @@ export function ResearchOverviewWorkspace({
         />
       </div>
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPendingDeleteNote(undefined);
-        }}
-        open={Boolean(pendingDeleteNote)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除这条研究记录？</DialogTitle>
-            <DialogDescription>
-              删除后会从当前项目的时间线和本地记录中移除，无法自动恢复。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+      <Modal
+        description="删除后会从当前项目的时间线和本地记录中移除，无法自动恢复。"
+        footer={
+          <>
             <Button
               onClick={() => setPendingDeleteNote(undefined)}
               variant="outline"
             >
               取消
             </Button>
-            <Button
-              onClick={() => {
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDeleteNote) removeResearchNote(pendingDeleteNote);
                 setPendingDeleteNote(undefined);
               }}
               variant="destructive"
             >
               删除记录
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setPendingDeleteNote(undefined)}
+        open={Boolean(pendingDeleteNote)}
+        title="删除这条研究记录？"
+      />
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingImport(undefined);
-            setPendingImportName("");
-          }
-        }}
-        open={Boolean(pendingImport)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>导入研究数据？</DialogTitle>
-            <DialogDescription>
-              将使用“{pendingImportName}
-              ”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+      <Modal
+        description={`将使用“${pendingImportName}”覆盖当前项目的研究记录、任务、文献和收件箱内容。建议先导出当前项目备份。`}
+        footer={
+          <>
             <Button
               onClick={() => {
                 setPendingImport(undefined);
@@ -438,10 +419,18 @@ export function ResearchOverviewWorkspace({
             >
               取消
             </Button>
-            <Button onClick={confirmImport}>导入并覆盖</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <HoldToConfirm onConfirm={confirmImport} variant="destructive">
+              导入并覆盖
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => {
+          setPendingImport(undefined);
+          setPendingImportName("");
+        }}
+        open={Boolean(pendingImport)}
+        title="导入研究数据？"
+      />
 
       {inbox ? (
         <button

@@ -1,10 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use tauri::AppHandle;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use crate::config_io::TextFileStore;
-use crate::workspace_access::confirm_action;
 
 use super::super::config_core::*;
 
@@ -177,33 +175,17 @@ pub fn list_marketplace_sources() -> Result<Vec<MarketplaceSource>, String> {
 }
 
 #[tauri::command]
-pub async fn add_marketplace_source(
-    app: AppHandle,
-    input: String,
-) -> Result<Vec<MarketplaceSource>, String> {
+pub async fn add_marketplace_source(input: String) -> Result<Vec<MarketplaceSource>, String> {
     let source = marketplace_source_from_input(&input)?;
-    confirm_action(
-        &app,
-        "确认添加 Marketplace",
-        format!("允许将以下来源写入 Melody 配置吗？\n{}", source.location),
-    )
-    .await?;
     save_marketplace_source_inner(None, source)
 }
 
 #[tauri::command]
 pub async fn save_marketplace_source(
-    app: AppHandle,
     original_name: Option<String>,
     mut source: MarketplaceSource,
 ) -> Result<Vec<MarketplaceSource>, String> {
     validate_marketplace_source(&mut source)?;
-    confirm_action(
-        &app,
-        "确认保存 Marketplace",
-        format!("允许将 Marketplace {} 写入 Melody 配置吗？", source.name),
-    )
-    .await?;
     save_marketplace_source_inner(original_name, source)
 }
 
@@ -254,16 +236,7 @@ fn save_marketplace_source_inner(
 }
 
 #[tauri::command]
-pub async fn delete_marketplace_source(
-    app: AppHandle,
-    name: String,
-) -> Result<Vec<MarketplaceSource>, String> {
-    confirm_action(
-        &app,
-        "确认删除 Marketplace",
-        format!("允许从 Melody 配置删除 Marketplace {} 吗？", name.trim()),
-    )
-    .await?;
+pub async fn delete_marketplace_source(name: String) -> Result<Vec<MarketplaceSource>, String> {
     let (path, mut document) = read_user_config_document()?;
     let sources = marketplace_sources_mut(&mut document)?;
     let index = sources

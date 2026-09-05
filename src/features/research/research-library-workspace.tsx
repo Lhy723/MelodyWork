@@ -1,11 +1,8 @@
-import {
-  BookmarkIcon,
-  LoaderCircleIcon,
-  PlusIcon,
-  SearchIcon,
-} from "lucide-react";
+import { BookmarkIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
@@ -25,6 +22,7 @@ export function LibraryWorkspace({
   onNavigate: (kind: ResearchMainKind) => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const papers = useResearchStore((state) => state.papers);
   const addPapers = useResearchStore((state) => state.addPapers);
   const [query, setQuery] = useState("");
@@ -49,17 +47,38 @@ export function LibraryWorkspace({
           paper.doi?.toLocaleLowerCase().includes(normalized)),
     );
   }, [papers, query, scope]);
-  const runImport = async () => {
+  const runImport = async (nextCandidate = candidate) => {
+    const normalized = nextCandidate.trim();
+    if (!normalized) return;
     setImporting(true);
     setError(undefined);
+    liveActivity.start({
+      detail: "正在查询学术索引…",
+      title: "导入论文",
+    });
     try {
-      const paper = await importResearchPaper(candidate);
+      const paper = await importResearchPaper(normalized);
       addPapers([paper]);
       onOpenPaper(paper);
       setCandidate("");
       setImportOpen(false);
+      liveActivity.succeed({
+        detail: `已导入《${paper.title}》。`,
+        title: "论文导入完成",
+      });
     } catch (reason) {
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "论文导入失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runImport(normalized).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       setImporting(false);
     }
@@ -115,23 +134,22 @@ export function LibraryWorkspace({
               onChange={(event) => setCandidate(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && candidate.trim() && !importing)
-                  void runImport();
+                  void runImport().catch(() => undefined);
               }}
               placeholder="arXiv 链接、doi.org 链接或 DOI"
               value={candidate}
             />
-            <Button
+            <LoadingButton
               disabled={!candidate.trim() || importing}
-              onClick={() => void runImport()}
+              errorLabel="重试"
+              icon={<PlusIcon />}
+              onAction={runImport}
+              pendingLabel="正在查询…"
               size="sm"
+              successLabel="已导入"
             >
-              {importing ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <PlusIcon />
-              )}
-              {importing ? "正在查询…" : "确认导入"}
-            </Button>
+              确认导入
+            </LoadingButton>
           </div>
         ) : null}
         {error ? (
@@ -187,6 +205,7 @@ export function LibraryWorkspace({
                   </>
                 }
                 description="粘贴 DOI 或 arXiv 链接即可拉取真实元信息；之后可以打开原文、收藏，并在知识资产中继续整理。"
+                reveal
                 steps={[
                   {
                     title: "粘贴链接",
