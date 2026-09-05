@@ -56,7 +56,6 @@ interface SettingsWorkspaceProps {
 export function SettingsWorkspace({
   cwd,
   projectId,
-  projectName: selectedProjectName,
   initialPage = "configuration",
   onClose,
 }: SettingsWorkspaceProps) {

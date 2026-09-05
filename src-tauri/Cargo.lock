@@ -2188,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "melody-work"
-version = "0.3.3-beta.4"
+version = "0.3.3"
 dependencies = [
  "libc",
  "portable-pty",

@@ -13,13 +13,6 @@ mod git_runtime_worktrees;
 pub(crate) use git_runtime_worktrees::parse_worktrees;
 pub use git_runtime_worktrees::*;
 
-#[path = "git_runtime_worktrees.rs"]
-mod git_runtime_worktrees;
-
-#[cfg(test)]
-pub(crate) use git_runtime_worktrees::parse_worktrees;
-pub use git_runtime_worktrees::*;
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChange {
