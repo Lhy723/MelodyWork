@@ -33,10 +33,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  IconMorphIcon,
+  ICON_MORPH_SHAPES,
+} from "@/components/interior/icon-morph";
 import { cn } from "@/lib/utils";
 import type { ChatStatus } from "ai";
-import { ArrowUpIcon, PlusIcon, SquareIcon } from "lucide-react";
-import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
+import { PlusIcon } from "lucide-react";
+import type {
+  ComponentProps,
+  HTMLAttributes,
+  ReactElement,
+  ReactNode,
+} from "react";
 import { Children, useCallback } from "react";
 
 import { usePromptInputAttachments } from "./prompt-input-context";
@@ -97,6 +106,38 @@ export type PromptInputButtonProps = ComponentProps<typeof InputGroupButton> & {
   tooltip?: PromptInputButtonTooltip;
 };
 
+export interface PromptInputTooltipProps {
+  children: ReactElement;
+  tooltip: PromptInputButtonTooltip;
+}
+
+/**
+ * Wrap a prompt control with a tooltip without stealing props from a parent
+ * Radix trigger. This order is important for controls that are themselves
+ * used with `asChild` (for example, dropdown and dialog triggers).
+ */
+export const PromptInputTooltip = ({
+  children,
+  tooltip,
+}: PromptInputTooltipProps) => {
+  const tooltipContent =
+    typeof tooltip === "string" ? tooltip : tooltip.content;
+  const shortcut = typeof tooltip === "string" ? undefined : tooltip.shortcut;
+  const side = typeof tooltip === "string" ? "top" : (tooltip.side ?? "top");
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side}>
+        {tooltipContent}
+        {shortcut && (
+          <span className="ml-2 text-muted-foreground">{shortcut}</span>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
 export const PromptInputButton = ({
   variant = "ghost",
   className,
@@ -121,22 +162,7 @@ export const PromptInputButton = ({
     return button;
   }
 
-  const tooltipContent =
-    typeof tooltip === "string" ? tooltip : tooltip.content;
-  const shortcut = typeof tooltip === "string" ? undefined : tooltip.shortcut;
-  const side = typeof tooltip === "string" ? "top" : (tooltip.side ?? "top");
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side={side}>
-        {tooltipContent}
-        {shortcut && (
-          <span className="ml-2 text-muted-foreground">{shortcut}</span>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  );
+  return <PromptInputTooltip tooltip={tooltip}>{button}</PromptInputTooltip>;
 };
 
 export type PromptInputActionMenuProps = ComponentProps<typeof DropdownMenu>;
@@ -149,14 +175,23 @@ export type PromptInputActionMenuTriggerProps = PromptInputButtonProps;
 export const PromptInputActionMenuTrigger = ({
   className,
   children,
+  tooltip,
   ...props
-}: PromptInputActionMenuTriggerProps) => (
-  <DropdownMenuTrigger asChild>
-    <PromptInputButton className={className} {...props}>
-      {children ?? <PlusIcon className="size-4" />}
-    </PromptInputButton>
-  </DropdownMenuTrigger>
-);
+}: PromptInputActionMenuTriggerProps) => {
+  const trigger = (
+    <DropdownMenuTrigger asChild>
+      <PromptInputButton className={className} {...props}>
+        {children ?? <PlusIcon className="size-4" />}
+      </PromptInputButton>
+    </DropdownMenuTrigger>
+  );
+
+  return tooltip ? (
+    <PromptInputTooltip tooltip={tooltip}>{trigger}</PromptInputTooltip>
+  ) : (
+    trigger
+  );
+};
 
 export type PromptInputActionMenuContentProps = ComponentProps<
   typeof DropdownMenuContent
@@ -204,14 +239,12 @@ export const PromptInputSubmit = ({
     isGenerating && !hasContent && attachments.files.length === 0;
 
   const Icon = (
-    <span
-      aria-hidden="true"
-      className="prompt-input-submit-icon"
-      data-state={shouldStop ? "stop" : "send"}
-    >
-      <ArrowUpIcon className="prompt-input-submit-icon-send size-4" />
-      <SquareIcon className="prompt-input-submit-icon-stop size-3.5 fill-current" />
-    </span>
+    <IconMorphIcon
+      active={shouldStop}
+      shapes={ICON_MORPH_SHAPES.sendStop}
+      size={16}
+      strokeWidth={1.8}
+    />
   );
 
   const handleClick = useCallback(
@@ -226,7 +259,7 @@ export const PromptInputSubmit = ({
     [onClick, onStop, shouldStop],
   );
 
-  return (
+  const button = (
     <InputGroupButton
       aria-label={shouldStop ? "停止" : "发送"}
       className={cn("prompt-input-submit", className)}
@@ -239,6 +272,12 @@ export const PromptInputSubmit = ({
     >
       {children ?? Icon}
     </InputGroupButton>
+  );
+
+  return (
+    <PromptInputTooltip tooltip={shouldStop ? "停止" : "发送"}>
+      {button}
+    </PromptInputTooltip>
   );
 };
 
@@ -259,7 +298,7 @@ export const PromptInputSelectTrigger = ({
   <SelectTrigger
     className={cn(
       "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
-      "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
+      "hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
       className,
     )}
     {...props}

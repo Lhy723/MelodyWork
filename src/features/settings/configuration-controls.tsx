@@ -1,11 +1,5 @@
+import { Dropdown } from "@/components/interior/dropdown";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { MelodyConfigValue } from "@/domain/config";
 import { cn } from "@/lib/utils";
@@ -87,26 +81,19 @@ export function SettingControl({
         ? explicit
         : (definition.clearValue ?? (typeof value === "string" ? value : ""));
     return (
-      <Select
-        onValueChange={(next) =>
+      <Dropdown
+        className="w-44"
+        items={definition.options ?? []}
+        label={definition.label}
+        onChange={(next) =>
           onChange(
             definition.path,
             next === definition.clearValue ? null : next,
           )
         }
+        placeholder="使用默认值"
         value={selectedValue}
-      >
-        <SelectTrigger aria-label={definition.label} className="w-44">
-          <SelectValue placeholder="使用默认值" />
-        </SelectTrigger>
-        <SelectContent>
-          {definition.options?.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
     );
   }
 

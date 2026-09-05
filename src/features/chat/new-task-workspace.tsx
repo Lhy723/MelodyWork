@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { TextReveal } from "@/components/interior/text-reveal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,7 +74,13 @@ export function NewTaskWorkspace({
         <div className="w-full max-w-5xl">
           <div className="mb-7 px-6 text-center">
             <h1 className="font-semibold text-2xl">
-              {researchMode ? "今天想研究什么？" : "今天要完成什么？"}
+              <TextReveal
+                by="character"
+                className="block"
+                maxDuration={0.9}
+                startOnView={false}
+                text={researchMode ? "今天想研究什么？" : "今天要完成什么？"}
+              />
             </h1>
             <p className="mt-2 text-muted-foreground text-sm">
               {independentChat

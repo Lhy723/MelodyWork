@@ -5,26 +5,6 @@
   transition-timing-function: var(--motion-ease-out);
 }
 
-.prompt-input-submit-icon {
-  display: grid;
-  place-items: center;
-}
-
-.prompt-input-submit-icon > svg {
-  grid-area: 1 / 1;
-  opacity: 0;
-  transform: scale(0.78) rotate(-12deg);
-  transition-duration: var(--motion-duration-fast);
-  transition-property: transform, opacity;
-  transition-timing-function: var(--motion-ease-out);
-}
-
-.prompt-input-submit-icon[data-state="send"] .prompt-input-submit-icon-send,
-.prompt-input-submit-icon[data-state="stop"] .prompt-input-submit-icon-stop {
-  opacity: 1;
-  transform: scale(1) rotate(0deg);
-}
-
 @media (hover: hover) and (pointer: fine) {
   .prompt-input-submit:not(:disabled):hover {
     transform: translateY(-1px);
@@ -43,11 +23,5 @@
 
   .prompt-input-submit:not(:disabled):active {
     transform: none;
-  }
-
-  .prompt-input-submit-icon > svg {
-    transform: none;
-    transition-duration: var(--motion-duration-instant);
-    transition-property: opacity;
   }
 }

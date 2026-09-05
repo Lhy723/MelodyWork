@@ -1,18 +1,9 @@
-import {
-  BotIcon,
-  CheckCircle2Icon,
-  CircleXIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover } from "@/components/interior/popover";
+import { PresenceAvatars } from "@/components/interior/presence-avatars";
 import type { AgentSubagent } from "@/domain/acp";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { SubagentAvatar } from "./subagent-avatar";
 
 interface SubagentTrayProps {
   className?: string;
@@ -46,151 +37,99 @@ const statusLabel = (subagent: AgentSubagent) => {
   return `已完成 · ${durationLabel(subagent.durationMs)}`;
 };
 
-const StatusIcon = ({ status }: Pick<AgentSubagent, "status">) => {
-  if (status === "running") {
-    return <LoaderCircleIcon className="size-3.5 animate-spin text-primary" />;
-  }
-  if (status === "completed") {
-    return <CheckCircle2Icon className="size-3.5 text-emerald-600" />;
-  }
-  return <CircleXIcon className="size-3.5 text-destructive" />;
-};
-
 export function SubagentTray({
   className,
   onOpenSubagent,
   subagents,
 }: SubagentTrayProps) {
+  const [openSubagentId, setOpenSubagentId] = useState<string | null>(null);
   const running = subagents.filter((subagent) => subagent.status === "running");
   const completed = subagents.filter(
     (subagent) => subagent.status !== "running",
   );
 
   return (
-    <div
-      className={cn(
-        "mx-auto flex w-full max-w-5xl justify-end px-4 pb-2 sm:px-6",
-        className,
-      )}
-    >
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            className="harness-subagent-trigger gap-1.5 rounded-full bg-background/58 shadow-none backdrop-blur"
-            size="sm"
-            variant="ghost"
-          >
-            <BotIcon />
-            <span>Subagents</span>
-            {running.length > 0 ? (
-              <span className="flex items-center gap-1 text-primary">
-                <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                {running.length} 运行中
-              </span>
-            ) : (
-              <span className="text-muted-foreground">
-                {completed.length > 0 ? `${completed.length} 已完成` : "0"}
-              </span>
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="end"
-          className="w-[min(25rem,calc(100vw-2rem))] p-2"
-          side="top"
-        >
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <div>
-              <h2 className="font-medium text-sm">Subagents</h2>
-              <p className="text-muted-foreground text-xs">
-                点击查看独立会话历史
-              </p>
-            </div>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
-              {subagents.length}
-            </span>
-          </div>
-          <div className="max-h-80 overflow-y-auto py-1">
-            {subagents.length === 0 ? (
-              <div className="px-3 py-8 text-center">
-                <BotIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
-                <p className="font-medium text-xs">还没有 Subagent</p>
-                <p className="mt-1 text-muted-foreground text-[11px]">
-                  主代理委派任务后，会在这里显示运行状态。
-                </p>
-              </div>
-            ) : null}
-            {running.length > 0 ? (
-              <section>
-                <p className="px-2 py-1.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
-                  正在运行
-                </p>
-                {running.map((subagent) => (
-                  <SubagentRow
-                    key={subagent.subagentId}
-                    onOpen={onOpenSubagent}
-                    subagent={subagent}
-                  />
-                ))}
-              </section>
-            ) : null}
+    <div className={cn("w-full min-w-0 overflow-hidden", className)}>
+      <div className="flex min-w-0 items-center gap-2 px-2 py-1">
+        <PresenceAvatars
+          className="shrink-0"
+          label="Subagents"
+          max={4}
+          people={subagents.map((subagent) => ({
+            id: subagent.subagentId,
+            name: subagent.description,
+          }))}
+          renderAvatar={(person) => {
+            const subagent = subagents.find(
+              (candidate) => candidate.subagentId === person.id,
+            );
+            return subagent ? (
+              <Popover
+                align="start"
+                className="w-64 p-3"
+                label={`Subagent：${subagent.description}`}
+                onOpenChange={(open) =>
+                  setOpenSubagentId(open ? subagent.subagentId : null)
+                }
+                open={openSubagentId === subagent.subagentId}
+                side="bottom"
+                trigger={
+                  <SubagentAvatar decorative size="xs" subagent={subagent} />
+                }
+                triggerAriaLabel={`查看 Subagent：${subagent.description}`}
+                triggerClassName="size-5 rounded-[22%] border-0 bg-transparent p-0 shadow-none hover:bg-transparent"
+              >
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-sm">
+                      {subagent.description}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {statusLabel(subagent)}
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex h-8 w-full items-center justify-center rounded-lg bg-primary px-3 font-medium text-primary-foreground text-sm outline-none transition-colors hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-ring/40"
+                    onClick={() => {
+                      setOpenSubagentId(null);
+                      onOpenSubagent(subagent);
+                    }}
+                    type="button"
+                  >
+                    打开会话
+                  </button>
+                </div>
+              </Popover>
+            ) : null;
+          }}
+          onOverflowSelect={(people) => {
+            const subagent = subagents.find(
+              (candidate) => candidate.subagentId === people[0]?.id,
+            );
+            if (subagent) onOpenSubagent(subagent);
+          }}
+          size="xs"
+          overlap="tight"
+        />
+        <span className="min-w-0 truncate font-medium text-sm">Subagents</span>
+        {running.length > 0 ? (
+          <span className="flex min-w-0 shrink-0 items-center gap-1 text-primary text-xs">
+            <span className="size-1.5 animate-pulse rounded-full bg-current" />
+            {running.length} 运行中
             {completed.length > 0 ? (
-              <section>
-                <p
-                  className={cn(
-                    "px-2 py-1.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide",
-                    running.length > 0 && "mt-1 border-t pt-2.5",
-                  )}
-                >
-                  已结束
-                </p>
-                {completed.map((subagent) => (
-                  <SubagentRow
-                    key={subagent.subagentId}
-                    onOpen={onOpenSubagent}
-                    subagent={subagent}
-                  />
-                ))}
-              </section>
+              <span className="text-muted-foreground">
+                · {completed.length} 已结束
+              </span>
             ) : null}
-          </div>
-        </PopoverContent>
-      </Popover>
+          </span>
+        ) : completed.length > 0 ? (
+          <span className="shrink-0 text-muted-foreground text-xs">
+            {completed.length} 已结束
+          </span>
+        ) : (
+          <span className="shrink-0 text-muted-foreground text-xs">暂无</span>
+        )}
+      </div>
     </div>
-  );
-}
-
-function SubagentRow({
-  onOpen,
-  subagent,
-}: {
-  onOpen: (subagent: AgentSubagent) => void;
-  subagent: AgentSubagent;
-}) {
-  return (
-    <button
-      className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={() => onOpen(subagent)}
-      type="button"
-    >
-      <span className="mt-0.5">
-        <StatusIcon status={subagent.status} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-xs">
-          {subagent.description}
-        </span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground text-[11px]">
-          <span>{subagent.subagentType}</span>
-          <span aria-hidden="true">·</span>
-          <span>{statusLabel(subagent)}</span>
-        </span>
-      </span>
-      {subagent.toolCallCount !== undefined ? (
-        <span className="mt-0.5 shrink-0 text-muted-foreground text-[11px] tabular-nums">
-          {subagent.toolCallCount} 工具
-        </span>
-      ) : null}
-    </button>
   );
 }

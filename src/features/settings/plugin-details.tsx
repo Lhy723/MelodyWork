@@ -13,21 +13,18 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type {
   MelodyExtension,
   PluginComponentGroup,
   PluginDetails,
 } from "@/domain/config";
+import { toUserMessage } from "@/domain/app-error";
 import { useAsyncOperation } from "@/hooks/use-async-operation";
 import {
   getMelodyPluginDetails,
@@ -60,6 +57,11 @@ export function PluginDetailsView({
   onBack,
   onDeleted,
 }: PluginDetailsViewProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [details, setDetails] = useState<PluginDetails>();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const { state: loadingState, run: runLoad } = useAsyncOperation();
@@ -70,25 +72,79 @@ export function PluginDetailsView({
   } = useAsyncOperation();
   const loading = loadingState.phase === "pending";
   const error = loadingState.error;
-  const deleting = deleteState.phase === "pending";
   const deleteError = deleteState.error;
 
-  const load = useCallback(() => {
-    void runLoad(() => getMelodyPluginDetails(cwd, plugin), setDetails).catch(
-      () => undefined,
-    );
-  }, [cwd, plugin, runLoad]);
+  const load = useCallback(
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: `正在读取插件“${plugin.name}”…`,
+          title: "刷新插件详情",
+        });
+      }
+      try {
+        const value = await runLoad(
+          () => getMelodyPluginDetails(cwd, plugin),
+          setDetails,
+        );
+        if (announce) {
+          succeedActivity({
+            detail: `已读取插件“${value.name ?? plugin.name}”的详细信息。`,
+            title: "插件详情已刷新",
+          });
+        }
+        return value;
+      } catch (reason) {
+        if (announce) {
+          const message = toUserMessage(reason);
+          failActivity(
+            { detail: message, title: "刷新插件详情失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void load(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+        throw reason;
+      }
+    },
+    [cwd, failActivity, plugin, runLoad, startActivity, succeedActivity],
+  );
 
   useEffect(() => {
-    void load();
+    void load().catch(() => undefined);
   }, [load]);
 
-  const remove = () => {
-    void runDelete(async () => {
-      await uninstallMelodyPlugin(cwd, plugin.name);
-      setDeleteOpen(false);
-      await onDeleted();
-    }).catch(() => undefined);
+  const remove = async () => {
+    startActivity({
+      detail: `正在移除插件“${plugin.name}”…`,
+      title: "删除插件",
+    });
+    try {
+      await runDelete(async () => {
+        await uninstallMelodyPlugin(cwd, plugin.name);
+        setDeleteOpen(false);
+        await onDeleted();
+      });
+      succeedActivity({
+        detail: `插件“${plugin.name}”已从 Melody 中移除。`,
+        title: "插件已删除",
+      });
+    } catch (reason) {
+      const message = toUserMessage(reason);
+      failActivity(
+        { detail: message, title: "删除插件失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void remove().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
+    }
   };
 
   return (
@@ -118,15 +174,19 @@ export function PluginDetailsView({
             {details?.description ?? "查看插件包含的能力和配置。"}
           </p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新插件详情"
           disabled={loading}
-          onClick={() => void load()}
-          size="icon-sm"
-          variant="ghost"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          onAction={() => load(true)}
+          pendingLabel="刷新中…"
+          size="sm"
+          successLabel="已刷新"
+          variant="outline"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新
+        </LoadingButton>
         {plugin.managed ? (
           <Button
             onClick={() => {
@@ -252,36 +312,41 @@ export function PluginDetailsView({
         </p>
       ) : null}
 
-      <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除“{plugin.name}”？</DialogTitle>
-            <DialogDescription>
-              这会从 Melody
-              的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。
-            </DialogDescription>
-          </DialogHeader>
-          {deleteError ? (
-            <p
-              aria-live="assertive"
-              className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
-              role="alert"
-            >
-              {deleteError}
-            </p>
-          ) : null}
-          <DialogFooter showCloseButton>
-            <Button
-              disabled={deleting}
-              onClick={() => void remove()}
+      <Modal
+        description="这会从 Melody 的安装注册表和本地安装目录中移除该插件。如果同一仓库包含多个插件，它们会一起被移除。"
+        footer={
+          <>
+            <Button onClick={() => setDeleteOpen(false)} variant="outline">
+              取消
+            </Button>
+            <HoldToConfirm
+              aria-label={`确认删除插件 ${plugin.name}`}
+              confirmLabel={
+                deleteState.phase === "pending" ? "正在删除…" : "已删除"
+              }
+              disabled={deleteState.phase === "pending"}
+              onConfirm={remove}
               variant="destructive"
             >
               <Trash2Icon />
-              {deleting ? "正在删除…" : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              确认删除
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setDeleteOpen(false)}
+        open={deleteOpen}
+        title={`删除“${plugin.name}”？`}
+      >
+        {deleteError ? (
+          <p
+            aria-live="assertive"
+            className="rounded-lg bg-destructive/5 px-3 py-2 text-destructive text-xs"
+            role="alert"
+          >
+            {deleteError}
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }

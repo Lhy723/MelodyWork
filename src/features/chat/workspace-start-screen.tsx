@@ -1,6 +1,7 @@
 import { FolderPlusIcon, MessageCircleIcon } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { PressDepthButton } from "@/components/interior/press-depth";
+import { TextReveal } from "@/components/interior/text-reveal";
 
 export interface WorkspaceStartScreenProps {
   canUseIndependentTask: boolean;
@@ -40,12 +41,37 @@ export function WorkspaceStartScreen({
           <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <FolderPlusIcon className="size-6" />
           </div>
-          <h1 className="mt-5 font-semibold text-2xl tracking-tight">
-            {title}
-          </h1>
-          <p className="mx-auto mt-2 max-w-lg text-muted-foreground text-sm leading-6">
-            {description}
-          </p>
+          {loading ? (
+            <>
+              <h1 className="mt-5 font-semibold text-2xl tracking-tight">
+                {title}
+              </h1>
+              <p className="mx-auto mt-2 max-w-lg text-muted-foreground text-sm leading-6">
+                {description}
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="mt-5 font-semibold text-2xl tracking-tight">
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={0.95}
+                  startOnView={false}
+                  text={title}
+                />
+              </h1>
+              <p className="mx-auto mt-2 max-w-lg text-muted-foreground text-sm leading-6">
+                <TextReveal
+                  by="character"
+                  className="block"
+                  maxDuration={1.1}
+                  startOnView={false}
+                  text={description}
+                />
+              </p>
+            </>
+          )}
           {error ? (
             <p
               className="mx-auto mt-5 max-w-lg rounded-xl bg-destructive/10 px-4 py-3 text-destructive text-sm"
@@ -56,15 +82,20 @@ export function WorkspaceStartScreen({
           ) : null}
           {!loading ? (
             <div className="mt-7 flex flex-wrap justify-center gap-3">
-              <Button onClick={onChooseWorkspace}>
+              <PressDepthButton depth={3} onClick={onChooseWorkspace} tilt={4}>
                 <FolderPlusIcon data-icon="inline-start" />
                 选择工作区
-              </Button>
+              </PressDepthButton>
               {canUseIndependentTask ? (
-                <Button onClick={onUseIndependentTask} variant="outline">
+                <PressDepthButton
+                  depth={3}
+                  onClick={onUseIndependentTask}
+                  tilt={4}
+                  variant="outline"
+                >
                   <MessageCircleIcon data-icon="inline-start" />
                   使用独立任务
-                </Button>
+                </PressDepthButton>
               ) : null}
             </div>
           ) : null}

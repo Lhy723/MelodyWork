@@ -2,9 +2,11 @@ import { toUserMessage as reasonMessage } from "@/domain/app-error";
 import { upsertPlanApproval } from "@/domain/plan-approval";
 import {
   applySessionUpdate,
+  contextUsageFromTotalTokens,
   isPromptCompleteMethod,
   isSessionUpdateMethod,
   notificationMetadata,
+  stampLatestTurnContextUsage,
   type SessionUpdateResult,
 } from "@/domain/session-projection";
 import { sessionModeIdFromUpdate } from "@/domain/session-mode";
@@ -19,6 +21,8 @@ import {
   objectValue,
   questionEntryForRequest,
   stringValue,
+  contextUsageForModel,
+  modelOptionsFromUpdate,
   wireValue,
 } from "./agent-store-parsing";
 import {
@@ -61,6 +65,59 @@ const promptCompleteUpdate = (params: Record<string, unknown> | undefined) => {
   };
 };
 
+const handleModelCatalogUpdate = (
+  store: AgentStoreAccess,
+  message: Parameters<AgentStore["receiveAcp"]>[0],
+) => {
+  const models = modelOptionsFromUpdate(message);
+  if (!models) {
+    return false;
+  }
+
+  const { get, set } = store;
+  const current = get();
+  const currentModelStillAvailable = current.selectedModelId
+    ? models.availableModels.some(
+        (model) => model.id === current.selectedModelId,
+      )
+    : false;
+  const updateSelectedModelStillAvailable = models.selectedModelId
+    ? models.availableModels.some(
+        (model) => model.id === models.selectedModelId,
+      )
+    : false;
+  // A catalog update carries the shell's default model. Keep an active
+  // session's explicit choice when it is still present; only fall back to the
+  // update's current model when the previous choice was removed.
+  const selectedModelId = currentModelStillAvailable
+    ? current.selectedModelId
+    : updateSelectedModelStillAvailable
+      ? models.selectedModelId
+      : models.availableModels[0]?.id;
+  const selectedModel = models.availableModels.find(
+    (model) => model.id === selectedModelId,
+  );
+  const modelChanged = selectedModelId !== current.selectedModelId;
+
+  set({
+    availableModels: models.availableModels,
+    selectedModelId,
+    selectedReasoningEffort: modelChanged
+      ? selectedModel?.reasoningEffort
+      : (current.selectedReasoningEffort ?? selectedModel?.reasoningEffort),
+    contextUsage: contextUsageForModel(
+      models.availableModels,
+      selectedModelId,
+      current.contextUsage,
+    ),
+    ...(current.pendingModelId &&
+    models.availableModels.some((model) => model.id === current.pendingModelId)
+      ? {}
+      : { pendingModelId: undefined }),
+  });
+  return true;
+};
+
 export const receiveAgentAcp = async (
   store: AgentStoreAccess,
   message: Parameters<AgentStore["receiveAcp"]>[0],
@@ -69,6 +126,10 @@ export const receiveAgentAcp = async (
 
   pruneTransientState();
   try {
+    if (handleModelCatalogUpdate(store, message)) {
+      return;
+    }
+
     if (isUserQuestionMethod(message.method) && message.id !== undefined) {
       const request = parseUserQuestionRequest(message, get().acpSessionId);
       if (!request) {
@@ -214,9 +275,24 @@ export const receiveAgentAcp = async (
       const buffered = startsFullReplay
         ? []
         : (get().backgroundTimelines[messageSessionId] ?? []);
+      const stateBeforeUpdate = get();
+      const fallbackUsage =
+        stateBeforeUpdate.backgroundContextUsage[messageSessionId] ??
+        contextUsageForModel(
+          stateBeforeUpdate.availableModels,
+          stateBeforeUpdate.selectedModelId,
+        );
       const result: SessionUpdateResult = skipUserEcho
         ? { timeline: buffered }
         : applySessionUpdate(buffered, update, metadata.eventId);
+      const reportedUsage =
+        result.contextUsage ??
+        contextUsageFromTotalTokens(metadata.totalTokens, fallbackUsage);
+      const hasReportedUsage =
+        result.contextUsage !== undefined || metadata.totalTokens !== undefined;
+      const nextTimeline = hasReportedUsage
+        ? stampLatestTurnContextUsage(result.timeline, reportedUsage)
+        : result.timeline;
       if (result.completed) {
         const pending = metadata.promptId
           ? [...pendingPrompts.entries()].find(
@@ -230,7 +306,7 @@ export const receiveAgentAcp = async (
       set((state) => ({
         backgroundTimelines: {
           ...state.backgroundTimelines,
-          [messageSessionId]: result.timeline,
+          [messageSessionId]: nextTimeline,
         },
         backgroundCursors: metadata.eventId
           ? {
@@ -238,10 +314,10 @@ export const receiveAgentAcp = async (
               [messageSessionId]: metadata.eventId,
             }
           : state.backgroundCursors,
-        backgroundContextUsage: result.contextUsage
+        backgroundContextUsage: reportedUsage
           ? {
               ...state.backgroundContextUsage,
-              [messageSessionId]: result.contextUsage,
+              [messageSessionId]: reportedUsage,
             }
           : state.backgroundContextUsage,
       }));
@@ -250,10 +326,25 @@ export const receiveAgentAcp = async (
 
     // 当前会话的 update：正常处理。
     const currentTimeline = startsFullReplay ? [] : get().timeline;
+    const stateBeforeUpdate = get();
+    const fallbackUsage =
+      stateBeforeUpdate.contextUsage ??
+      contextUsageForModel(
+        stateBeforeUpdate.availableModels,
+        stateBeforeUpdate.selectedModelId,
+      );
     const authoritativeSessionModeId = sessionModeIdFromUpdate(update);
     const result: SessionUpdateResult = skipUserEcho
       ? { timeline: currentTimeline }
       : applySessionUpdate(currentTimeline, update, metadata.eventId);
+    const reportedUsage =
+      result.contextUsage ??
+      contextUsageFromTotalTokens(metadata.totalTokens, fallbackUsage);
+    const hasReportedUsage =
+      result.contextUsage !== undefined || metadata.totalTokens !== undefined;
+    const nextTimeline = hasReportedUsage
+      ? stampLatestTurnContextUsage(result.timeline, reportedUsage)
+      : result.timeline;
     if (result.completed) {
       const pending = metadata.promptId
         ? [...pendingPrompts.entries()].find(
@@ -265,7 +356,7 @@ export const receiveAgentAcp = async (
       }
     }
     set((state) => ({
-      timeline: result.timeline,
+      timeline: nextTimeline,
       ...(metadata.eventId ? { acpCursor: metadata.eventId } : {}),
       ...(result.streaming ? { chatStatus: "streaming" as const } : {}),
       ...(result.completed
@@ -287,7 +378,7 @@ export const receiveAgentAcp = async (
             status: { ...state.status, message: result.error },
           }
         : {}),
-      ...(result.contextUsage ? { contextUsage: result.contextUsage } : {}),
+      ...(reportedUsage ? { contextUsage: reportedUsage } : {}),
       ...(authoritativeSessionModeId
         ? {
             selectedSessionModeId: authoritativeSessionModeId,

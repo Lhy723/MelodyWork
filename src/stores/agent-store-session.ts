@@ -1,5 +1,6 @@
 import { toUserMessage as reasonMessage } from "@/domain/app-error";
 import {
+  contextUsageFromTimeline,
   parseTimelineProjection,
   readTimelineProjection,
   TIMELINE_PROJECTION_VERSION,
@@ -60,19 +61,23 @@ export const beginAgentSession = async (
     (archivedProjection?.status ?? projectionRead.status) === "valid"
       ? projectionCursor
       : undefined;
+  const persistedContextUsage = contextUsageFromTimeline(restoredTimeline);
+  const state = get();
   if (!isTauriRuntime()) {
+    const displayTimeline =
+      localSessionId === "implement-acp-bridge" && restoredTimeline.length === 0
+        ? previewTimeline
+        : restoredTimeline;
     set({
       activeSessionId: localSessionId,
       localSessionId,
       cwd,
       acpSessionId,
       acpCursor: restoredCursor,
-      timeline:
-        localSessionId === "implement-acp-bridge" &&
-        restoredTimeline.length === 0
-          ? previewTimeline
-          : restoredTimeline,
-      contextUsage: undefined,
+      timeline: displayTimeline,
+      contextUsage:
+        contextUsageFromTimeline(displayTimeline) ??
+        contextUsageForModel(state.availableModels, state.selectedModelId),
       acpPhase: "initializing",
       chatStatus: "submitted",
     });
@@ -104,7 +109,6 @@ export const beginAgentSession = async (
     return;
   }
 
-  const state = get();
   if (
     state.localSessionId === localSessionId &&
     (state.acpPhase === "initializing" ||
@@ -146,9 +150,19 @@ export const beginAgentSession = async (
     restoredFromBuffer && acpSessionId
       ? backgroundCursors[acpSessionId]
       : restoredCursor;
-  const restoredContextUsage = acpSessionId
-    ? backgroundContextUsage[acpSessionId]
-    : undefined;
+  const restoredContextUsage =
+    contextUsageFromTimeline(finalTimeline) ??
+    (acpSessionId ? backgroundContextUsage[acpSessionId] : undefined) ??
+    persistedContextUsage;
+  // Older sessions persisted the conversation and cursor before tokenUsage
+  // was added to timeline entries. Replaying from the beginning once lets
+  // Melody Build's `_meta.totalTokens` backfill that durable usage metadata.
+  // Keep the cached timeline visible while the replay is in flight, but do
+  // not advertise the stale cursor as restorable if the app is interrupted.
+  const shouldRebuildContextUsage = Boolean(
+    acpSessionId && finalCursor && !restoredContextUsage,
+  );
+  const sessionLoadCursor = shouldRebuildContextUsage ? undefined : finalCursor;
   if (acpSessionId && restoredFromBuffer) {
     delete backgroundTimelines[acpSessionId];
     delete backgroundCursors[acpSessionId];
@@ -167,7 +181,7 @@ export const beginAgentSession = async (
     localSessionId,
     cwd,
     acpSessionId,
-    acpCursor: finalCursor,
+    acpCursor: sessionLoadCursor,
     timeline: finalTimeline,
     backgroundTimelines,
     backgroundCursors,
@@ -200,7 +214,7 @@ export const beginAgentSession = async (
         acpSessionId,
         state.selectedModelId,
         state.permissionMode,
-        finalCursor,
+        sessionLoadCursor,
       );
       armSetupTimeout(
         localSessionId,

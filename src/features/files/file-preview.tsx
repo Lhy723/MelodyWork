@@ -1,14 +1,14 @@
 import { RefreshCwIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MessageResponse } from "@/components/ai-elements/message";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import {
   readWorkspaceBinaryFile,
   readWorkspaceFile,
 } from "@/lib/melody-bridge";
-import { cn } from "@/lib/utils";
 
 import {
   BinaryPreview,
@@ -34,11 +34,11 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [rendered, setRendered] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
+  const requestId = useRef(0);
   const Icon = iconForKind(kind);
 
-  useEffect(() => {
-    let active = true;
+  const loadPreview = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(undefined);
     setContent(undefined);
@@ -46,29 +46,33 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
 
     if (kind === "legacy-office") {
       setLoading(false);
-      return () => {
-        active = false;
-      };
+      return;
     }
 
-    const request = binaryKind
-      ? readWorkspaceBinaryFile(root, path).then((value) => {
-          if (active) setBuffer(value);
-        })
-      : readWorkspaceFile(root, path).then((value) => {
-          if (active) setContent(value);
-        });
-    void request
-      .catch((reason) => {
-        if (active) setError(toUserMessage(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    try {
+      if (binaryKind) {
+        const nextBuffer = await readWorkspaceBinaryFile(root, path);
+        if (requestId.current === currentRequest) setBuffer(nextBuffer);
+      } else {
+        const nextContent = await readWorkspaceFile(root, path);
+        if (requestId.current === currentRequest) setContent(nextContent);
+      }
+    } catch (reason) {
+      if (requestId.current === currentRequest) {
+        setError(toUserMessage(reason));
+      }
+      throw reason;
+    } finally {
+      if (requestId.current === currentRequest) setLoading(false);
+    }
+  }, [binaryKind, kind, path, root]);
+
+  useEffect(() => {
+    void loadPreview().catch(() => undefined);
     return () => {
-      active = false;
+      requestId.current += 1;
     };
-  }, [binaryKind, kind, path, reloadKey, root]);
+  }, [loadPreview]);
 
   return (
     <section className="flex size-full min-h-0 flex-col bg-background">
@@ -98,15 +102,20 @@ export function FilePreview({ path, root }: { path: string; root: string }) {
             </Button>
           </div>
         ) : null}
-        <Button
+        <LoadingButton
           aria-label="重新加载文件"
           disabled={loading}
-          onClick={() => setReloadKey((value) => value + 1)}
-          size="icon-xs"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={loadPreview}
+          pendingLabel="加载中…"
+          size="xs"
+          successLabel="已加载"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          重新加载文件
+        </LoadingButton>
       </header>
       <div className="min-h-0 flex-1">
         {loading ? (

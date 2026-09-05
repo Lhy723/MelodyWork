@@ -8,12 +8,11 @@ import {
   PlanTitle,
   PlanTrigger,
 } from "@/components/ai-elements/plan";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { ShowMore } from "@/components/interior/show-more";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type {
-  AgentPlanDecision,
-  TimelineEntry,
-} from "@/domain/acp";
+import type { AgentPlanDecision, TimelineEntry } from "@/domain/acp";
 import {
   BanIcon,
   CheckIcon,
@@ -30,7 +29,7 @@ interface PlanTimelineEntryProps {
     entryId: string,
     outcome: AgentPlanDecision,
     feedback?: string,
-  ) => void;
+  ) => void | Promise<void>;
   renderedContent: ReactNode;
 }
 
@@ -58,7 +57,21 @@ export const PlanTimelineEntry = memo(function PlanTimelineEntry({
 }: PlanTimelineEntryProps) {
   const [editingFeedback, setEditingFeedback] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [pendingDecision, setPendingDecision] = useState<AgentPlanDecision>();
   const awaiting = entry.status === "awaiting-approval";
+
+  const submitDecision = async (
+    outcome: AgentPlanDecision,
+    nextFeedback?: string,
+  ) => {
+    if (pendingDecision) return;
+    setPendingDecision(outcome);
+    try {
+      await onDecision(entry.id, outcome, nextFeedback);
+    } finally {
+      setPendingDecision(undefined);
+    }
+  };
 
   return (
     <Plan
@@ -76,7 +89,16 @@ export const PlanTimelineEntry = memo(function PlanTimelineEntry({
         </PlanAction>
       </PlanHeader>
       <PlanContent className="border-t pt-4">
-        {renderedContent}
+        <ShowMore
+          defaultExpanded={entry.status === "streaming" || awaiting}
+          label="实施计划正文"
+          lessLabel="收起计划"
+          lines={8}
+          maxHeight={520}
+          moreLabel="显示完整计划"
+        >
+          {renderedContent}
+        </ShowMore>
       </PlanContent>
       {awaiting ? (
         <PlanFooter className="flex-col items-stretch gap-3">
@@ -100,28 +122,34 @@ export const PlanTimelineEntry = memo(function PlanTimelineEntry({
                 >
                   取消
                 </Button>
-                <Button
-                  disabled={!feedback.trim()}
-                  onClick={() =>
-                    onDecision(entry.id, "cancelled", feedback)
-                  }
+                <LoadingButton
+                  disabled={pendingDecision !== undefined || !feedback.trim()}
+                  errorLabel="重试"
+                  icon={<MessageSquareTextIcon />}
+                  onAction={() => submitDecision("cancelled", feedback)}
+                  pendingLabel="发送中…"
                   size="sm"
+                  successLabel="已发送"
                   variant="outline"
                 >
                   发送修改意见
-                </Button>
+                </LoadingButton>
               </div>
             </div>
           ) : (
             <div className="flex w-full flex-wrap justify-end gap-2">
-              <Button
-                onClick={() => onDecision(entry.id, "abandoned")}
+              <LoadingButton
+                disabled={pendingDecision !== undefined}
+                errorLabel="重试"
+                icon={<BanIcon />}
+                onAction={() => submitDecision("abandoned")}
+                pendingLabel="放弃中…"
                 size="sm"
+                successLabel="已放弃"
                 variant="ghost"
               >
-                <BanIcon />
                 放弃计划
-              </Button>
+              </LoadingButton>
               <Button
                 onClick={() => setEditingFeedback(true)}
                 size="sm"
@@ -130,13 +158,17 @@ export const PlanTimelineEntry = memo(function PlanTimelineEntry({
                 <MessageSquareTextIcon />
                 提出修改
               </Button>
-              <Button
-                onClick={() => onDecision(entry.id, "approved")}
+              <LoadingButton
+                disabled={pendingDecision !== undefined}
+                errorLabel="重试"
+                icon={<CheckIcon />}
+                onAction={() => submitDecision("approved")}
+                pendingLabel="启动中…"
                 size="sm"
+                successLabel="已开始"
               >
-                <CheckIcon />
                 开始实施
-              </Button>
+              </LoadingButton>
             </div>
           )}
         </PlanFooter>

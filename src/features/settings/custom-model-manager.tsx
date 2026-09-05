@@ -1,16 +1,11 @@
 import { BotIcon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 import { valueAt } from "./configuration-controls";
@@ -36,7 +31,13 @@ export function CustomModelManager({
   const entries = objectEntries(values, ["model"]);
   const currentDefault = valueAt(values, ["models", "default"]);
   const [editingModel, setEditingModel] = useState<string | null>();
+  const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string>();
+
+  const openModelEditor = (name?: string) => {
+    setEditingModel(name ?? null);
+    setModelEditorOpen(true);
+  };
 
   return (
     <div>
@@ -47,10 +48,10 @@ export function CustomModelManager({
             管理第三方提供商、自托管模型和模型专用参数。
           </p>
         </div>
-        <Button onClick={() => setEditingModel(null)} size="sm">
+        <PressDepthButton onClick={() => openModelEditor()} size="sm">
           <PlusIcon />
           添加模型
-        </Button>
+        </PressDepthButton>
       </div>
 
       {entries.length > 0 ? (
@@ -88,29 +89,30 @@ export function CustomModelManager({
                   </p>
                 </div>
                 {!isDefault ? (
-                  <Button
+                  <PressDepthButton
                     onClick={() => onChange(["models", "default"], name)}
                     size="sm"
                     variant="ghost"
                   >
                     设为默认
-                  </Button>
+                  </PressDepthButton>
                 ) : null}
-                <Button
-                  onClick={() => setEditingModel(name)}
+                <PressDepthButton
+                  onClick={() => openModelEditor(name)}
                   size="sm"
                   variant="outline"
                 >
                   编辑
-                </Button>
-                <Button
+                </PressDepthButton>
+                <PressDepthButton
                   aria-label={`删除 ${displayName}`}
+                  className="size-7 p-0"
                   onClick={() => setPendingDelete(name)}
-                  size="icon-sm"
-                  variant="ghost"
+                  size="sm"
+                  variant="destructive"
                 >
                   <Trash2Icon />
-                </Button>
+                </PressDepthButton>
               </div>
             );
           })}
@@ -137,40 +139,29 @@ export function CustomModelManager({
             editingModel ? valueAt(values, ["model", editingModel]) : undefined
           }
           onOpenChange={(open) => {
-            if (!open) {
-              setEditingModel(undefined);
-            }
+            setModelEditorOpen(open);
           }}
           onSave={(name, model) => onChange(["model", name], model)}
-          open
+          onExitComplete={() => {
+            setEditingModel(undefined);
+            setModelEditorOpen(false);
+          }}
+          open={modelEditorOpen}
         />
       ) : null}
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDelete(undefined);
-          }
-        }}
-        open={Boolean(pendingDelete)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除模型配置？</DialogTitle>
-            <DialogDescription>
-              这会从 Melody 配置中删除“{pendingDelete}
-              ”。该操作不会删除提供商上的模型。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+      <Modal
+        description={`这会从 Melody 配置中删除“${pendingDelete}”。该操作不会删除提供商上的模型。`}
+        footer={
+          <>
             <Button
               onClick={() => setPendingDelete(undefined)}
               variant="outline"
             >
               取消
             </Button>
-            <Button
-              onClick={() => {
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDelete) {
                   onChange(["model", pendingDelete], null);
                   if (currentDefault === pendingDelete) {
@@ -182,10 +173,13 @@ export function CustomModelManager({
               variant="destructive"
             >
               删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setPendingDelete(undefined)}
+        open={Boolean(pendingDelete)}
+        title="删除模型配置？"
+      />
     </div>
   );
 }

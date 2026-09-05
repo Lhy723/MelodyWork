@@ -1,12 +1,5 @@
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
 import {
   type ProjectDeleteResult,
@@ -40,100 +33,103 @@ export function SidebarDeleteDialogs({
   onDeleteSession,
   onDeleteProject,
 }: SidebarDeleteDialogsProps) {
+  const deleteProject = async () => {
+    if (!pendingDeleteProject || deletingProject) {
+      return;
+    }
+    const project = pendingDeleteProject;
+    onDeletingProjectChange(true);
+    onProjectDeleteErrorChange(undefined);
+    try {
+      const result = await onDeleteProject(project);
+      if (!result.deleted) {
+        const message = result.error ?? "删除项目失败，请重试。";
+        onProjectDeleteErrorChange(message);
+        throw new Error(message);
+      }
+      onPendingDeleteProjectChange(undefined);
+    } catch (reason) {
+      if (reason instanceof Error && reason.message) {
+        onProjectDeleteErrorChange(reason.message);
+      } else {
+        onProjectDeleteErrorChange("删除项目失败，请重试。");
+      }
+      throw reason;
+    } finally {
+      onDeletingProjectChange(false);
+    }
+  };
+
   return (
     <>
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            onPendingDeleteChange(undefined);
-          }
-        }}
-        open={Boolean(pendingDelete)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除任务？</DialogTitle>
-            <DialogDescription>
-              “{pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}
-              ”及其本地对话记录将被永久删除，工作区文件不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDelete ? localizedSessionTitle(pendingDelete.title) : ""}”及其本地对话记录将被永久删除，工作区文件不会受到影响。`}
+        footer={
+          <>
             <Button
-              onClick={() => {
+              onClick={() => onPendingDeleteChange(undefined)}
+              variant="outline"
+            >
+              取消
+            </Button>
+            <HoldToConfirm
+              onConfirm={() => {
                 if (pendingDelete) {
                   onDeleteSession(pendingDelete);
                   onPendingDeleteChange(undefined);
                 }
               }}
+              size="default"
               variant="destructive"
             >
               删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => onPendingDeleteChange(undefined)}
+        open={Boolean(pendingDelete)}
+        title="删除任务？"
+      />
 
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) {
-            onPendingDeleteProjectChange(undefined);
-            onDeletingProjectChange(false);
-            onProjectDeleteErrorChange(undefined);
-          }
-        }}
-        open={Boolean(pendingDeleteProject)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除项目？</DialogTitle>
-            <DialogDescription>
-              “{pendingDeleteProject?.name ?? ""}
-              ”及其本地任务记录将被永久删除，工作区文件不会受到影响。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">取消</Button>
-            </DialogClose>
+      <Modal
+        description={`“${pendingDeleteProject?.name ?? ""}”及其本地任务记录将被永久删除，工作区文件不会受到影响。`}
+        footer={
+          <>
             <Button
               disabled={deletingProject}
-              onClick={async () => {
-                if (!pendingDeleteProject || deletingProject) {
-                  return;
-                }
-                onDeletingProjectChange(true);
+              onClick={() => {
+                onPendingDeleteProjectChange(undefined);
+                onDeletingProjectChange(false);
                 onProjectDeleteErrorChange(undefined);
-                try {
-                  const result = await onDeleteProject(pendingDeleteProject);
-                  if (result.deleted) {
-                    onPendingDeleteProjectChange(undefined);
-                  } else {
-                    onProjectDeleteErrorChange(
-                      result.error ?? "删除项目失败，请重试。",
-                    );
-                  }
-                } catch {
-                  onProjectDeleteErrorChange("删除项目失败，请重试。");
-                } finally {
-                  onDeletingProjectChange(false);
-                }
               }}
+              variant="outline"
+            >
+              取消
+            </Button>
+            <HoldToConfirm
+              confirmLabel={deletingProject ? "删除中…" : "已删除"}
+              disabled={deletingProject}
+              onConfirm={deleteProject}
               variant="destructive"
             >
-              {deletingProject ? "删除中…" : "删除项目"}
-            </Button>
-          </DialogFooter>
-          {projectDeleteError ? (
-            <p className="text-destructive text-sm" role="alert">
-              {projectDeleteError}
-            </p>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+              删除项目
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => {
+          onPendingDeleteProjectChange(undefined);
+          onDeletingProjectChange(false);
+          onProjectDeleteErrorChange(undefined);
+        }}
+        open={Boolean(pendingDeleteProject)}
+        title="删除项目？"
+      >
+        {projectDeleteError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {projectDeleteError}
+          </p>
+        ) : null}
+      </Modal>
     </>
   );
 }

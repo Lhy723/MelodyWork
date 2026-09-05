@@ -21,6 +21,10 @@
     transform: translate(-50%, -50%) scale(0.95);
   }
 
+  .motion-drawer-content {
+    will-change: transform;
+  }
+
   .motion-popover {
     --motion-popover-x: 0px;
     --motion-popover-y: 0px;
@@ -72,6 +76,13 @@
   .motion-collapsible-content[data-state="closed"] {
     opacity: 0;
     transform: translateY(-6px) scale(0.99);
+  }
+
+  /* The sidebar owns its height/opacity motion with Motion; this class keeps
+   * the animated tree viewport clipped while it expands and collapses. */
+  .motion-tree-collapsible-content {
+    overflow: hidden;
+    transform-origin: top;
   }
 
   .motion-layer,
@@ -295,6 +306,53 @@
   }
 }
 
+/*
+ * Streaming Text Reveal intentionally uses a CSS animation for appended
+ * units. React can reconcile a stream several times in one frame; a mount-
+ * based animation keeps each newly inserted unit observable instead of
+ * relying on Motion to retarget a large, rapidly changing tree.
+ */
+.text-reveal-streaming-unit {
+  animation: motion-text-reveal-in 600ms var(--motion-ease-out) both;
+  animation-delay: var(--motion-text-reveal-delay, 0ms);
+}
+
+@keyframes motion-text-reveal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    filter: blur(0);
+  }
+}
+
+/* Streamdown's animation plugin supplies the per-block queue and timing;
+ * this keyframe keeps its renderer visually aligned with the Text Reveal
+ * component used elsewhere in the app. */
+@keyframes sd-text-reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    filter: blur(0);
+  }
+}
+
+/* Keep a long response from building an unbounded character queue. Streamdown
+ * still staggers each new unit, but anything past the first short wave starts
+ * within the same 220ms window so later paragraphs do not appear motionless. */
+.harness-chat-message [data-sd-animate] {
+  animation-delay: min(var(--sd-delay, 0ms), 220ms);
+}
+
 @keyframes motion-activity-complete {
   from {
     opacity: 0.45;
@@ -304,16 +362,6 @@
     opacity: 1;
     transform: scale(1) rotate(0deg);
   }
-}
-
-.reasoning-effort-track {
-  position: relative;
-  height: 1rem;
-  overflow: visible;
-  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
-  border-radius: 0.5rem;
-  background: color-mix(in oklab, var(--muted) 86%, var(--background));
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 5%);
 }
 
 .sidebar-shell {
@@ -381,185 +429,6 @@
   background-color: color-mix(in srgb, var(--foreground) 38%, transparent);
 }
 
-.settings-scope-switcher {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.settings-scope-button {
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  transition:
-    color var(--motion-duration-fast) var(--motion-ease-out),
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    box-shadow var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.settings-scope-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  color: var(--foreground);
-}
-
-.settings-scope-button[data-selected="true"] {
-  background: color-mix(in srgb, var(--foreground) 9%, transparent);
-  color: var(--foreground);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 8%),
-    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 5%, transparent);
-}
-
-.settings-scope-button[data-selected="true"]:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 12%, transparent);
-}
-
-.settings-scope-button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ring) 72%, transparent);
-  outline-offset: -1px;
-}
-
-.settings-scope-button:disabled {
-  cursor: not-allowed;
-}
-
-.reasoning-effort-fill,
-.reasoning-effort-grid,
-.reasoning-effort-pixels {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.reasoning-effort-fill {
-  opacity: 0;
-  background: linear-gradient(
-    90deg,
-    rgb(167 139 250 / 12%),
-    rgb(139 92 246 / 58%)
-  );
-  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.reasoning-effort-grid {
-  opacity: 0;
-  background-image:
-    linear-gradient(rgb(255 255 255 / 35%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 35%) 1px, transparent 1px);
-  background-size: 6px 6px;
-  mask-image: linear-gradient(90deg, transparent 5%, black 48%, black 100%);
-  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.reasoning-effort-pixels {
-  opacity: 0;
-  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.reasoning-effort-track.is-maximum .reasoning-effort-pixels {
-  opacity: 1;
-}
-
-.reasoning-effort-track.is-maximum .reasoning-effort-fill {
-  opacity: 1;
-}
-
-.reasoning-effort-track.is-maximum .reasoning-effort-grid {
-  opacity: 0.38;
-}
-
-.reasoning-effort-pixel {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 1px;
-  background: rgb(255 255 255 / 88%);
-  opacity: 0.08;
-  animation: reasoning-effort-pixel-flicker 2s steps(1, end) infinite;
-}
-
-.reasoning-effort-range {
-  position: absolute;
-  inset-block: 0;
-  inset-inline: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  margin: 0;
-  appearance: none;
-  cursor: pointer;
-  background: transparent;
-  outline: none;
-}
-
-.reasoning-effort-range:disabled {
-  cursor: not-allowed;
-}
-
-.reasoning-effort-range:focus-visible {
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-
-.reasoning-effort-range::-webkit-slider-runnable-track {
-  height: 100%;
-  background: transparent;
-}
-
-.reasoning-effort-range::-webkit-slider-thumb {
-  width: 1.625rem;
-  height: 1.625rem;
-  margin-top: -5px;
-  appearance: none;
-  border: 1px solid color-mix(in oklab, var(--border) 90%, black);
-  border-radius: 0.55rem;
-  background: var(--background);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
-}
-
-.reasoning-effort-range::-moz-range-track {
-  height: 100%;
-  background: transparent;
-}
-
-.reasoning-effort-range::-moz-range-thumb {
-  width: 1.625rem;
-  height: 1.625rem;
-  border: 1px solid color-mix(in oklab, var(--border) 90%, black);
-  border-radius: 0.55rem;
-  background: var(--background);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
-}
-
-@keyframes reasoning-effort-pixel-flicker {
-  0%,
-  100% {
-    opacity: 0.06;
-  }
-  16% {
-    opacity: 0.72;
-  }
-  21%,
-  58% {
-    opacity: 0.1;
-  }
-  64% {
-    opacity: 0.92;
-  }
-  70% {
-    opacity: 0.14;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -568,6 +437,7 @@
   }
 
   .motion-dialog-content,
+  .motion-drawer-content,
   .motion-popover,
   .motion-collapsible-content,
   .motion-layer,
@@ -619,15 +489,9 @@
   }
 
   .harness-stats-card-content,
-  .harness-stats-card-chevron,
-  .harness-stats-context-fill {
+  .harness-stats-card-chevron {
     animation: none !important;
     transition: none !important;
-  }
-
-  .reasoning-effort-pixel {
-    animation: none !important;
-    opacity: 0.18;
   }
 
   .sidebar-shell,

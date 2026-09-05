@@ -11,6 +11,7 @@ import {
   pageEnterTransition,
   pageExitTransition,
 } from "@/components/motion/page-transition";
+import { TextReveal } from "@/components/interior/text-reveal";
 import type { ResearchPaper } from "@/domain/research";
 import { cn } from "@/lib/utils";
 
@@ -62,19 +63,41 @@ export function ProjectContext({ projectName }: { projectName: string }) {
 export function EmptyWorkflow({
   actions,
   description,
+  reveal = false,
   steps,
   title,
 }: {
   actions: ReactNode;
   description: string;
+  reveal?: boolean;
   steps: Array<{ description: string; title: string }>;
   title: string;
 }) {
   return (
     <div className="w-full max-w-3xl border bg-muted/10 px-5 py-5 text-left">
-      <h2 className="research-serif font-semibold text-lg">{title}</h2>
+      <h2 className="research-serif font-semibold text-lg">
+        {reveal ? (
+          <TextReveal
+            by="character"
+            className="block"
+            maxDuration={0.95}
+            text={title}
+          />
+        ) : (
+          title
+        )}
+      </h2>
       <p className="mt-1 max-w-2xl text-muted-foreground text-xs leading-5">
-        {description}
+        {reveal ? (
+          <TextReveal
+            by="character"
+            className="block"
+            maxDuration={1.25}
+            text={description}
+          />
+        ) : (
+          description
+        )}
       </p>
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {steps.map((step, index) => (
@@ -113,7 +136,7 @@ export const SourceToggle = ({
 }) => (
   <label
     className={cn(
-      "flex min-h-6 items-center gap-1.5 text-xs",
+      "flex min-h-6 select-none items-center gap-1.5 text-xs",
       disabled
         ? "cursor-not-allowed text-muted-foreground/55"
         : "text-foreground",
@@ -181,7 +204,7 @@ export function ResultTable({
             )}
             key={paper.id}
           >
-            <label className="grid h-full min-h-16 min-w-6 place-items-center">
+            <label className="grid h-full min-h-16 min-w-6 select-none place-items-center">
               <input
                 aria-label={`选择论文：${paper.title}`}
                 checked={checked.has(paper.id)}
@@ -231,7 +254,7 @@ export function ResultTable({
       <div className="divide-y md:hidden">
         {papers.map((paper) => (
           <div className="flex items-start gap-3 px-4 py-4" key={paper.id}>
-            <label className="flex min-h-6 min-w-6 items-start justify-center pt-1">
+            <label className="flex min-h-6 min-w-6 select-none items-start justify-center pt-1">
               <input
                 aria-label={`选择论文：${paper.title}`}
                 checked={checked.has(paper.id)}

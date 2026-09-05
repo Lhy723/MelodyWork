@@ -2,13 +2,7 @@ import { MonitorIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dropdown } from "@/components/interior/dropdown";
 import { Switch } from "@/components/ui/switch";
 import type { AgentPermissionMode } from "@/domain/acp";
 import { getFileOpenerAvailability } from "@/lib/melody-bridge";
@@ -73,21 +67,13 @@ export function PreferenceSelect<Key extends keyof AppSettings>({
   const value = useAppSettingsStore((state) => state[settingKey]);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   return (
-    <Select
-      onValueChange={(next) => setSetting(settingKey, next as AppSettings[Key])}
+    <Dropdown
+      className="w-36"
+      items={options}
+      label={label}
+      onChange={(next) => setSetting(settingKey, next as AppSettings[Key])}
       value={String(value)}
-    >
-      <SelectTrigger aria-label={label} className="w-36">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    />
   );
 }
 
@@ -213,33 +199,19 @@ export function FileOpenerPreference() {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <Select
-        onValueChange={(next) =>
-          setSetting("defaultFileOpener", next as FileOpener)
-        }
+      <Dropdown
+        className="w-48"
+        items={visibleOptions.map((option) => ({
+          ...option,
+          icon: (
+            <FileOpenerIcon className="size-4 shrink-0" opener={option.value} />
+          ),
+        }))}
+        label="默认文件打开目标"
+        menuClassName="min-w-52"
+        onChange={(next) => setSetting("defaultFileOpener", next as FileOpener)}
         value={selectedValue}
-      >
-        <SelectTrigger aria-label="默认文件打开目标" className="w-48">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="min-w-52" matchTriggerWidth={false}>
-          {visibleOptions.map((option) => {
-            return (
-              <SelectItem key={option.value} value={option.value}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <FileOpenerIcon
-                    className="size-4 shrink-0"
-                    opener={option.value}
-                  />
-                  <span className="min-w-0 flex-1 truncate">
-                    {option.label}
-                  </span>
-                </span>
-              </SelectItem>
-            );
-          })}
-        </SelectContent>
-      </Select>
+      />
     </div>
   );
 }
@@ -273,23 +245,21 @@ export function PermissionModePreference() {
   const value = useAppSettingsStore((state) => state.defaultPermissionMode);
   const setSetting = useAppSettingsStore((state) => state.setSetting);
   return (
-    <Select
-      onValueChange={(next) => {
+    <Dropdown
+      className="w-44"
+      items={[
+        { label: "询问", value: "ask" },
+        { label: "自动审核", value: "auto" },
+        { label: "始终允许", value: "always-approve" },
+      ]}
+      label="默认及当前权限模式"
+      onChange={(next) => {
         const mode = next as AgentPermissionMode;
         setSetting("defaultPermissionMode", mode);
         void useAgentStore.getState().selectPermissionMode(mode);
       }}
       value={value}
-    >
-      <SelectTrigger aria-label="默认及当前权限模式" className="w-44">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="ask">询问</SelectItem>
-        <SelectItem value="auto">自动审核</SelectItem>
-        <SelectItem value="always-approve">始终允许</SelectItem>
-      </SelectContent>
-    </Select>
+    />
   );
 }
 
@@ -333,8 +303,15 @@ export function CompletionNotificationPreference() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   return (
     <div className="flex flex-col items-end gap-1">
-      <Select
-        onValueChange={(next) => {
+      <Dropdown
+        className="w-36"
+        items={[
+          { label: "仅应用失焦时", value: "unfocused" },
+          { label: "始终", value: "always" },
+          { label: "从不", value: "never" },
+        ]}
+        label="轮次完成通知"
+        onChange={(next) => {
           const mode = next as AppSettings["completionNotification"];
           if (mode === "never") {
             setPermissionDenied(false);
@@ -347,16 +324,7 @@ export function CompletionNotificationPreference() {
           });
         }}
         value={value}
-      >
-        <SelectTrigger aria-label="轮次完成通知" className="w-36">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="unfocused">仅应用失焦时</SelectItem>
-          <SelectItem value="always">始终</SelectItem>
-          <SelectItem value="never">从不</SelectItem>
-        </SelectContent>
-      </Select>
+      />
       {permissionDenied ? (
         <span className="text-destructive text-[11px]">系统未授予通知权限</span>
       ) : null}

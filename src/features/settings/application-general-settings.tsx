@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { PressDepthButton } from "@/components/interior/press-depth";
 import type { AppSettings } from "@/stores/app-settings-store";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 
@@ -85,19 +85,19 @@ export function ApplicationGeneralSettings() {
             ref={importInput}
             type="file"
           />
-          <Button
+          <PressDepthButton
             onClick={() => importInput.current?.click()}
             size="sm"
             variant="secondary"
           >
             导入
-          </Button>
+          </PressDepthButton>
         </PreferenceRow>
         <PreferenceRow
           description="查看 MelodyWork 使用的第三方开源依赖。"
           label="开源许可证"
         >
-          <Button
+          <PressDepthButton
             onClick={() =>
               setActionMessage(
                 "开源依赖信息可在 package.json 与 pnpm-lock.yaml 中查看。",
@@ -107,7 +107,7 @@ export function ApplicationGeneralSettings() {
             variant="secondary"
           >
             查看
-          </Button>
+          </PressDepthButton>
         </PreferenceRow>
       </PreferenceGroup>
 

@@ -4,10 +4,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use tauri::AppHandle;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use tokio::sync::oneshot;
-
 /// Renderer supplied paths are only accepted after the user has selected the
 /// directory through the native picker or the path has been restored from the
 /// trusted project database.  This registry is deliberately kept in Rust so a
@@ -91,35 +87,6 @@ impl WorkspaceRegistry {
     fn clear(&self) {
         self.roots.write().unwrap().clear();
         self.approved_config_paths.write().unwrap().clear();
-    }
-}
-
-/// Ask through the native dialog for operations that can mutate the user's
-/// files, execute a process, or install code.  A renderer call alone cannot
-/// silently grant these operations after an XSS compromise.
-pub async fn confirm_action(
-    app: &AppHandle,
-    title: impl Into<String>,
-    message: impl Into<String>,
-) -> Result<(), String> {
-    let (sender, receiver) = oneshot::channel();
-    app.dialog()
-        .message(message)
-        .title(title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "允许".to_string(),
-            "取消".to_string(),
-        ))
-        .show(move |confirmed| {
-            let _ = sender.send(confirmed);
-        });
-    match receiver
-        .await
-        .map_err(|_| "Native confirmation dialog was closed unexpectedly".to_string())?
-    {
-        true => Ok(()),
-        false => Err("Operation was not approved".to_string()),
     }
 }
 

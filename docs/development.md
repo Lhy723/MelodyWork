@@ -27,6 +27,7 @@ cargo install dotslash --locked
 | `pnpm tauri dev`                                  | Build or refresh the sidecar, then launch the desktop application.    |
 | `pnpm tauri:clean`                                | Remove the Rust build targets used by Tauri and the embedded sidecar. |
 | `pnpm check`                                      | Run the TypeScript type check.                                        |
+| `pnpm check:ui-font`                              | Check for UI font overrides that bypass the configured font preset.   |
 | `pnpm test:unit`                                  | Run frontend and domain unit tests.                                   |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests.                                                       |
 | `pnpm build`                                      | Produce a production frontend build.                                  |

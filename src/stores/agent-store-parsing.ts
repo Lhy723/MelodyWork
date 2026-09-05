@@ -8,7 +8,10 @@ import type {
   PermissionOption,
   TimelineEntry,
 } from "@/domain/acp";
-import { parseSessionContextUsage } from "@/domain/session-projection";
+import {
+  contextUsageFromTotalTokens,
+  parseSessionContextUsage,
+} from "@/domain/session-projection";
 
 export const objectValue = (
   value: unknown,
@@ -207,53 +210,70 @@ const reasoningEffortCopy: Record<
   low: { label: "低", description: "优先快速响应" },
 };
 
-export const modelOptions = (message: AcpEnvelope) => {
-  const state = objectValue(responseMeta(message)?.modelState);
-  const availableModels = Array.isArray(state?.availableModels)
-    ? state.availableModels.flatMap((value) => {
+const modelOptionsFromState = (state: Record<string, unknown> | undefined) => {
+  const rawAvailableModels = wireValue(
+    state,
+    "availableModels",
+    "available_models",
+  );
+  const availableModels = Array.isArray(rawAvailableModels)
+    ? rawAvailableModels.flatMap((value) => {
         const model = objectValue(value);
-        const id = stringValue(model?.modelId);
+        const id = stringValue(wireValue(model, "modelId", "model_id"));
         if (!id) {
           return [];
         }
         const meta = objectValue(model?._meta) ?? objectValue(model?.meta);
         const supportsReasoningEffort =
-          booleanValue(meta?.supportsReasoningEffort) ?? false;
-        const configuredOptions = Array.isArray(meta?.reasoningEfforts)
-          ? meta.reasoningEfforts.flatMap(
-              (raw): AgentReasoningEffortOption[] => {
-                if (typeof raw === "string") {
-                  const localized = reasoningEffortCopy[raw];
-                  return [
-                    {
-                      id: raw,
-                      value: raw,
-                      label: localized?.label ?? raw,
-                      description: localized?.description,
-                    },
-                  ];
-                }
-                const option = objectValue(raw);
-                const optionValue = stringValue(option?.value);
-                if (!optionValue) {
-                  return [];
-                }
-                const localized = reasoningEffortCopy[optionValue];
+          booleanValue(
+            wireValue(
+              meta,
+              "supportsReasoningEffort",
+              "supports_reasoning_effort",
+            ),
+          ) ?? false;
+        const rawReasoningEfforts = wireValue(
+          meta,
+          "reasoningEfforts",
+          "reasoning_efforts",
+        );
+        const configuredOptions = Array.isArray(rawReasoningEfforts)
+          ? rawReasoningEfforts.flatMap((raw): AgentReasoningEffortOption[] => {
+              if (typeof raw === "string") {
+                const localized = reasoningEffortCopy[raw];
                 return [
                   {
-                    id: stringValue(option?.id) ?? optionValue,
-                    value: optionValue,
-                    label:
-                      localized?.label ??
-                      stringValue(option?.label) ??
-                      optionValue,
-                    description:
-                      localized?.description ??
-                      stringValue(option?.description),
+                    id: raw,
+                    value: raw,
+                    label: localized?.label ?? raw,
+                    description: localized?.description,
                   },
                 ];
-              },
-            )
+              }
+              const option = objectValue(raw);
+              const optionValue = stringValue(
+                wireValue(option, "value", "value"),
+              );
+              if (!optionValue) {
+                return [];
+              }
+              const localized = reasoningEffortCopy[optionValue];
+              return [
+                {
+                  id: stringValue(wireValue(option, "id", "id")) ?? optionValue,
+                  value: optionValue,
+                  label:
+                    localized?.label ??
+                    stringValue(wireValue(option, "label", "label")) ??
+                    optionValue,
+                  description:
+                    localized?.description ??
+                    stringValue(
+                      wireValue(option, "description", "description"),
+                    ),
+                },
+              ];
+            })
           : [];
         const reasoningEfforts =
           supportsReasoningEffort && configuredOptions.length === 0
@@ -268,14 +288,20 @@ export const modelOptions = (message: AcpEnvelope) => {
           {
             id,
             name: stringValue(model?.name) ?? id,
-            contextWindowTokens: numberValue(meta?.totalContextTokens),
-            reasoningEffort: stringValue(meta?.reasoningEffort),
+            contextWindowTokens: numberValue(
+              wireValue(meta, "totalContextTokens", "total_context_tokens"),
+            ),
+            reasoningEffort: stringValue(
+              wireValue(meta, "reasoningEffort", "reasoning_effort"),
+            ),
             reasoningEfforts,
           },
         ];
       })
     : [];
-  const selectedModelId = stringValue(state?.currentModelId);
+  const selectedModelId = stringValue(
+    wireValue(state, "currentModelId", "current_model_id"),
+  );
   const selectedModel = availableModels.find(
     (model) => model.id === selectedModelId,
   );
@@ -284,6 +310,40 @@ export const modelOptions = (message: AcpEnvelope) => {
     selectedModelId,
     selectedReasoningEffort: selectedModel?.reasoningEffort,
   };
+};
+
+export const modelOptions = (message: AcpEnvelope) =>
+  modelOptionsFromState(objectValue(responseMeta(message)?.modelState));
+
+const normalizedExtensionMethod = (method: unknown) =>
+  stringValue(method)?.replace(/^_+/, "");
+
+const hasModelStateShape = (value: Record<string, unknown>) =>
+  Array.isArray(wireValue(value, "availableModels", "available_models")) ||
+  value.currentModelId !== undefined ||
+  value.current_model_id !== undefined;
+
+/**
+ * Model catalog updates are machine-wide ACP extension notifications. Depending
+ * on the gateway version they may be sent directly, `_`-prefixed, or wrapped
+ * with a nested `params.method`/`params.params` pair. Normalize all forms here
+ * so a settings change updates the picker without requiring a reconnect.
+ */
+export const modelOptionsFromUpdate = (message: AcpEnvelope) => {
+  let params = objectValue(message.params);
+  let isModelUpdate =
+    normalizedExtensionMethod(message.method) === "x.ai/models/update";
+
+  for (let depth = 0; params && depth < 5; depth += 1) {
+    if (normalizedExtensionMethod(params.method) === "x.ai/models/update") {
+      isModelUpdate = true;
+    }
+    if (isModelUpdate && hasModelStateShape(params)) {
+      return modelOptionsFromState(params);
+    }
+    params = objectValue(params.params);
+  }
+  return undefined;
 };
 
 export const contextUsageFromResult = (
@@ -295,7 +355,7 @@ export const contextUsageFromResult = (
     return directUsage;
   }
 
-  const meta = objectValue(result?._meta);
+  const meta = objectValue(result?._meta) ?? objectValue(result?.meta);
   const metadataUsage = parseSessionContextUsage(
     objectValue(meta?.["x.ai/contextUsage"]),
   );
@@ -303,15 +363,10 @@ export const contextUsageFromResult = (
     return metadataUsage;
   }
 
-  const usedTokens = numberValue(meta?.totalTokens);
-  if (fallback && usedTokens !== undefined && usedTokens >= 0) {
-    return {
-      ...fallback,
-      usedTokens,
-    };
-  }
-
-  return undefined;
+  return contextUsageFromTotalTokens(
+    numberValue(meta?.totalTokens ?? meta?.total_tokens),
+    fallback,
+  );
 };
 
 export const contextUsageForModel = (
@@ -388,7 +443,8 @@ export const directSessionUpdate = (
   if (objectValue(params.update)) {
     return objectValue(params.update);
   }
-  return params.sessionUpdate !== undefined || params.session_update !== undefined
+  return params.sessionUpdate !== undefined ||
+    params.session_update !== undefined
     ? params
     : undefined;
 };

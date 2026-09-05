@@ -9,12 +9,15 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { FloatingLabelInput } from "@/components/interior/floating-label";
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
+import { Modal } from "@/components/interior/modal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
 import { RequestGate } from "@/domain/request-gate";
-import { cn } from "@/lib/utils";
 
 import { searchResearchPapers } from "./research-api";
 import type { ResearchMainKind } from "./research-main-workspace";
@@ -66,28 +69,18 @@ export function TrackingWorkspace({
             </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-[1fr_1.45fr_auto] lg:items-end">
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">主题名称</span>
-              <Input
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="例如：多模态 RAG 可复现性"
-                value={title}
-              />
-              <span className="text-muted-foreground text-[10px] leading-4">
-                这是侧栏和主题列表里显示的标题，方便你识别方向。
-              </span>
-            </label>
-            <label className="grid gap-1.5">
-              <span className="font-medium text-xs">检索词</span>
-              <Input
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="例如：multimodal RAG evaluation reproducibility benchmark"
-                value={query}
-              />
-              <span className="text-muted-foreground text-[10px] leading-4">
-                刷新时会把这段关键词发送给已启用的数据源。
-              </span>
-            </label>
+            <FloatingLabelInput
+              hint="侧栏和主题列表中显示的标题"
+              label="主题名称"
+              onChange={(value) => setTitle(value)}
+              value={title}
+            />
+            <FloatingLabelInput
+              hint="刷新时发送给已启用的数据源"
+              label="检索词"
+              onChange={(value) => setQuery(value)}
+              value={query}
+            />
             <Button
               disabled={!title.trim() || !query.trim()}
               onClick={() => {
@@ -169,6 +162,7 @@ export function TrackingWorkspace({
                   </>
                 }
                 description="主题名称只是你在项目里看到的标题；检索词才会在刷新时发送给 Crossref、arXiv、PubMed 等学术索引。创建后会在独立详情页查看进展。"
+                reveal
                 steps={[
                   {
                     title: "命名方向",
@@ -201,6 +195,7 @@ export function TrackingDetailWorkspace({
   projectName: string;
   topicId: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const topic = useResearchStore((state) =>
     state.trackingTopics.find((item) => item.id === topicId),
   );
@@ -214,6 +209,7 @@ export function TrackingDetailWorkspace({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const refreshGateRef = useRef(new RequestGate());
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const topicPapers =
     topic?.paperIds?.flatMap((id) => {
       const paper = papers.find((item) => item.id === id);
@@ -225,13 +221,54 @@ export function TrackingDetailWorkspace({
     const requestToken = refreshGateRef.current.begin();
     setRefreshing(true);
     setError(undefined);
+    liveActivity.start({
+      detail: `正在刷新“${topic.title}”…`,
+      progress: 0,
+      title: "刷新科研追踪",
+    });
     try {
-      const result = await searchResearchPapers(topic.query);
+      const result = await searchResearchPapers(
+        topic.query,
+        undefined,
+        (progress) => {
+          if (!refreshGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "刷新科研追踪",
+          });
+        },
+      );
       if (!refreshGateRef.current.isCurrent(requestToken)) return;
       refreshTrackingTopic(topic.id, result.papers);
+      liveActivity.succeed({
+        detail: `已更新 ${result.papers.length} 条结果${
+          result.warnings.length
+            ? `，${result.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "科研追踪已刷新",
+      });
     } catch (reason) {
       if (!refreshGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
+      liveActivity.fail(
+        { detail: message, title: "科研追踪刷新失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void refresh().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       if (refreshGateRef.current.isCurrent(requestToken)) {
         setRefreshing(false);
@@ -282,20 +319,20 @@ export function TrackingDetailWorkspace({
             <ProjectContext projectName={projectName} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button
+            <LoadingButton
               disabled={refreshing}
-              onClick={() => void refresh()}
+              errorLabel="重试"
+              icon={<RefreshCwIcon />}
+              onAction={refresh}
+              pendingLabel="正在刷新…"
               size="sm"
+              successLabel="已刷新"
             >
-              <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
-              {refreshing ? "正在刷新…" : "刷新进展"}
-            </Button>
+              刷新进展
+            </LoadingButton>
             <Button
               aria-label="删除追踪主题"
-              onClick={() => {
-                removeTrackingTopic(topic.id);
-                onBack();
-              }}
+              onClick={() => setDeleteOpen(true)}
               size="icon-sm"
               variant="ghost"
             >
@@ -348,6 +385,30 @@ export function TrackingDetailWorkspace({
           </div>
         </div>
       </main>
+
+      <Modal
+        description={`“${topic.title}”及其关联的追踪关系将从当前项目中移除，已导入文献不会被删除。`}
+        footer={
+          <>
+            <Button onClick={() => setDeleteOpen(false)} variant="outline">
+              取消
+            </Button>
+            <HoldToConfirm
+              onConfirm={() => {
+                removeTrackingTopic(topic.id);
+                setDeleteOpen(false);
+                onBack();
+              }}
+              variant="destructive"
+            >
+              删除主题
+            </HoldToConfirm>
+          </>
+        }
+        onClose={() => setDeleteOpen(false)}
+        open={deleteOpen}
+        title="删除追踪主题？"
+      />
     </div>
   );
 }

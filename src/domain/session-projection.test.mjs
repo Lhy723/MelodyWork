@@ -3,12 +3,15 @@ import test from "node:test";
 
 import {
   applySessionUpdate,
+  contextUsageFromTimeline,
+  contextUsageFromTotalTokens,
   isPromptCompleteMethod,
   isSessionUpdateMethod,
   parseTimelineProjection,
   readTimelineProjection,
   projectPermissionRequest,
   SessionEventDeduplicator,
+  stampLatestTurnContextUsage,
   TIMELINE_PROJECTION_VERSION,
   notificationMetadata,
   timelineProjectionVersion,
@@ -158,6 +161,80 @@ test("reads the Melody Build replay and cursor metadata", () => {
     }),
     { eventId: "session-9", isReplay: true, promptId: "p-9" },
   );
+  assert.deepEqual(
+    notificationMetadata({
+      _meta: { eventId: "session-10", totalTokens: 42 },
+    }),
+    { eventId: "session-10", isReplay: false, totalTokens: 42 },
+  );
+});
+
+test("restores context usage from persisted turn metadata", () => {
+  const timeline = [
+    { id: "user-1", kind: "message", role: "user", content: "first" },
+    {
+      id: "assistant-1",
+      kind: "message",
+      role: "assistant",
+      content: "done",
+      tokenUsage: { usedTokens: 120, maxTokens: 1_000 },
+    },
+  ];
+  assert.deepEqual(contextUsageFromTimeline(timeline), {
+    usedTokens: 120,
+    maxTokens: 1_000,
+  });
+  assert.deepEqual(
+    contextUsageFromTotalTokens(240, { usedTokens: 0, maxTokens: 1_000 }),
+    { usedTokens: 240, maxTokens: 1_000 },
+  );
+  assert.equal(
+    contextUsageFromTotalTokens(240, { usedTokens: 0, maxTokens: 0 }),
+    undefined,
+  );
+});
+
+test("stamps the latest completed assistant turn with context usage", () => {
+  const timeline = [
+    { id: "user-1", kind: "message", role: "user", content: "go" },
+    {
+      id: "assistant-1",
+      kind: "message",
+      role: "assistant",
+      content: "done",
+    },
+  ];
+  assert.deepEqual(
+    stampLatestTurnContextUsage(timeline, {
+      usedTokens: 120,
+      maxTokens: 1_000,
+    }),
+    [
+      timeline[0],
+      {
+        ...timeline[1],
+        tokenUsage: { usedTokens: 120, maxTokens: 1_000 },
+      },
+    ],
+  );
+});
+
+test("keeps context usage when a turn has no assistant message yet", () => {
+  const timeline = [
+    { id: "user-1", kind: "message", role: "user", content: "go" },
+  ];
+  const stamped = stampLatestTurnContextUsage(timeline, {
+    usedTokens: 64,
+    maxTokens: 1_000,
+  });
+  assert.deepEqual(contextUsageFromTimeline(stamped), {
+    usedTokens: 64,
+    maxTokens: 1_000,
+  });
+  assert.deepEqual(stamped[0].tokenUsage, {
+    usedTokens: 64,
+    maxTokens: 1_000,
+  });
 });
 
 test("preserves the prompt id used to ignore late cancelled events", () => {
@@ -250,6 +327,36 @@ test("settles an assistant stream when thought projection starts", () => {
     },
     { kind: "thought", content: "checking", streaming: true },
   );
+});
+
+test("keeps assistant message keys unique when a stream resumes after activity", () => {
+  const first = applySessionUpdate(
+    [],
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { text: "first" },
+    },
+    "message-1",
+  );
+  const withThought = applySessionUpdate(
+    first.timeline,
+    {
+      sessionUpdate: "agent_thought_chunk",
+      content: { text: "checking" },
+    },
+    "thought-1",
+  );
+  const resumed = applySessionUpdate(
+    withThought.timeline,
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { text: "second" },
+    },
+    "message-2",
+  );
+
+  assert.equal(resumed.timeline.at(-1).id, "assistant-message-2");
+  assert.notEqual(resumed.timeline[0].id, resumed.timeline.at(-1).id);
 });
 
 test("normalizes user chunks and honors projection metadata", () => {

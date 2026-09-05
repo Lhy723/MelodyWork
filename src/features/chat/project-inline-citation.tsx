@@ -1,8 +1,6 @@
+import { Popover } from "@/components/interior/popover";
 import {
   InlineCitation,
-  InlineCitationCard,
-  InlineCitationCardBody,
-  InlineCitationCardTrigger,
   InlineCitationSource,
   InlineCitationText,
 } from "@/components/ai-elements/inline-citation";
@@ -83,25 +81,29 @@ export function ProjectInlineCitation({
           </code>
         </button>
       </InlineCitationText>
-      <InlineCitationCard>
-        <InlineCitationCardTrigger
-          aria-label={`查看项目${reference.kind === "folder" ? "文件夹" : "文件"} ${reference.displayPath}`}
-          className="ml-0.5 gap-1 px-1.5"
-          label={referenceLabel(reference)}
-          sources={[]}
+      <Popover
+        align="start"
+        className="w-96 p-4"
+        label={`项目${reference.kind === "folder" ? "文件夹" : "文件"}：${reference.displayPath}`}
+        side="top"
+        trigger={
+          <span className="inline-flex items-center gap-1">
+            {referenceLabel(reference)}
+          </span>
+        }
+        triggerAriaLabel={`查看项目${reference.kind === "folder" ? "文件夹" : "文件"} ${reference.displayPath}`}
+        triggerClassName="ml-0.5 h-auto min-w-0 rounded-full border-0 bg-secondary px-1.5 py-0.5 text-xs shadow-none hover:bg-accent active:translate-y-0"
+      >
+        <InlineCitationSource
+          description={
+            reference.kind === "folder"
+              ? "当前项目中的文件夹"
+              : "当前项目中的文件"
+          }
+          title={reference.displayPath}
+          url={reference.absolutePath}
         />
-        <InlineCitationCardBody className="w-96 p-4">
-          <InlineCitationSource
-            description={
-              reference.kind === "folder"
-                ? "当前项目中的文件夹"
-                : "当前项目中的文件"
-            }
-            title={reference.displayPath}
-            url={reference.absolutePath}
-          />
-        </InlineCitationCardBody>
-      </InlineCitationCard>
+      </Popover>
     </InlineCitation>
   );
 }

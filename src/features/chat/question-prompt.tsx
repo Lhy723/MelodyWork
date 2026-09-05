@@ -6,7 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { RippleLayer, useRipple } from "@/components/interior/ripple";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { AgentQuestion, AgentQuestionResponse } from "@/domain/acp";
@@ -15,7 +16,6 @@ import { cn } from "@/lib/utils";
 import {
   CheckIcon,
   CircleHelpIcon,
-  LoaderCircleIcon,
   MessageCircleIcon,
   SkipForwardIcon,
   XIcon,
@@ -126,41 +126,56 @@ const QuestionOption = ({
   disabled: boolean;
   selected: boolean;
   onClick: () => void;
-}) => (
-  <button
-    aria-pressed={selected}
-    className={cn(
-      "flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-      "hover:border-primary/50 hover:bg-muted/60",
-      selected
-        ? "border-primary bg-primary/8 text-foreground ring-1 ring-primary/25"
-        : "border-border/80 bg-background",
-      disabled &&
-        "cursor-default opacity-70 hover:border-border/80 hover:bg-background",
-    )}
-    disabled={disabled}
-    onClick={onClick}
-    type="button"
-  >
-    <span
-      aria-hidden="true"
+}) => {
+  const { bindings, fadeDuration, ripples } = useRipple({
+    disabled,
+    max: 2,
+  });
+
+  return (
+    <button
+      aria-pressed={selected}
       className={cn(
-        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border text-primary",
-        selected && "border-primary bg-primary text-primary-foreground",
+        "relative isolate w-full overflow-hidden rounded-lg border text-left transition-colors",
+        "hover:border-primary/50 hover:bg-muted/60",
+        selected
+          ? "border-primary bg-primary/8 text-foreground ring-1 ring-primary/25"
+          : "border-border/80 bg-background",
+        disabled &&
+          "cursor-default opacity-70 hover:border-border/80 hover:bg-background",
       )}
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        WebkitTapHighlightColor: "transparent",
+        touchAction: "manipulation",
+      }}
+      type="button"
+      {...bindings}
     >
-      {selected ? <CheckIcon className="size-3" /> : null}
-    </span>
-    <span className="min-w-0">
-      <span className="block font-medium">{label}</span>
-      {description ? (
-        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-          {description}
+      <RippleLayer fadeDuration={fadeDuration} ripples={ripples} />
+      <span className="relative z-10 flex w-full items-start gap-3 px-3 py-2.5">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border text-primary",
+            selected && "border-primary bg-primary text-primary-foreground",
+          )}
+        >
+          {selected ? <CheckIcon className="size-3" /> : null}
         </span>
-      ) : null}
-    </span>
-  </button>
-);
+        <span className="min-w-0">
+          <span className="block font-medium">{label}</span>
+          {description ? (
+            <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+              {description}
+            </span>
+          ) : null}
+        </span>
+      </span>
+    </button>
+  );
+};
 
 export function QuestionPrompt({ entry, onResolve }: QuestionPromptProps) {
   const request = entry.question;
@@ -226,9 +241,10 @@ export function QuestionPrompt({ entry, onResolve }: QuestionPromptProps) {
     setError(undefined);
     try {
       await onResolve(entry.id, response);
-    } catch {
-      setSubmitting(false);
+    } catch (reason) {
       setError("回答发送失败，请稍后重试。");
+      setSubmitting(false);
+      throw reason;
     }
   };
 
@@ -239,7 +255,7 @@ export function QuestionPrompt({ entry, onResolve }: QuestionPromptProps) {
       answers,
       notes,
     );
-    void submit({
+    return submit({
       outcome: "accepted",
       answers: nextAnswers,
       ...(annotations ? { annotations } : {}),
@@ -247,13 +263,13 @@ export function QuestionPrompt({ entry, onResolve }: QuestionPromptProps) {
   };
 
   const discuss = () =>
-    void submit({
+    submit({
       outcome: "chat_about_this",
       partialAnswers: partialAnswers(request.questions, answers),
     });
 
   const skip = () =>
-    void submit({
+    submit({
       outcome: "skip_interview",
       partialAnswers: partialAnswers(request.questions, answers),
     });
@@ -369,55 +385,55 @@ export function QuestionPrompt({ entry, onResolve }: QuestionPromptProps) {
         <CardFooter className="flex flex-wrap justify-end gap-2">
           {isPlan ? (
             <>
-              <Button
+              <LoadingButton
                 disabled={submitting}
-                onClick={discuss}
+                errorLabel="重试"
+                icon={<MessageCircleIcon />}
+                onAction={discuss}
+                pendingLabel="发送中…"
                 size="sm"
-                type="button"
+                successLabel="已发送"
                 variant="ghost"
               >
-                {submitting ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : (
-                  <MessageCircleIcon />
-                )}
                 继续讨论
-              </Button>
-              <Button
+              </LoadingButton>
+              <LoadingButton
                 disabled={submitting}
-                onClick={skip}
+                errorLabel="重试"
+                icon={<SkipForwardIcon />}
+                onAction={skip}
+                pendingLabel="发送中…"
                 size="sm"
-                type="button"
+                successLabel="已跳过"
                 variant="ghost"
               >
-                <SkipForwardIcon />
                 跳过
-              </Button>
+              </LoadingButton>
             </>
           ) : null}
-          <Button
+          <LoadingButton
             disabled={submitting}
-            onClick={() => void submit({ outcome: "cancelled" })}
+            errorLabel="重试"
+            icon={<XIcon />}
+            onAction={() => submit({ outcome: "cancelled" })}
+            pendingLabel="取消中…"
             size="sm"
-            type="button"
+            successLabel="已取消"
             variant="ghost"
           >
-            <XIcon />
             取消
-          </Button>
-          <Button
+          </LoadingButton>
+          <LoadingButton
             disabled={submitting}
-            onClick={accept}
+            errorLabel="重试"
+            icon={<CheckIcon />}
+            onAction={accept}
+            pendingLabel="提交中…"
             size="sm"
-            type="button"
+            successLabel="已提交"
           >
-            {submitting ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <CheckIcon />
-            )}
             {selectedCount > 0 ? "提交回答" : "继续"}
-          </Button>
+          </LoadingButton>
         </CardFooter>
       ) : (
         <CardFooter className="justify-end py-2.5 text-xs text-muted-foreground">

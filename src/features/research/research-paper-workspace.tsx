@@ -5,13 +5,15 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   FileTextIcon,
-  LoaderCircleIcon,
   MessageCircleQuestionIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useState } from "react";
 
+import { CopyButton } from "@/components/interior/copy-button";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type { ResearchPaper } from "@/domain/research";
@@ -37,6 +39,7 @@ export function PaperDetailWorkspace({
   onBack: () => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const stored = useResearchStore((state) =>
     state.papers.find((item) => item.id === initialPaper.id),
   );
@@ -52,47 +55,38 @@ export function PaperDetailWorkspace({
     state.enabledToolIds.includes("verify-citation"),
   );
   const [showPdf, setShowPdf] = useState(false);
-  const [bibtexCopied, setBibtexCopied] = useState(false);
   const [verificationBusy, setVerificationBusy] = useState(false);
   const [verificationMessage, setVerificationMessage] = useState<string>();
-
-  const copyBibtex = async () => {
-    if (!bibtexEnabled) return;
-    const value = formatResearchBibtex(paper);
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = value;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        textarea.remove();
-      }
-      setBibtexCopied(true);
-      window.setTimeout(() => setBibtexCopied(false), 1800);
-    } catch {
-      setBibtexCopied(false);
-    }
-  };
 
   const verifyCitation = async () => {
     if (!citationAuditEnabled || !paper.doi) return;
     setVerificationBusy(true);
     setVerificationMessage(undefined);
+    liveActivity.start({
+      detail: "正在从 Crossref 和 OpenAlex 获取元数据…",
+      title: "核验论文引用",
+    });
     try {
       const verified = await verifyResearchPaper(paper);
       addPapers([verified]);
-      setVerificationMessage(
-        verified.verified
-          ? `已匹配 ${verified.sources.join("、")}`
-          : "已返回单一来源元数据，请打开原文核对。",
-      );
+      const message = verified.verified
+        ? `已匹配 ${verified.sources.join("、")}`
+        : "已返回单一来源元数据，请打开原文核对。";
+      setVerificationMessage(message);
+      liveActivity.succeed({ detail: message, title: "论文引用核验完成" });
     } catch (reason) {
-      setVerificationMessage(toUserMessage(reason, "验证失败，请稍后重试。"));
+      const message = toUserMessage(reason, "验证失败，请稍后重试。");
+      setVerificationMessage(message);
+      liveActivity.fail(
+        { detail: message, title: "论文引用核验失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void verifyCitation().catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       setVerificationBusy(false);
     }
@@ -178,29 +172,29 @@ export function PaperDetailWorkspace({
               打开原文
             </Button>
             {bibtexEnabled ? (
-              <Button
-                onClick={() => void copyBibtex()}
-                size="sm"
-                variant="outline"
+              <CopyButton
+                className="h-7 rounded-lg border-input bg-background px-2.5 text-[0.8rem] dark:border-input dark:bg-input/30"
+                copiedLabel="BibTeX 已复制"
+                errorLabel="复制失败"
+                label="复制 BibTeX"
+                value={() => formatResearchBibtex(paper)}
               >
                 <FileTextIcon />
-                {bibtexCopied ? "BibTeX 已复制" : "复制 BibTeX"}
-              </Button>
+              </CopyButton>
             ) : null}
             {citationAuditEnabled && paper.doi ? (
-              <Button
+              <LoadingButton
                 disabled={verificationBusy}
-                onClick={() => void verifyCitation()}
+                errorLabel="重试"
+                icon={<RefreshCwIcon />}
+                onAction={verifyCitation}
+                pendingLabel="核验中…"
                 size="sm"
+                successLabel="已核验"
                 variant="outline"
               >
-                {verificationBusy ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : (
-                  <RefreshCwIcon />
-                )}
-                {verificationBusy ? "核验中…" : "重新核验"}
-              </Button>
+                重新核验
+              </LoadingButton>
             ) : null}
             {onAskPaper ? (
               <Button

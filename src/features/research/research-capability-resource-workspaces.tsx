@@ -136,6 +136,7 @@ export function KnowledgeWorkspace({
                   </>
                 }
                 description="这里不会自动塞入无法追溯的示例论文。先检索真实来源，再用“保存为知识资产”收藏论文，摘要与来源记录会保留在当前项目。"
+                reveal
                 steps={[
                   {
                     title: "提出问题",

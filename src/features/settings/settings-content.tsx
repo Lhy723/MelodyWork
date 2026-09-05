@@ -35,8 +35,8 @@ interface SettingsContentProps {
   kindExtensions: MelodyExtension[];
   loading: boolean;
   onChangeConfig: (path: string[], value: MelodyConfigValue) => void;
-  onRefreshExtensions: () => void;
-  onRefreshRules: () => void;
+  onRefreshExtensions: () => Promise<void>;
+  onRefreshRules: () => Promise<void>;
   onReloadConfig: () => void;
   onRemoveRule: (id: string) => void | Promise<void>;
   onSelectedPluginChange: (extension?: MelodyExtension) => void;

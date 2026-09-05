@@ -103,9 +103,23 @@ const toolOutput = (tool: JsonObject): string => {
   return contentText || stringifyValue(tool.rawOutput);
 };
 
+const uniqueTimelineId = (timeline: TimelineEntry[], base: string) => {
+  if (!timeline.some((entry) => entry.id === base)) {
+    return base;
+  }
+  let suffix = 2;
+  let candidate = `${base}-${suffix}`;
+  while (timeline.some((entry) => entry.id === candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+  return candidate;
+};
+
 const appendAgentChunk = (
   timeline: TimelineEntry[],
   text: string,
+  eventId?: string,
 ): TimelineEntry[] => {
   const now = Date.now();
   const last = timeline.at(-1);
@@ -115,6 +129,10 @@ const appendAgentChunk = (
       { ...last, content: `${last.content}${text}` },
     ];
   }
+  const messageId = uniqueTimelineId(
+    timeline,
+    eventId ? `assistant-${eventId}` : `assistant-${now}`,
+  );
   const settledTimeline = timeline.map((entry) =>
     entry.kind === "thought" && entry.streaming
       ? { ...entry, completedAt: entry.completedAt ?? now, streaming: false }
@@ -123,7 +141,11 @@ const appendAgentChunk = (
   return [
     ...settledTimeline,
     {
-      id: `assistant-${now}`,
+      // ACP event ids are stable and unique within a session. Use them for
+      // the React key whenever a stream has to split around a tool/thought
+      // event; timestamp-only ids can collide when several chunks arrive in
+      // the same millisecond and cause later reveal nodes to be reused.
+      id: messageId,
       kind: "message",
       role: "assistant",
       content: text,
@@ -136,6 +158,7 @@ const appendAgentChunk = (
 const appendThoughtChunk = (
   timeline: TimelineEntry[],
   text: string,
+  eventId?: string,
 ): TimelineEntry[] => {
   const now = Date.now();
   const last = timeline.at(-1);
@@ -145,6 +168,10 @@ const appendThoughtChunk = (
       { ...last, content: `${last.content}${text}` },
     ];
   }
+  const thoughtId = uniqueTimelineId(
+    timeline,
+    eventId ? `thought-${eventId}` : `thought-${now}`,
+  );
   return [
     ...timeline.map((entry) =>
       entry.kind === "message" && entry.streaming
@@ -152,7 +179,7 @@ const appendThoughtChunk = (
         : entry,
     ),
     {
-      id: `thought-${now}`,
+      id: thoughtId,
       kind: "thought",
       content: text,
       startedAt: now,
@@ -172,18 +199,11 @@ export const settleSessionProjection = (
   );
 };
 
-const stampLatestTurnAnalytics = (
-  timeline: TimelineEntry[],
-  usage: AgentContextUsage | undefined,
-  billingUsage: AgentBillingUsage | undefined,
-  reasoningEffort: string | undefined,
-  sessionModeId: string | undefined,
-): TimelineEntry[] => {
-  const settled = settleSessionProjection(timeline);
+const latestAssistantIndex = (timeline: TimelineEntry[]): number => {
   let lastUserIndex = -1;
   let assistantIndex = -1;
-  for (let index = settled.length - 1; index >= 0; index -= 1) {
-    const entry = settled[index];
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index];
     if (
       assistantIndex < 0 &&
       entry?.kind === "message" &&
@@ -196,9 +216,68 @@ const stampLatestTurnAnalytics = (
       break;
     }
   }
-  if (assistantIndex <= lastUserIndex) {
-    assistantIndex = -1;
+  return assistantIndex > lastUserIndex ? assistantIndex : -1;
+};
+
+const latestMessageIndex = (timeline: TimelineEntry[]): number => {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    if (timeline[index]?.kind === "message") {
+      return index;
+    }
   }
+  return -1;
+};
+
+/**
+ * Persist the latest context usage on the message that owns it. Completed
+ * turns prefer the assistant message; while a turn has no assistant message
+ * yet, the latest user message is a durable fallback for cancellation/error
+ * recovery. This deliberately does not settle streaming entries: usage
+ * updates can arrive before the terminal event and must not make the UI look
+ * finished early.
+ */
+export const stampLatestTurnContextUsage = (
+  timeline: TimelineEntry[],
+  usage: AgentContextUsage | undefined,
+): TimelineEntry[] => {
+  if (
+    !usage ||
+    !Number.isFinite(usage.usedTokens) ||
+    usage.usedTokens < 0 ||
+    !Number.isFinite(usage.maxTokens) ||
+    usage.maxTokens <= 0
+  ) {
+    return timeline;
+  }
+  const messageIndex = Math.max(
+    latestAssistantIndex(timeline),
+    latestMessageIndex(timeline),
+  );
+  if (messageIndex < 0) {
+    return timeline;
+  }
+  return timeline.map((entry, index) =>
+    index === messageIndex && entry.kind === "message"
+      ? {
+          ...entry,
+          tokenUsage: {
+            usedTokens: usage.usedTokens,
+            maxTokens: usage.maxTokens,
+          },
+        }
+      : entry,
+  );
+};
+
+const stampLatestTurnAnalytics = (
+  timeline: TimelineEntry[],
+  usage: AgentContextUsage | undefined,
+  billingUsage: AgentBillingUsage | undefined,
+  reasoningEffort: string | undefined,
+  sessionModeId: string | undefined,
+): TimelineEntry[] => {
+  const settled = settleSessionProjection(timeline);
+  const assistantIndex = latestAssistantIndex(settled);
   if (assistantIndex < 0) {
     return settled;
   }
@@ -597,14 +676,17 @@ export const applySessionUpdate = (
   if (updateType === "agent_message_chunk") {
     const text = textFromContent(update?.content);
     return text
-      ? { timeline: appendAgentChunk(timeline, text), streaming: true }
+      ? { timeline: appendAgentChunk(timeline, text, eventId), streaming: true }
       : { timeline };
   }
 
   if (updateType === "agent_thought_chunk") {
     const text = textFromContent(update?.content);
     return text
-      ? { timeline: appendThoughtChunk(timeline, text), streaming: true }
+      ? {
+          timeline: appendThoughtChunk(timeline, text, eventId),
+          streaming: true,
+        }
       : { timeline };
   }
 

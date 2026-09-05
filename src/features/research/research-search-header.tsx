@@ -2,13 +2,15 @@ import {
   ArrowRightIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
-  LoaderCircleIcon,
   SearchIcon,
   TriangleAlertIcon,
   WandSparklesIcon,
 } from "lucide-react";
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { CollapsibleBanner } from "@/components/interior/collapsible-banner";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ResearchSource, ResearchSourceRun } from "@/domain/research";
@@ -47,7 +49,7 @@ export function ResearchSearchHeader({
   error?: string;
   loading: boolean;
   onNavigate: (kind: ResearchMainKind) => void;
-  onRunSearch: () => void;
+  onRunSearch: () => unknown;
   projectName: string;
   query: string;
   queryPlan: ResearchQueryPlan;
@@ -64,6 +66,8 @@ export function ResearchSearchHeader({
   warnings: string[];
   searchToolEnabled: boolean;
 }) {
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <>
       <header className="shrink-0 border-b px-6 pt-4 pb-3">
@@ -82,7 +86,7 @@ export function ResearchSearchHeader({
             }}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                onRunSearch();
+                searchButtonRef.current?.click();
               }
             }}
             placeholder="例如：大语言模型在科研发现中的应用效果如何？有哪些可复现的证据？"
@@ -109,7 +113,7 @@ export function ResearchSearchHeader({
                 }
               />
             ))}
-            <Button
+            <LoadingButton
               className="sm:ml-auto"
               disabled={
                 !searchToolEnabled ||
@@ -117,16 +121,16 @@ export function ResearchSearchHeader({
                 loading ||
                 enabledSources.size === 0
               }
-              onClick={onRunSearch}
+              errorLabel="重试"
+              icon={<SearchIcon />}
+              onAction={onRunSearch}
+              pendingLabel="正在检索…"
+              ref={searchButtonRef}
               size="sm"
+              successLabel="检索完成"
             >
-              {loading ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : (
-                <SearchIcon />
-              )}
-              {loading ? "正在检索…" : "检索"}
-            </Button>
+              检索
+            </LoadingButton>
           </div>
         </div>
         {!searchToolEnabled ? (
@@ -265,9 +269,22 @@ export function ResearchSearchHeader({
         </p>
       ) : null}
       {warnings.length ? (
-        <p className="border-b bg-amber-500/8 px-6 py-2 text-amber-800 text-xs dark:text-amber-200">
-          {warnings.join("；")}
-        </p>
+        <CollapsibleBanner
+          ariaLive="polite"
+          className="mx-6 my-2"
+          defaultState="folded"
+          dismissible={false}
+          icon={<TriangleAlertIcon className="size-3.5" />}
+          role="status"
+          title={`部分数据源未响应 · ${warnings.length} 项`}
+          tone="warning"
+        >
+          <ul className="space-y-1 text-muted-foreground text-xs leading-5">
+            {warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </CollapsibleBanner>
       ) : null}
       {sourceRuns.length ? (
         <div className="shrink-0 border-b bg-muted/10 px-6 py-2">

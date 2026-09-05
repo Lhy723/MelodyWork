@@ -9,8 +9,11 @@ import {
   TreesIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { HoldToConfirm } from "@/components/interior/hold-to-confirm";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toUserMessage as messageFrom } from "@/domain/app-error";
@@ -26,7 +29,6 @@ import {
   stageGitPaths,
   unstageGitPaths,
 } from "@/lib/melody-bridge";
-import { cn } from "@/lib/utils";
 
 interface GitWorkspaceProps {
   changes: GitChange[];
@@ -41,6 +43,11 @@ export function GitWorkspace({
   onClose,
   onRefreshChanges,
 }: GitWorkspaceProps) {
+  const {
+    fail: failActivity,
+    start: startActivity,
+    succeed: succeedActivity,
+  } = useGlobalLiveActivity();
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([]);
   const [commitMessage, setCommitMessage] = useState("");
@@ -52,35 +59,74 @@ export function GitWorkspace({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<string>();
+  const commitButtonRef = useRef<HTMLButtonElement>(null);
+  const branchButtonRef = useRef<HTMLButtonElement>(null);
+  const worktreeButtonRef = useRef<HTMLButtonElement>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const [nextBranches, nextWorktrees] = await Promise.all([
-        getGitBranches(cwd),
-        getGitWorktrees(cwd),
-      ]);
-      setBranches(nextBranches);
-      setWorktrees(nextWorktrees);
-      setWorktreeBranch(
-        (current) =>
-          current ||
-          nextBranches.find((branch) => branch.current)?.name ||
-          "main",
-      );
-    } catch (reason) {
-      setError(messageFrom(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [cwd]);
+  const refresh = useCallback(
+    async (announce = false) => {
+      if (announce) {
+        startActivity({
+          detail: "正在读取分支和工作树…",
+          title: "刷新 Git",
+        });
+      }
+      setLoading(true);
+      setError(undefined);
+      try {
+        const [nextBranches, nextWorktrees] = await Promise.all([
+          getGitBranches(cwd),
+          getGitWorktrees(cwd),
+        ]);
+        setBranches(nextBranches);
+        setWorktrees(nextWorktrees);
+        setWorktreeBranch(
+          (current) =>
+            current ||
+            nextBranches.find((branch) => branch.current)?.name ||
+            "main",
+        );
+        if (announce) {
+          succeedActivity({
+            detail: `已读取 ${nextBranches.length} 个分支和 ${nextWorktrees.length} 个工作树。`,
+            title: "Git 已刷新",
+          });
+        }
+      } catch (reason) {
+        const message = messageFrom(reason);
+        setError(message);
+        if (announce) {
+          failActivity(
+            { detail: message, title: "Git 刷新失败" },
+            {
+              label: "重试",
+              onClick: () => {
+                void refresh(true).catch(() => undefined);
+              },
+            },
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [cwd, failActivity, startActivity, succeedActivity],
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const runAction = async (action: () => Promise<void>, success: string) => {
+  const runAction = async (
+    action: () => Promise<void>,
+    success: string,
+    propagateError = false,
+    activityTitle = "Git 操作",
+  ) => {
+    startActivity({
+      detail: "正在执行 Git 操作…",
+      title: activityTitle,
+    });
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
@@ -88,8 +134,27 @@ export function GitWorkspace({
       await action();
       setNotice(success);
       await Promise.all([refresh(), Promise.resolve(onRefreshChanges())]);
+      succeedActivity({ detail: success, title: `${activityTitle}完成` });
     } catch (reason) {
-      setError(messageFrom(reason));
+      const message = messageFrom(reason);
+      setError(message);
+      failActivity(
+        { detail: message, title: `${activityTitle}失败` },
+        {
+          label: "重试",
+          onClick: () => {
+            void runAction(
+              action,
+              success,
+              propagateError,
+              activityTitle,
+            ).catch(() => undefined);
+          },
+        },
+      );
+      if (propagateError) {
+        throw reason;
+      }
     } finally {
       setBusy(false);
     }
@@ -104,15 +169,20 @@ export function GitWorkspace({
           <h2 className="font-semibold text-base">Git</h2>
           <p className="truncate text-muted-foreground text-xs">{cwd}</p>
         </div>
-        <Button
+        <LoadingButton
           aria-label="刷新 Git"
           disabled={loading || busy}
-          onClick={() => void refresh()}
-          size="icon"
+          errorLabel="重试"
+          icon={<RefreshCwIcon />}
+          iconOnly
+          onAction={() => refresh(true)}
+          pendingLabel="刷新中…"
+          size="default"
+          successLabel="已刷新"
           variant="ghost"
         >
-          <RefreshCwIcon className={cn(loading && "animate-spin")} />
-        </Button>
+          刷新 Git
+        </LoadingButton>
         <Button
           aria-label="关闭 Git"
           onClick={onClose}
@@ -162,22 +232,27 @@ export function GitWorkspace({
                   <span className="text-red-700 text-xs">
                     −{change.deletions}
                   </span>
-                  <Button
+                  <LoadingButton
                     disabled={busy}
-                    onClick={() =>
-                      void runAction(
+                    errorLabel="重试"
+                    onAction={() =>
+                      runAction(
                         () =>
                           change.staged
                             ? unstageGitPaths(cwd, [change.path])
                             : stageGitPaths(cwd, [change.path]),
                         change.staged ? "文件已取消暂存。" : "文件已暂存。",
+                        true,
+                        change.staged ? "取消暂存文件" : "暂存文件",
                       )
                     }
+                    pendingLabel={change.staged ? "取消中…" : "暂存中…"}
                     size="sm"
+                    successLabel={change.staged ? "已取消" : "已暂存"}
                     variant={change.staged ? "secondary" : "outline"}
                   >
                     {change.staged ? "取消暂存" : "暂存"}
-                  </Button>
+                  </LoadingButton>
                 </div>
               ))}
               {changes.length === 0 ? (
@@ -197,10 +272,7 @@ export function GitWorkspace({
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await commitGitChanges(cwd, commitMessage);
-                  setCommitMessage("");
-                }, "提交已创建。");
+                commitButtonRef.current?.click();
               }}
             >
               <Input
@@ -210,12 +282,26 @@ export function GitWorkspace({
                 placeholder="提交说明"
                 value={commitMessage}
               />
-              <Button
+              <LoadingButton
                 disabled={busy || stagedCount === 0 || !commitMessage.trim()}
-                type="submit"
+                errorLabel="重试"
+                onAction={() =>
+                  runAction(
+                    async () => {
+                      await commitGitChanges(cwd, commitMessage);
+                      setCommitMessage("");
+                    },
+                    "提交已创建。",
+                    true,
+                    "创建提交",
+                  )
+                }
+                pendingLabel="提交中…"
+                ref={commitButtonRef}
+                successLabel="已提交"
               >
                 提交
-              </Button>
+              </LoadingButton>
             </form>
           </section>
 
@@ -234,6 +320,8 @@ export function GitWorkspace({
                     void runAction(
                       () => checkoutGitBranch(cwd, branch.name),
                       `已切换到 ${branch.name}。`,
+                      false,
+                      "切换 Git 分支",
                     )
                   }
                   type="button"
@@ -248,10 +336,7 @@ export function GitWorkspace({
               className="flex gap-2 border-t p-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await createGitBranch(cwd, newBranch);
-                  setNewBranch("");
-                }, `已创建 ${newBranch}。`);
+                branchButtonRef.current?.click();
               }}
             >
               <Input
@@ -261,10 +346,28 @@ export function GitWorkspace({
                 placeholder="新分支"
                 value={newBranch}
               />
-              <Button disabled={busy || !newBranch.trim()} type="submit">
-                <PlusIcon />
+              <LoadingButton
+                disabled={busy || !newBranch.trim()}
+                errorLabel="重试"
+                icon={<PlusIcon />}
+                onAction={() => {
+                  const branchName = newBranch;
+                  return runAction(
+                    async () => {
+                      await createGitBranch(cwd, branchName);
+                      setNewBranch("");
+                    },
+                    `已创建 ${branchName}。`,
+                    true,
+                    "创建 Git 分支",
+                  );
+                }}
+                pendingLabel="创建中…"
+                ref={branchButtonRef}
+                successLabel="已创建"
+              >
                 创建
-              </Button>
+              </LoadingButton>
             </form>
           </section>
 
@@ -290,32 +393,36 @@ export function GitWorkspace({
                     </span>
                   </span>
                   {worktree.path !== cwd ? (
-                    <Button
-                      aria-label={`移除 ${worktree.path}`}
-                      disabled={busy}
-                      onClick={() => {
-                        if (pendingRemoval !== worktree.path) {
-                          setPendingRemoval(worktree.path);
-                          return;
+                    pendingRemoval === worktree.path ? (
+                      <HoldToConfirm
+                        aria-label={`确认移除 ${worktree.path}`}
+                        confirmLabel={busy ? "移除中…" : "已移除"}
+                        disabled={busy}
+                        onConfirm={() =>
+                          runAction(
+                            () => removeGitWorktree(cwd, worktree.path),
+                            "工作树已移除。",
+                            true,
+                            "移除工作树",
+                          ).then(() => setPendingRemoval(undefined))
                         }
-                        setPendingRemoval(undefined);
-                        void runAction(
-                          () => removeGitWorktree(cwd, worktree.path),
-                          "工作树已移除。",
-                        );
-                      }}
-                      size={pendingRemoval === worktree.path ? "sm" : "icon"}
-                      variant={
-                        pendingRemoval === worktree.path
-                          ? "destructive"
-                          : "ghost"
-                      }
-                    >
-                      <Trash2Icon />
-                      {pendingRemoval === worktree.path ? (
-                        <span className="motion-view-enter">确认移除</span>
-                      ) : null}
-                    </Button>
+                        size="sm"
+                        variant="destructive"
+                      >
+                        <Trash2Icon />
+                        确认移除
+                      </HoldToConfirm>
+                    ) : (
+                      <Button
+                        aria-label={`移除 ${worktree.path}`}
+                        disabled={busy}
+                        onClick={() => setPendingRemoval(worktree.path)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    )
                   ) : null}
                 </div>
               ))}
@@ -324,16 +431,7 @@ export function GitWorkspace({
               className="grid gap-2 border-t p-3 md:grid-cols-[1fr_1fr_auto]"
               onSubmit={(event) => {
                 event.preventDefault();
-                void runAction(async () => {
-                  await createGitWorktree({
-                    cwd,
-                    path: worktreePath,
-                    branch: worktreeBranch,
-                    createBranch: true,
-                  });
-                  setWorktreePath("");
-                  setWorktreeBranch("");
-                }, "工作树已创建。");
+                worktreeButtonRef.current?.click();
               }}
             >
               <Input
@@ -350,14 +448,36 @@ export function GitWorkspace({
                 placeholder="新分支"
                 value={worktreeBranch}
               />
-              <Button
+              <LoadingButton
                 disabled={
                   busy || !worktreePath.trim() || !worktreeBranch.trim()
                 }
-                type="submit"
+                errorLabel="重试"
+                onAction={() => {
+                  const path = worktreePath;
+                  const branch = worktreeBranch;
+                  return runAction(
+                    async () => {
+                      await createGitWorktree({
+                        cwd,
+                        path,
+                        branch,
+                        createBranch: true,
+                      });
+                      setWorktreePath("");
+                      setWorktreeBranch("");
+                    },
+                    "工作树已创建。",
+                    true,
+                    "创建工作树",
+                  );
+                }}
+                pendingLabel="创建中…"
+                ref={worktreeButtonRef}
+                successLabel="已创建"
               >
                 创建工作树
-              </Button>
+              </LoadingButton>
             </form>
           </section>
         </div>

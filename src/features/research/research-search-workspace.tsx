@@ -7,6 +7,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Dropdown } from "@/components/interior/dropdown";
+import { useGlobalLiveActivity } from "@/components/interior/live-activity";
+import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/domain/app-error";
 import type {
@@ -39,6 +42,7 @@ export function SearchWorkspace({
   onNavigate: (kind: ResearchMainKind) => void;
   projectName: string;
 }) {
+  const liveActivity = useGlobalLiveActivity();
   const addPapers = useResearchStore((state) => state.addPapers);
   const inbox = useResearchStore((state) => state.inbox);
   const recordSearchResult = useResearchStore(
@@ -130,10 +134,29 @@ export function SearchWorkspace({
     setWarnings([]);
     setSourceRuns([]);
     setActiveView("results");
+    liveActivity.start({
+      detail: `正在查询 ${enabledSources.size} 个数据源…`,
+      progress: 0,
+      title: "检索文献",
+    });
     try {
       const result = await searchResearchPapers(
         queryForSearch,
         Array.from(enabledSources),
+        (progress) => {
+          if (!searchGateRef.current.isCurrent(requestToken)) return;
+          const sourceDetail =
+            progress.status === "running"
+              ? `正在查询 ${progress.source}…`
+              : progress.status === "success"
+                ? `${progress.source} 返回 ${progress.resultCount ?? 0} 条`
+                : `${progress.source} 查询失败`;
+          liveActivity.update({
+            detail: `${sourceDetail} · ${progress.completed}/${progress.total}`,
+            progress: progress.completed / progress.total,
+            title: "检索文献",
+          });
+        },
       );
       if (!searchGateRef.current.isCurrent(requestToken)) return;
       setPapers(result.papers);
@@ -147,12 +170,31 @@ export function SearchWorkspace({
         terms: buildResearchQueryPlan(queryForSearch).terms,
         result,
       });
+      liveActivity.succeed({
+        detail: `找到 ${result.papers.length} 篇文献${
+          result.warnings.length
+            ? `，${result.warnings.length} 个数据源异常`
+            : ""
+        }。`,
+        title: "文献检索完成",
+      });
     } catch (reason) {
       if (!searchGateRef.current.isCurrent(requestToken)) return;
-      setError(toUserMessage(reason));
+      const message = toUserMessage(reason);
+      setError(message);
       setPapers([]);
       setSourceSummary([]);
       setSourceRuns([]);
+      liveActivity.fail(
+        { detail: message, title: "文献检索失败" },
+        {
+          label: "重试",
+          onClick: () => {
+            void runSearch(normalized, queryForSearch).catch(() => undefined);
+          },
+        },
+      );
+      throw reason;
     } finally {
       if (searchGateRef.current.isCurrent(requestToken)) setLoading(false);
     }
@@ -166,7 +208,7 @@ export function SearchWorkspace({
         error={error}
         loading={loading}
         onNavigate={onNavigate}
-        onRunSearch={() => void runSearch()}
+        onRunSearch={() => runSearch()}
         projectName={projectName}
         query={query}
         queryPlan={queryPlan}
@@ -191,7 +233,11 @@ export function SearchWorkspace({
                 <button
                   className="flex w-full items-center gap-3 px-2 py-3 text-left hover:bg-muted/40"
                   key={item.id}
-                  onClick={() => void runSearch(item.query, item.searchQuery)}
+                  onClick={() => {
+                    void runSearch(item.query, item.searchQuery).catch(
+                      () => undefined,
+                    );
+                  }}
                   type="button"
                 >
                   <HistoryIcon className="size-4 text-muted-foreground" />
@@ -236,30 +282,33 @@ export function SearchWorkspace({
                   {papers.filter((paper) => paper.verified).length} 篇已多源匹配
                 </span>
               ) : null}
-              <select
-                aria-label="按年份筛选"
-                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:ml-auto"
-                onChange={(event) => setYear(event.target.value)}
+              <Dropdown
+                className="shrink-0 sm:ml-auto"
+                items={[
+                  { label: "全部年份", value: "all" },
+                  ...years.map((value) => ({
+                    label: String(value),
+                    value: String(value),
+                  })),
+                ]}
+                label="按年份筛选"
+                onChange={setYear}
+                triggerClassName="h-7 rounded-md px-2 text-xs"
                 value={year}
-              >
-                <option value="all">全部年份</option>
-                {years.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="排序方式"
-                className="h-7 rounded-md border bg-background px-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                onChange={(event) => setSort(event.target.value as ResultSort)}
+              />
+              <Dropdown
+                className="shrink-0"
+                items={[
+                  { label: "相关度排序", value: "relevance" },
+                  { label: "最新发表", value: "year" },
+                  { label: "引用次数", value: "citations" },
+                ]}
+                label="排序方式"
+                onChange={(value) => setSort(value as ResultSort)}
+                triggerClassName="h-7 rounded-md px-2 text-xs"
                 value={sort}
-              >
-                <option value="relevance">相关度排序</option>
-                <option value="year">最新发表</option>
-                <option value="citations">引用次数</option>
-              </select>
-              <label className="flex min-h-6 items-center gap-1.5 px-2 text-xs">
+              />
+              <label className="flex min-h-6 select-none items-center gap-1.5 px-2 text-xs">
                 <input
                   checked={verifiedOnly}
                   className="accent-primary"
@@ -301,13 +350,16 @@ export function SearchWorkspace({
                   <EmptyWorkflow
                     actions={
                       <>
-                        <Button
-                          onClick={() => void runSearch(EXAMPLE_RESEARCH_QUERY)}
+                        <LoadingButton
+                          errorLabel="重试"
+                          icon={<SearchIcon />}
+                          onAction={() => runSearch(EXAMPLE_RESEARCH_QUERY)}
+                          pendingLabel="正在检索…"
+                          successLabel="检索完成"
                           size="sm"
                         >
-                          <SearchIcon />
                           {query.trim() ? "试用示例问题" : "运行示例检索"}
-                        </Button>
+                        </LoadingButton>
                         <Button
                           onClick={() => onNavigate("library")}
                           size="sm"

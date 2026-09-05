@@ -131,23 +131,21 @@ export function SettingsWorkspace({
     [cwd, runConfigLoad, scope],
   );
 
-  const loadExtensions = useCallback(() => {
+  const loadExtensions = useCallback(async (): Promise<void> => {
     if (page !== "skills" && page !== "plugins" && page !== "hooks") {
       return;
     }
     const capabilityPage = page;
     setError(undefined);
-    void runExtensionLoad(
+    await runExtensionLoad(
       () => capabilityLifecycle.load(cwd, capabilityPage),
       setExtensions,
-    ).catch(() => undefined);
+    );
   }, [cwd, page, runExtensionLoad]);
 
-  const loadRules = useCallback(() => {
+  const loadRules = useCallback(async (): Promise<void> => {
     setError(undefined);
-    void runRulesLoad(() => listPermissionRules(projectId), setRules).catch(
-      () => undefined,
-    );
+    await runRulesLoad(() => listPermissionRules(projectId), setRules);
   }, [projectId, runRulesLoad]);
 
   const loading =
@@ -173,11 +171,11 @@ export function SettingsWorkspace({
   }, [loadConfig, scope]);
 
   useEffect(() => {
-    void loadExtensions();
+    void loadExtensions().catch(() => undefined);
   }, [loadExtensions]);
 
   useEffect(() => {
-    if (page === "permissions") void loadRules();
+    if (page === "permissions") void loadRules().catch(() => undefined);
   }, [loadRules, page]);
 
   const removeRule = async (id: string) => {
