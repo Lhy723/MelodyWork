@@ -673,7 +673,7 @@ fn project_projection_with_remote(
         // environment variables; the JSON file itself never contains a
         // credential value.
         let mut credentials = CredentialWriter::new(credential_index);
-        if let Some(secret) = resolve_api_key(alias, model) {
+        if let Some(secret) = resolve_api_key(model) {
             provider.insert(
                 "apiKey".into(),
                 Value::String(credentials.reference("KEY", secret, &mut projection.credentials)),
@@ -993,52 +993,8 @@ fn merged_headers(
     Ok(result)
 }
 
-fn resolve_api_key(alias: &str, model: &toml::Table) -> Option<String> {
-    if let Some(value) = string_value(model, "api_key") {
-        return Some(value);
-    }
-    let names = match model.get("env_key") {
-        Some(toml::Value::String(value)) => vec![value.clone()],
-        Some(toml::Value::Array(values)) => values
-            .iter()
-            .filter_map(toml::Value::as_str)
-            .map(ToOwned::to_owned)
-            .collect(),
-        _ => Vec::new(),
-    };
-    let configured = names
-        .into_iter()
-        .filter_map(|name| env::var(name.trim()).ok())
-        .map(|value| value.trim().to_owned())
-        .find(|value| !value.is_empty());
-    if configured.is_some() {
-        return configured;
-    }
-
-    // The legacy ACP adapter exposed ambient xAI credentials as a convenience
-    // for the built-in xAI provider.  Do not carry that fallback over to every
-    // arbitrary custom endpoint: doing so would silently attach an unrelated
-    // user's xAI key to a third-party model.  Keep the compatibility fallback
-    // only when the alias or endpoint explicitly identifies xAI.
-    let alias = alias.trim().to_ascii_lowercase();
-    let endpoint = string_value(model, "base_url")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let is_xai = alias == "xai"
-        || alias.starts_with("xai-")
-        || endpoint.contains("api.x.ai")
-        || endpoint.contains("api.xai.com");
-    if !is_xai {
-        return None;
-    }
-    env::var("XAI_API_KEY")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            env::var("MELODY_CODE_XAI_API_KEY")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
+fn resolve_api_key(model: &toml::Table) -> Option<String> {
+    string_value(model, "api_key").filter(|value| !value.trim().is_empty())
 }
 
 struct CredentialWriter {
@@ -1111,11 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn projects_scoped_models_without_writing_credentials() {
-        let _guard = env_lock().lock().unwrap();
-        unsafe {
-            env::set_var("MELODY_TEST_MODEL_KEY", "secret-value");
-        }
+    fn projects_direct_model_api_key_without_writing_credentials() {
         let user = toml::from_str::<toml::Table>(
             r#"
             [models]
@@ -1128,7 +1080,7 @@ mod tests {
             model = "demo-v1"
             name = "Demo"
             base_url = "https://example.test/v1"
-            env_key = "MELODY_TEST_MODEL_KEY"
+            api_key = "secret-value"
             extra_headers = { x-org = "project" }
             "#,
         )
@@ -1148,9 +1100,6 @@ mod tests {
         assert!(provider["models"][0].get("apiKey").is_none());
         assert!(provider["models"][0].get("headers").is_none());
         assert_eq!(projection.credentials.len(), 2);
-        unsafe {
-            env::remove_var("MELODY_TEST_MODEL_KEY");
-        }
     }
 
     #[test]
@@ -1247,51 +1196,40 @@ mod tests {
     }
 
     #[test]
-    fn does_not_borrow_ambient_xai_key_for_unrelated_custom_provider() {
+    fn ignores_environment_keys_for_model_authentication() {
         let _guard = env_lock().lock().unwrap();
         unsafe {
             env::set_var("XAI_API_KEY", "ambient-xai-secret");
             env::set_var("MELODY_CODE_XAI_API_KEY", "legacy-xai-secret");
+            env::set_var("MELODY_TEST_MODEL_KEY", "configured-env-secret");
         }
         let user = toml::from_str::<toml::Table>(
             r#"
             [model.open-code]
             model = "open-code-v1"
             base_url = "https://open.example.test/v1"
+
+            [model.xai]
+            model = "grok-4"
+            base_url = "https://api.x.ai/v1"
+
+            [model.environment-only]
+            model = "env-v1"
+            base_url = "https://env.example.test/v1"
+            env_key = "MELODY_TEST_MODEL_KEY"
             "#,
         )
         .unwrap();
         let projection = project_projection(&user, &toml::Table::new()).unwrap();
-        let provider = projection.providers.get(&provider_id("open-code")).unwrap();
-        assert!(provider.get("apiKey").is_none());
+        for alias in ["open-code", "xai", "environment-only"] {
+            let provider = projection.providers.get(&provider_id(alias)).unwrap();
+            assert!(provider.get("apiKey").is_none());
+        }
         assert!(projection.credentials.is_empty());
         unsafe {
             env::remove_var("XAI_API_KEY");
             env::remove_var("MELODY_CODE_XAI_API_KEY");
-        }
-    }
-
-    #[test]
-    fn keeps_ambient_xai_key_for_explicit_xai_provider() {
-        let _guard = env_lock().lock().unwrap();
-        unsafe {
-            env::set_var("XAI_API_KEY", "ambient-xai-secret");
-        }
-        let user = toml::from_str::<toml::Table>(
-            r#"
-            [model.xai]
-            model = "grok-4"
-            base_url = "https://api.x.ai/v1"
-            "#,
-        )
-        .unwrap();
-        let projection = project_projection(&user, &toml::Table::new()).unwrap();
-        let provider = projection.providers.get(&provider_id("xai")).unwrap();
-        assert!(provider.get("apiKey").is_some());
-        assert_eq!(projection.credentials.len(), 1);
-        assert_eq!(projection.credentials[0].1, "ambient-xai-secret");
-        unsafe {
-            env::remove_var("XAI_API_KEY");
+            env::remove_var("MELODY_TEST_MODEL_KEY");
         }
     }
 

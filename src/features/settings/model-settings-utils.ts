@@ -17,18 +17,16 @@ export const providerTemplates = [
   {
     id: "openai",
     name: "OpenAI",
-    description: "Responses API，使用 OPENAI_API_KEY。",
+    description: "Responses API，直接填写 OpenAI API Key。",
     baseUrl: "https://api.openai.com/v1",
     backend: "responses",
-    envKey: "OPENAI_API_KEY",
   },
   {
     id: "anthropic",
     name: "Anthropic",
-    description: "Messages API，使用 ANTHROPIC_API_KEY。",
+    description: "Messages API，直接填写 Anthropic API Key。",
     baseUrl: "https://api.anthropic.com/v1",
     backend: "messages",
-    envKey: "ANTHROPIC_API_KEY",
   },
   {
     id: "compatible",
@@ -36,7 +34,6 @@ export const providerTemplates = [
     description: "适用于第三方网关和自托管服务。",
     baseUrl: "",
     backend: "chat_completions",
-    envKey: "",
   },
 ] as const;
 

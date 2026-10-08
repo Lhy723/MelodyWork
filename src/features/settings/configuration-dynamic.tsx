@@ -95,15 +95,9 @@ export function DynamicSection({
           {
             path: [...root, name, "api_key"],
             label: "API Key",
-            description: "直接保存的密钥；优先建议使用环境变量。",
+            description: "此模型直接使用该 API Key 进行认证。",
             kind: "string",
             secret: true,
-          },
-          {
-            path: [...root, name, "env_key"],
-            label: "密钥环境变量",
-            description: "每行一个候选环境变量名。",
-            kind: "string-list",
           },
           {
             path: [...root, name, "context_window"],

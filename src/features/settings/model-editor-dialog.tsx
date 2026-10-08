@@ -6,12 +6,18 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Dropdown } from "@/components/interior/dropdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/interior/drawer";
 import { FloatingLabelInput } from "@/components/interior/floating-label";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { MelodyConfigValue } from "@/domain/config";
 
@@ -122,12 +128,6 @@ export function ModelEditorDialog({
   const [draft, setDraft] = useState<ConfigObject>(() =>
     configObject(modelValue),
   );
-  const [authMode, setAuthMode] = useState<"environment" | "key">(() =>
-    stringConfigValue(configObject(modelValue), "api_key")
-      ? "key"
-      : "environment",
-  );
-
   const setField = (key: string, value: MelodyConfigValue | undefined) => {
     setDraft((current) => {
       const next = { ...current };
@@ -146,23 +146,23 @@ export function ModelEditorDialog({
   };
 
   const chooseProvider = (template: (typeof providerTemplates)[number]) => {
-    setDraft((current) => ({
-      ...current,
-      api_backend: template.backend,
-      ...(template.baseUrl ? { base_url: template.baseUrl } : {}),
-      ...(template.envKey ? { env_key: [template.envKey] } : {}),
-    }));
-    setAuthMode("environment");
+    setDraft((current) => {
+      const next: ConfigObject = {
+        ...current,
+        api_backend: template.backend,
+        ...(template.baseUrl ? { base_url: template.baseUrl } : {}),
+      };
+      delete next.env_key;
+      return next;
+    });
     setStep("details");
   };
 
   const modelId = stringConfigValue(draft, "model");
   const baseUrl = stringConfigValue(draft, "base_url");
-  const envKeys = Array.isArray(draft.env_key)
-    ? draft.env_key
-        .filter((item): item is string => typeof item === "string")
-        .join(", ")
-    : "";
+  const apiKey = stringConfigValue(draft, "api_key");
+  const needsCredentialMigration =
+    draft.env_key !== undefined && !apiKey.trim();
   const inheritedInput = inputModalities(
     valueAt(globalValues, ["models", "input"]),
   );
@@ -187,9 +187,16 @@ export function ModelEditorDialog({
               取消
             </Button>
             <Button
-              disabled={!alias.trim() || !modelId.trim() || nameConflict}
+              disabled={
+                !alias.trim() ||
+                !modelId.trim() ||
+                nameConflict ||
+                needsCredentialMigration
+              }
               onClick={() => {
-                onSave(alias.trim(), draft);
+                const next = { ...draft };
+                delete next.env_key;
+                onSave(alias.trim(), next);
                 onOpenChange(false);
               }}
             >
@@ -290,74 +297,45 @@ export function ModelEditorDialog({
               />
               <label className="grid gap-1.5 text-xs">
                 <span className="font-medium">接口类型</span>
-                <Dropdown
-                  className="w-full"
-                  items={[
-                    { label: "Chat Completions", value: "chat_completions" },
-                    { label: "Responses", value: "responses" },
-                    { label: "Messages", value: "messages" },
-                  ]}
-                  label="接口类型"
-                  onChange={(value) => setField("api_backend", value)}
+                <Select
+                  onValueChange={(value) => setField("api_backend", value)}
                   value={
                     stringConfigValue(draft, "api_backend") ||
                     "chat_completions"
                   }
-                />
+                >
+                  <SelectTrigger aria-label="接口类型" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="chat_completions">
+                      Chat Completions
+                    </SelectItem>
+                    <SelectItem value="responses">Responses</SelectItem>
+                    <SelectItem value="messages">Messages</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
-              <label className="grid gap-1.5 text-xs">
-                <span className="font-medium">认证方式</span>
-                <Dropdown
-                  className="w-full"
-                  items={[
-                    { label: "环境变量", value: "environment" },
-                    { label: "直接填写 API Key", value: "key" },
-                  ]}
-                  label="认证方式"
-                  onChange={(value) => {
-                    const next = value as "environment" | "key";
-                    setAuthMode(next);
-                    if (next === "environment") {
-                      setField("api_key", undefined);
-                    } else {
-                      setField("env_key", undefined);
-                    }
-                  }}
-                  value={authMode}
-                />
-              </label>
-              {authMode === "environment" ? (
-                <FloatingLabelInput
-                  className="text-xs sm:col-span-2"
-                  hint="例如 OPENAI_API_KEY，可填写多个变量"
-                  label="密钥环境变量"
-                  onChange={(value) =>
-                    setField(
-                      "env_key",
-                      value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean),
-                    )
-                  }
-                  value={envKeys}
-                />
-              ) : (
-                <FloatingLabelInput
-                  autoComplete="off"
-                  className="text-xs sm:col-span-2"
-                  hint="推荐使用环境变量，避免把密钥写入配置文件。"
-                  label={
-                    <span className="flex items-center gap-1.5">
-                      <KeyRoundIcon aria-hidden className="size-3.5" />
-                      API Key
-                    </span>
-                  }
-                  onChange={(value) => setField("api_key", value)}
-                  type="password"
-                  value={stringConfigValue(draft, "api_key")}
-                />
-              )}
+              {needsCredentialMigration ? (
+                <p className="text-destructive text-xs sm:col-span-2">
+                  此模型之前通过环境变量认证。请重新填写 API
+                  Key；保存时会移除旧认证配置。
+                </p>
+              ) : null}
+              <FloatingLabelInput
+                autoComplete="off"
+                className="text-xs sm:col-span-2"
+                hint="API Key 会保存在本机 Melody 配置中。"
+                label={
+                  <span className="flex items-center gap-1.5">
+                    <KeyRoundIcon aria-hidden className="size-3.5" />
+                    API Key
+                  </span>
+                }
+                onChange={(value) => setField("api_key", value)}
+                type="password"
+                value={apiKey}
+              />
             </div>
           </section>
 

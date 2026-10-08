@@ -154,40 +154,8 @@ fn collect_headers(
     Ok(merged.into_iter().collect())
 }
 
-fn environment_name(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
 fn resolve_key(model: Option<&Map<String, Value>>) -> Option<String> {
-    if let Some(value) = string_value(model, "api_key") {
-        return Some(value);
-    }
-    if let Some(value) = model.and_then(|value| value.get("env_key")) {
-        let names = match value {
-            Value::String(name) => vec![name.as_str()],
-            Value::Array(values) => values.iter().filter_map(Value::as_str).collect(),
-            _ => Vec::new(),
-        };
-        for name in names {
-            if environment_name(name) {
-                if let Ok(value) = env::var(name) {
-                    if !value.trim().is_empty() {
-                        return Some(value);
-                    }
-                }
-            }
-        }
-    }
-    for name in ["MELODY_WEB_SEARCH_API_KEY", "XAI_API_KEY"] {
-        if let Ok(value) = env::var(name) {
-            if !value.trim().is_empty() {
-                return Some(value);
-            }
-        }
-    }
-    None
+    string_value(model, "api_key").filter(|value| !value.trim().is_empty())
 }
 
 fn public_https_url(candidate: &str, label: &str) -> Result<Url, String> {
@@ -220,7 +188,7 @@ fn web_search_spec(root: &Path) -> Result<Option<WebSearchSpec>, String> {
         .and_then(|value| value.get(&alias))
         .and_then(Value::as_object);
     let api_key = resolve_key(model_table).ok_or_else(|| {
-        "已启用 web_search，但没有找到 API key；请配置模型 api_key/env_key 或 MELODY_WEB_SEARCH_API_KEY。".to_string()
+        "已启用 web_search，但所选模型没有 API Key；请在模型设置中直接填写 API Key。".to_string()
     })?;
     let base_url = string_value(model_table, "base_url")
         .or_else(|| env::var("MELODY_WEB_SEARCH_BASE_URL").ok())
@@ -762,6 +730,18 @@ pub(crate) async fn resolve_request(root: &Path, value: &Value) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_web_search_key_only_from_model_api_key() {
+        let direct = json!({ "api_key": "direct-secret" });
+        assert_eq!(
+            resolve_key(direct.as_object()).as_deref(),
+            Some("direct-secret")
+        );
+
+        let legacy = json!({ "env_key": "MELODY_TEST_WEB_KEY" });
+        assert_eq!(resolve_key(legacy.as_object()), None);
+    }
 
     #[test]
     fn rejects_unsafe_fetch_urls() {
