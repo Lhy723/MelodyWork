@@ -8,19 +8,21 @@
 
 Talk through a task, inspect the result, review the diff, and ship directly from the project already on your machine. MelodyWork keeps the agent loop grounded in the repository, with visible tool activity and explicit permission boundaries.
 
+Pi is MelodyWork's only Agent runtime for desktop sessions. Existing ACP sessions remain read-only archives; capabilities Pi cannot safely provide are reported as unavailable, while unsafe session configurations block opening Pi. There is no ACP runtime fallback. The bundled Pi worker uses the product protocol and Host-owned policy boundary for files, terminal, MCP/Web, memory, LSP, bounded tree-sitter codebase navigation, subagents, and background tasks.
+
 [Development guide](docs/development.md) · [Release guide](docs/releasing.md)
 
 `Local-first` `Git-native` `macOS` `Windows`
 
 ## Built for the Whole Loop
 
-| Plan & Research | Build & Review | Control & Ship |
-| --- | --- | --- |
-| Start and resume ACP agent sessions, collect research context, and keep source material beside the implementation. | Inspect files and per-file Git diffs, edit within workspace boundaries, and work through a deliberate terminal. | Stage and commit changes, manage branches and worktrees, and decide permissions once, per session, or per project. |
+| Plan & Research                                                                                                   | Build & Review                                                                                                  | Control & Ship                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Start and resume Pi Agent sessions, collect research context, and keep source material beside the implementation. | Inspect files and per-file Git diffs, edit within workspace boundaries, and work through a deliberate terminal. | Stage and commit changes, manage branches and worktrees, and decide permissions once, per session, or per project. |
 
-## How Melody Build Works
+## How the Agent Engine Works
 
-Melody Build is the execution engine underneath MelodyWork. It is a terminal-based AI coding agent that can run interactively as a full-screen TUI, headlessly for scripts and CI, or embedded in another application through the Agent Client Protocol (ACP). MelodyWork provides the desktop control surface around that engine.
+The diagram below preserves the former Legacy ACP architecture for migration context; it is not an available Agent runtime. Current sessions run the model/session loop in the bundled Pi worker behind the same desktop control plane and Host execution boundary; the migration design and capability matrix live in [`docs/architecture/pi-migration`](docs/architecture/pi-migration/README.md).
 
 ```mermaid
 flowchart TB
@@ -94,20 +96,20 @@ Solid arrows represent the execution path. Dashed arrows show events, tool resul
 ### One turn, end to end
 
 1. You describe an outcome in MelodyWork and choose the project or worktree where it belongs.
-2. MelodyWork starts or resumes `melody-pager` and opens an ACP stdio session with Melody Build.
-3. The agent runtime reads the workspace, reasons about the task, and selects the tools it needs.
-4. `melody-tools` performs terminal, file, search, and workspace operations. Permission-sensitive actions can pause for your decision.
-5. Tool output and progress stream back through ACP, so the timeline stays inspectable while the agent works.
+2. MelodyWork starts or resumes the bundled Pi worker. An existing ACP session stays archived until the user explicitly imports it through the migration flow.
+3. The selected agent runtime reads the workspace, reasons about the task, and selects the tools it needs.
+4. Host-owned tools perform terminal, file, search, codebase navigation, and workspace operations. Permission-sensitive actions can pause for your decision.
+5. Tool output and progress stream through the product event protocol, so the timeline stays inspectable while the agent works.
 6. The resulting files remain in the local workspace. MelodyWork then gives you the Git diff, branch, worktree, and commit controls needed to review and deliver them.
 
-This separation is intentional: Melody Build owns the agent loop and tool execution; MelodyWork owns the desktop experience, session navigation, project boundaries, review surfaces, and user decisions.
+This separation is intentional: Pi owns the model/session loop, while MelodyWork owns the desktop experience, session navigation, project boundaries, review surfaces, Host tools, and user decisions. Missing peripheral capabilities are surfaced as diagnostics; safety-critical gaps stop session opening instead of switching execution engines.
 
 ## Why This Shape
 
 - **Local-first:** projects, session state, files, Git history, tool activity, and project rules stay on the machine where the work happens.
-- **Protocol-driven:** ACP stdio gives the desktop client a clear boundary around messages, tool calls, progress, and permissions.
+- **Protocol-driven:** the versioned product protocol gives the desktop client a clear boundary around messages, tool calls, progress, and permissions.
 - **Inspectable by default:** the agent can move quickly, but changes remain visible through timelines, file previews, diffs, and Git actions.
-- **Composable engine:** the same Melody Build runtime can power the terminal, CI, or another ACP client; MelodyWork focuses on making the desktop loop coherent.
+- **Consistent execution boundary:** the Pi worker and Host share the product contract; MelodyWork keeps permissions and workspace policy consistent across the desktop experience.
 
 The current beta has no account system or cloud sync.
 

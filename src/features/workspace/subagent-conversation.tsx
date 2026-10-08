@@ -1,10 +1,24 @@
-import { CheckCircle2Icon, CircleXIcon, LoaderCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  CircleXIcon,
+  LoaderCircleIcon,
+  SendIcon,
+} from "lucide-react";
+import { useState } from "react";
 
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { toUserMessage } from "@/domain/app-error";
 import type { AgentSubagent, TimelineEntry } from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
 import { AgentTimeline } from "@/features/chat/agent-timeline";
 import { SubagentAvatar } from "@/features/chat/subagent-avatar";
+import { agentEngineForSession } from "@/lib/agent-client";
+import {
+  isTauriRuntime,
+  sendPiAgentCommand,
+} from "@/lib/melody-bridge-runtime";
 import { useAgentStore } from "@/stores/agent-store";
 
 interface SubagentConversationProps {
@@ -45,12 +59,46 @@ export function SubagentConversation({
   projectRoot,
   subagent,
 }: SubagentConversationProps) {
+  const [draft, setDraft] = useState("");
+  const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState<string>();
   const timeline = useAgentStore((state) =>
     active
       ? (state.backgroundTimelines[subagent.childSessionId] ?? EMPTY_TIMELINE)
       : EMPTY_TIMELINE,
   );
+  const resolvePermission = useAgentStore((state) => state.resolvePermission);
   const resolveQuestion = useAgentStore((state) => state.resolveQuestion);
+  const canContinue =
+    active &&
+    subagent.status === "completed" &&
+    !subagent.parentTaskId &&
+    isTauriRuntime() &&
+    agentEngineForSession(subagent.parentSessionId) === "pi";
+  const continueChild = async () => {
+    const content = draft.trim();
+    if (!canContinue || !content || continuing) return;
+    setContinuing(true);
+    setContinueError(undefined);
+    try {
+      await sendPiAgentCommand({
+        protocolVersion: 1,
+        requestId: `pi-child-continue-${crypto.randomUUID()}`,
+        sessionId: subagent.parentSessionId,
+        command: {
+          type: "task.continue",
+          sessionId: subagent.parentSessionId,
+          taskId: subagent.subagentId,
+          content,
+        },
+      });
+      setDraft("");
+    } catch (reason) {
+      setContinueError(toUserMessage(reason, "无法继续该子会话。"));
+    } finally {
+      setContinuing(false);
+    }
+  };
   const status = statusContent(subagent);
   return (
     <section className="flex size-full min-h-0 flex-col bg-background">
@@ -94,7 +142,7 @@ export function SubagentConversation({
           entries={timeline}
           onOpenFile={onOpenFile}
           onOpenProjectReference={onOpenProjectReference}
-          onPermission={() => undefined}
+          onPermission={resolvePermission}
           onQuestion={resolveQuestion}
           onPlanDecision={() => undefined}
           projectRoot={projectRoot}
@@ -133,6 +181,48 @@ export function SubagentConversation({
           </div>
         </div>
       )}
+      {canContinue ? (
+        <form
+          className="shrink-0 border-t bg-background p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void continueChild();
+          }}
+        >
+          <div className="flex items-end gap-2">
+            <Textarea
+              aria-label="继续子会话"
+              className="max-h-36 min-h-16 resize-y text-sm"
+              disabled={continuing}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              placeholder="继续这个子会话…"
+              value={draft}
+            />
+            <Button
+              aria-label="发送续接消息"
+              className="mb-0.5"
+              disabled={
+                continuing || !draft.trim() || Array.from(draft).length > 12_000
+              }
+              size="icon"
+              type="submit"
+            >
+              {continuing ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <SendIcon />
+              )}
+            </Button>
+          </div>
+          {continueError ? (
+            <p className="mt-2 text-destructive text-xs">{continueError}</p>
+          ) : null}
+          <p className="mt-1 text-muted-foreground text-[11px]">
+            续接会恢复同一 Pi transcript 和原有权限上限（
+            {Array.from(draft).length}/12000）
+          </p>
+        </form>
+      ) : null}
     </section>
   );
 }

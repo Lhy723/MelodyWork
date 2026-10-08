@@ -1,7 +1,8 @@
 import { toUserMessage as reasonMessage } from "@/domain/app-error";
 import { sessionModeState } from "@/domain/session-mode";
 import { stampLatestTurnContextUsage } from "@/domain/session-projection";
-import { updateStoredSession, sendAcp } from "@/lib/melody-bridge";
+import { sendAgentCommand } from "@/lib/agent-client";
+import { updateStoredSession } from "@/lib/melody-bridge";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 import {
@@ -62,16 +63,16 @@ const handleInitializeResponse = async (
   if (preferredMethod) {
     set({ acpPhase: "authenticating" });
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: AUTHENTICATE_REQUEST_ID,
-        method: "authenticate",
-        params: {
+      const localSessionId = get().localSessionId;
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: AUTHENTICATE_REQUEST_ID,
+        ...(localSessionId ? { sessionId: localSessionId } : {}),
+        command: {
+          type: "runtime.authenticate",
           methodId: preferredMethod,
-          _meta: { headless: false },
         },
       });
-      const localSessionId = get().localSessionId;
       if (localSessionId) {
         armSetupTimeout(
           localSessionId,

@@ -10,7 +10,25 @@ import {
   type UpdateSessionRequest,
   type WorkspaceEntry,
 } from "@/domain/workspace";
-import { isTauriRuntime } from "./melody-bridge-runtime";
+import {
+  buildPiMigrationReportForSession,
+  type PiMigrationReport,
+} from "@/domain/agent/session-migration";
+import {
+  buildPiSessionImportPlanForSession,
+  type PiSessionImportPlan,
+} from "@/domain/agent/pi-session-import";
+import type { JsonObject } from "@/domain/agent/contract";
+import type { ExplorerSessionReference } from "@/domain/agent/explorer-branch";
+import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
+import type { AgentPermissionMode } from "@/domain/acp";
+import {
+  isTauriRuntime,
+  getPiAgentSessionBinding,
+  sendPiAgentCommand,
+  subscribeToPiAgentEvents,
+  startPiWorker,
+} from "./melody-bridge-runtime";
 
 const previewProject: ProjectRecord = {
   id: "preview-project",
@@ -150,6 +168,145 @@ export const createStoredSession = async (
   return invoke<SessionRecord>("create_session", { projectId, cwd });
 };
 
+/** Create a durable Pi-native branch and wait for the Host-accepted open ack. */
+export const forkPiSession = async (
+  source: SessionRecord,
+  target: SessionRecord,
+  nativeEntryId: string,
+): Promise<void> => {
+  if (!isTauriRuntime()) {
+    throw new Error("Pi 会话分支仅在桌面运行时可用。 ");
+  }
+  if (source.cwd !== target.cwd || source.projectId !== target.projectId) {
+    throw new Error("探索分支必须留在源会话所属的工作区。 ");
+  }
+  const forkRequestId = `pi-fork-${target.id}-${Date.now()}`;
+  await invoke("prepare_pi_session_fork", {
+    sourceSessionId: source.id,
+    branchSessionId: target.id,
+    anchorNativeEntryId: nativeEntryId,
+    requestId: forkRequestId,
+    cwd: source.cwd,
+  });
+  await startPiWorker(source.cwd);
+
+  const sourceBinding = await getPiAgentSessionBinding(source.id);
+  let expectedRequestId = "";
+  let expectedSessionId = "";
+  let acknowledge: (() => void) | undefined;
+  let rejectAcknowledge: ((reason: Error) => void) | undefined;
+  const unlisteners = await subscribeToPiAgentEvents(
+    (envelope) => {
+      if (envelope.requestId !== expectedRequestId) return;
+      if (
+        envelope.event.type === "session.opened" &&
+        envelope.sessionId === expectedSessionId
+      ) {
+        acknowledge?.();
+      } else if (envelope.event.type === "runtime.error") {
+        rejectAcknowledge?.(new Error(envelope.event.error.message));
+      }
+    },
+    () => {},
+  );
+
+  const sendAndWaitForOpen = async (
+    requestId: string,
+    sessionId: string,
+    command: Parameters<typeof sendPiAgentCommand>[0]["command"],
+  ) => {
+    expectedRequestId = requestId;
+    expectedSessionId = sessionId;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const acknowledgement = new Promise<void>((resolve, reject) => {
+      acknowledge = resolve;
+      rejectAcknowledge = reject;
+    });
+    try {
+      await sendPiAgentCommand({
+        protocolVersion: 1,
+        requestId,
+        sessionId: source.id,
+        command,
+      });
+      await Promise.race([
+        acknowledgement,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("恢复 Pi 探索分支超时。")),
+            15_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      acknowledge = undefined;
+      rejectAcknowledge = undefined;
+    }
+  };
+
+  try {
+    await sendAndWaitForOpen(
+      `pi-open-fork-source-${source.id}-${Date.now()}`,
+      source.id,
+      {
+        type: "session.open",
+        sessionId: source.id,
+        productSessionId: source.id,
+        cwd: source.cwd,
+        permissionMode: sourceBinding?.permissionMode ?? "ask",
+        sessionModeId: sourceBinding?.sessionModeId ?? "default",
+        ...(sourceBinding?.modelId ? { modelId: sourceBinding.modelId } : {}),
+        ...(sourceBinding?.reasoningEffort
+          ? { reasoningEffort: sourceBinding.reasoningEffort }
+          : {}),
+      },
+    );
+    await sendAndWaitForOpen(forkRequestId, target.id, {
+      type: "session.fork",
+      sessionId: source.id,
+      targetSessionId: target.id,
+      cwd: source.cwd,
+      nativeEntryId,
+    });
+  } finally {
+    for (const unlisten of unlisteners) unlisten();
+  }
+};
+
+export const getPiSessionFork = async (
+  branchSessionId: string,
+): Promise<PiSessionFork | undefined> => {
+  if (!isTauriRuntime()) return undefined;
+  return (
+    (await invoke<PiSessionFork | null>("get_pi_session_fork", {
+      branchSessionId,
+    })) ?? undefined
+  );
+};
+
+export const listPiSessionForks = async (
+  sessionId: string,
+): Promise<PiSessionFork[]> => {
+  if (!isTauriRuntime()) return [];
+  return invoke<PiSessionFork[]>("list_pi_session_forks", { sessionId });
+};
+
+export const readPiSessionForkReference = async (
+  sourceSessionId: string,
+  branchSessionId: string,
+): Promise<ExplorerSessionReference> => {
+  if (!isTauriRuntime()) {
+    throw new Error(
+      "Explorer session references are available only in the desktop app.",
+    );
+  }
+  return invoke<ExplorerSessionReference>("read_pi_session_fork_reference", {
+    sourceSessionId,
+    branchSessionId,
+  });
+};
+
 export const updateStoredSession = async (
   request: UpdateSessionRequest,
 ): Promise<SessionRecord> => {
@@ -199,6 +356,196 @@ export const readStoredSessionTimeline = async (
       .join(",") +
     "]"
   );
+};
+
+/**
+ * Produce a conservative, read-only Pi migration report for one persisted
+ * session. The full Host archive is preferred when it is available; an archive
+ * read failure is carried into the report as a blocker instead of silently
+ * falling back to a potentially partial snapshot.
+ */
+export const getPiMigrationReportForSession = async (
+  session: SessionRecord,
+): Promise<PiMigrationReport> => {
+  let timelineArchiveJson: string | undefined;
+  let timelineArchiveReadFailed = false;
+  try {
+    timelineArchiveJson = await readStoredSessionTimeline(session.id);
+  } catch {
+    timelineArchiveReadFailed = true;
+  }
+  return buildPiMigrationReportForSession({
+    id: session.id,
+    ...(session.acpSessionId ? { acpSessionId: session.acpSessionId } : {}),
+    ...(session.acpCursor ? { acpCursor: session.acpCursor } : {}),
+    timelineJson: session.timelineJson,
+    timelineVersion: session.timelineVersion,
+    ...(timelineArchiveJson !== undefined ? { timelineArchiveJson } : {}),
+    ...(timelineArchiveReadFailed ? { timelineArchiveReadFailed: true } : {}),
+  });
+};
+
+/**
+ * Produce a bounded, read-only ACP → Pi import plan. The plan contains only
+ * converter-local records and source mappings; it never creates a Pi session,
+ * changes an engine binding, or writes an archive.
+ */
+export const getPiSessionImportPlanForSession = async (
+  session: SessionRecord,
+): Promise<PiSessionImportPlan> => {
+  let timelineArchiveJson: string | undefined;
+  let timelineArchiveReadFailed = false;
+  try {
+    timelineArchiveJson = await readStoredSessionTimeline(session.id);
+  } catch {
+    timelineArchiveReadFailed = true;
+  }
+  return buildPiSessionImportPlanForSession({
+    id: session.id,
+    ...(session.acpSessionId ? { acpSessionId: session.acpSessionId } : {}),
+    ...(session.acpCursor ? { acpCursor: session.acpCursor } : {}),
+    timelineJson: session.timelineJson,
+    timelineVersion: session.timelineVersion,
+    ...(timelineArchiveJson !== undefined ? { timelineArchiveJson } : {}),
+    ...(timelineArchiveReadFailed ? { timelineArchiveReadFailed: true } : {}),
+  });
+};
+
+export interface PiMigrationJournalRecord {
+  migrationId: string;
+  sessionId: string;
+  sourceEngine: "melody-acp";
+  targetEngine: "pi";
+  sourceDigest: string;
+  converterVersion: string;
+  stage: "planned" | "materializing" | "applied" | "failed" | "rolled-back";
+  validationReport: JsonObject;
+  plan: JsonObject;
+  backupRequested: boolean;
+  backupRef?: string | null;
+  targetNativeSessionId?: string | null;
+  error?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BeginPiMigrationInput {
+  sessionId: string;
+  sourceDigest: string;
+  converterVersion: string;
+  validationReport: JsonObject;
+  plan: JsonObject;
+  backup?: boolean;
+}
+
+/** Create or resume the Host-owned journal entry for one ACP → Pi attempt. */
+export const beginPiMigration = async (
+  request: BeginPiMigrationInput,
+): Promise<PiMigrationJournalRecord> => {
+  if (!isTauriRuntime()) {
+    throw new Error("Pi 会话迁移日志仅在桌面运行时可用。 ");
+  }
+  return invoke<PiMigrationJournalRecord>("begin_pi_migration", { request });
+};
+
+export const listPiMigrationJournal = async (
+  sessionId: string,
+): Promise<PiMigrationJournalRecord[]> => {
+  if (!isTauriRuntime()) return [];
+  return invoke<PiMigrationJournalRecord[]>("list_pi_migration_journal", {
+    sessionId,
+  });
+};
+
+/** Preserve a bounded failure reason so a later retry receives a new ID. */
+export const failPiMigration = async (
+  migrationId: string,
+  sessionId: string,
+  error: unknown,
+): Promise<PiMigrationJournalRecord> => {
+  if (!isTauriRuntime()) {
+    throw new Error("Pi 会话迁移日志仅在桌面运行时可用。 ");
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return invoke<PiMigrationJournalRecord>("fail_pi_migration", {
+    request: { migrationId, sessionId, error: message.slice(0, 16_384) },
+  });
+};
+
+/**
+ * Execute the explicit ACP → Pi migration for a stored session. The planner
+ * remains side-effect-free; this function is the one narrow, user-invoked
+ * mutation that starts the Pi worker and asks it to materialize the validated
+ * plan. Automatic session opening uses the same command, so this helper is
+ * also useful to settings/recovery UI without duplicating conversion logic.
+ */
+export const migrateStoredSessionToPi = async (
+  session: SessionRecord,
+  options: {
+    modelId?: string;
+    reasoningEffort?: string;
+    sessionModeId?: string;
+    permissionMode?: AgentPermissionMode;
+    backup?: boolean;
+  } = {},
+): Promise<PiSessionImportPlan> => {
+  if (!isTauriRuntime()) {
+    throw new Error("Pi 会话迁移仅在桌面运行时可用。 ");
+  }
+  const plan = await getPiSessionImportPlanForSession(session);
+  if (plan.readiness === "blocked") {
+    throw new Error(
+      `该会话暂时不能迁移到 Pi：${plan.blockers[0] ?? "迁移计划未通过安全检查。"}`,
+    );
+  }
+  const planValue = plan as unknown as JsonObject;
+  const journal = await beginPiMigration({
+    sessionId: session.id,
+    sourceDigest: plan.sourceDigest,
+    converterVersion: plan.converterVersion,
+    validationReport: planValue,
+    plan: planValue,
+    backup: options.backup ?? true,
+  });
+  if (journal.stage === "applied") return plan;
+  try {
+    await startPiWorker(session.cwd);
+    await sendPiAgentCommand({
+      protocolVersion: 1,
+      requestId: `pi-migrate-${session.id}-${Date.now()}`,
+      sessionId: session.id,
+      command: {
+        type: "session.import",
+        sessionId: session.id,
+        migrationId: journal.migrationId,
+        cwd: session.cwd,
+        ...(options.modelId ? { modelId: options.modelId } : {}),
+        ...(options.reasoningEffort
+          ? { reasoningEffort: options.reasoningEffort }
+          : {}),
+        ...(options.sessionModeId
+          ? { sessionModeId: options.sessionModeId }
+          : {}),
+        ...(options.permissionMode
+          ? { permissionMode: options.permissionMode }
+          : {}),
+        plan: planValue,
+        // The journal is authoritative on retries.  Never let a caller
+        // replace an active attempt's backup choice after it has been
+        // materialized, otherwise the worker could overwrite native JSONL
+        // without the recovery copy recorded by the Host.
+        backup: journal.backupRequested,
+      },
+    });
+  } catch (error) {
+    try {
+      await failPiMigration(journal.migrationId, session.id, error);
+    } catch {
+      // Keep the original worker error; the Host journal remains inspectable.
+    }
+    throw error;
+  }
+  return plan;
 };
 
 export const deleteStoredSession = async (id: string): Promise<void> => {

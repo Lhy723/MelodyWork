@@ -12,6 +12,13 @@ import type {
   AgentSubagent,
   TimelineEntry,
 } from "@/domain/acp";
+import type {
+  AgentCapabilityDiagnostic,
+  AgentEventEnvelope,
+  AgentModelDescriptor,
+  AgentProtocolCapabilities,
+} from "@/domain/agent/contract";
+import type { AgentMonitorNotification } from "@/domain/agent/event-to-session-update";
 
 export interface AgentStore {
   activeSessionId: string;
@@ -29,6 +36,24 @@ export interface AgentStore {
   subagents: Record<string, AgentSubagent>;
   stderr: string[];
   availableModels: AgentModelOption[];
+  /** Pi model entries that are known but currently unavailable. */
+  unavailableModels: AgentModelDescriptor[];
+  /** Provider/auth errors from the latest Pi model catalog refresh. */
+  modelRefreshErrors: Record<string, string>;
+  /** Latest engine capability negotiation snapshot. */
+  capabilities?: AgentProtocolCapabilities;
+  /** Structured gaps reported by the active engine/compatibility preflight. */
+  capabilityDiagnostics: AgentCapabilityDiagnostic[];
+  /**
+   * Bounded Host-owned monitor feed. Monitors stream each output line as an
+   * event instead of a chat message, so the lines live here rather than in the
+   * timeline.
+   */
+  monitorNotifications: AgentMonitorNotification[];
+  /** Renderer-visible revision of the Host-owned schedule inventory. */
+  scheduleRevision: number;
+  /** Monotonic revision acknowledged by the active session. */
+  configRevision: number;
   selectedModelId?: string;
   pendingModelId?: string;
   selectedReasoningEffort?: string;
@@ -39,6 +64,12 @@ export interface AgentStore {
   permissionMode: AgentPermissionMode;
   runningSessions: Record<string, boolean>;
   chatStatus: "ready" | "submitted" | "streaming" | "error";
+  /**
+   * True only while a legacy-engine session is displayed as a read-only
+   * archive: history stays visible, but no engine process is started and the
+   * composer must stay gated. Reset by every other session-open path.
+   */
+  archivedReadOnly: boolean;
   setStatus: (status: AgentStatus) => void;
   /** Clears the session-scoped projection when no workspace session is active. */
   resetSessionView: () => void;
@@ -53,7 +84,20 @@ export interface AgentStore {
     archivedTimelineJson?: string,
     forceInitialize?: boolean,
   ) => Promise<void>;
+  /**
+   * Opens a legacy-engine session as a read-only archive: seeds the timeline
+   * from persisted history and performs no engine traffic at all.
+   */
+  beginArchivedSession: (
+    cwd: string,
+    localSessionId: string,
+    timelineJson?: string,
+    archivedTimelineJson?: string,
+    timelineVersion?: number,
+  ) => Promise<void>;
   receiveAcp: (message: AcpEnvelope) => Promise<void>;
+  /** Opt-in normalized Pi event sink; ACP remains the default bridge. */
+  receiveAgentEvent: (event: AgentEventEnvelope) => void;
   submitPrompt: (
     content: string,
     attachments?: AgentPromptAttachment[],

@@ -3,6 +3,7 @@ mod workspace_files;
 #[path = "workspace_terminal.rs"]
 mod workspace_terminal;
 
+pub(crate) use workspace_files::safe_write_path;
 #[allow(unused_imports)]
 pub use workspace_files::{
     WorkspaceEntry, pick_workspace_directory, read_workspace_binary_file, read_workspace_file,
@@ -15,12 +16,9 @@ pub use workspace_terminal::{
 
 #[cfg(test)]
 pub(crate) use workspace_files::collect_tree;
-#[cfg(test)]
 pub(crate) use workspace_files::is_ignored_directory;
 #[cfg(test)]
 pub(crate) use workspace_files::read_workspace_binary_bytes;
-#[cfg(test)]
-pub(crate) use workspace_files::safe_write_path;
 #[cfg(test)]
 pub(crate) use workspace_terminal::{terminal_command, wait_for_terminal_exit};
 

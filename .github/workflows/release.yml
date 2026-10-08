@@ -44,6 +44,10 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Load release notes
         id: release-notes
         shell: bash
@@ -120,6 +124,14 @@ jobs:
           cargo build --locked --release --package melody-pager-bin --bin melody-pager
           mkdir -p ../../src-tauri/binaries
           cp "target/release/melody-pager${{ matrix.sidecar_ext }}" "../../src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
+
+      - name: Build and smoke-test Pi worker
+        shell: bash
+        env:
+          TAURI_ENV_TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          pnpm prepare:agent-worker
+          MELODY_PI_WORKER_PATH="src-tauri/binaries/melody-agent-worker-${{ matrix.target }}${{ matrix.sidecar_ext }}" pnpm test:pi-worker-smoke
 
       - name: Build and publish installers
         uses: tauri-apps/tauri-action@v0

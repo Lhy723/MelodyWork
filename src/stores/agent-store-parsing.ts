@@ -3,15 +3,16 @@ import type {
   AgentContextUsage,
   AgentModelOption,
   AgentReasoningEffortOption,
-  AgentQuestionRequest,
-  AgentQuestionResponse,
   PermissionOption,
-  TimelineEntry,
 } from "@/domain/acp";
 import {
   contextUsageFromTotalTokens,
   parseSessionContextUsage,
 } from "@/domain/session-projection";
+export {
+  questionEntryForRequest,
+  updateQuestionEntry,
+} from "@/domain/user-question";
 
 export const objectValue = (
   value: unknown,
@@ -48,113 +49,6 @@ export const parsePermissionOptions = (value: unknown): PermissionOption[] =>
         return optionId && name && kind ? [{ optionId, name, kind }] : [];
       })
     : [];
-
-const questionResponseText = (response: AgentQuestionResponse) => {
-  switch (response.outcome) {
-    case "accepted":
-      return "已提交回答，Melody 将继续处理。";
-    case "chat_about_this":
-      return "已请求进一步讨论这些问题。";
-    case "skip_interview":
-      return "已跳过提问，Melody 将继续制定计划。";
-    case "cancelled":
-      return "已取消回答。";
-  }
-};
-
-export const questionEntryForRequest = (
-  timeline: TimelineEntry[],
-  request: AgentQuestionRequest,
-): TimelineEntry[] => {
-  const index = timeline.findIndex(
-    (entry) =>
-      entry.kind === "tool" &&
-      (entry.toolCallId === request.toolCallId ||
-        entry.question?.requestId === request.requestId),
-  );
-  const existing = index >= 0 ? timeline[index] : undefined;
-  const existingQuestion =
-    existing?.kind === "tool" ? existing.question : undefined;
-  const keepAnsweredRequest =
-    existingQuestion?.requestId === request.requestId &&
-    existingQuestion.outcome !== "pending";
-  const next: TimelineEntry = {
-    id:
-      existing?.id ??
-      `question-${request.toolCallId}-${String(request.requestId)}`,
-    kind: "tool",
-    toolCallId: request.toolCallId,
-    title:
-      existing?.kind === "tool" && existing.title.trim()
-        ? existing.title
-        : "询问用户",
-    command:
-      existing?.kind === "tool" && existing.command.trim()
-        ? existing.command
-        : "ask_user_question",
-    output:
-      existing?.kind === "tool" && existing.output
-        ? existing.output
-        : "正在等待你的回答。",
-    startedAt: existing?.kind === "tool" ? existing.startedAt : Date.now(),
-    activity: existing?.kind === "tool" ? existing.activity : undefined,
-    status: keepAnsweredRequest
-      ? existing?.kind === "tool"
-        ? existing.status
-        : "completed"
-      : "pending",
-    permission: existing?.kind === "tool" ? existing.permission : undefined,
-    permissionRequestId:
-      existing?.kind === "tool" ? existing.permissionRequestId : undefined,
-    permissionOptions:
-      existing?.kind === "tool" ? existing.permissionOptions : undefined,
-    question: keepAnsweredRequest ? existingQuestion : request,
-  };
-  if (index < 0) {
-    return [...timeline, next];
-  }
-  return timeline.map((entry, entryIndex) =>
-    entryIndex === index ? next : entry,
-  );
-};
-
-export const updateQuestionEntry = (
-  timeline: TimelineEntry[],
-  entryId: string,
-  response: AgentQuestionResponse,
-): TimelineEntry[] =>
-  timeline.map((entry) => {
-    if (entry.id !== entryId || entry.kind !== "tool" || !entry.question) {
-      return entry;
-    }
-    const question = entry.question;
-    return {
-      ...entry,
-      output: questionResponseText(response),
-      question: {
-        ...question,
-        outcome: response.outcome,
-        ...(response.outcome === "accepted"
-          ? {
-              answers: response.answers,
-              annotations: response.annotations,
-              partialAnswers: undefined,
-            }
-          : response.outcome === "chat_about_this" ||
-              response.outcome === "skip_interview"
-            ? {
-                partialAnswers: response.partialAnswers,
-                answers: undefined,
-                annotations: undefined,
-              }
-            : {
-                answers: undefined,
-                annotations: undefined,
-                partialAnswers: undefined,
-              }),
-      },
-    };
-  });
 
 export const errorMessage = (message: AcpEnvelope, fallback: string) => {
   const base = message.error?.message?.trim();
@@ -208,6 +102,17 @@ const reasoningEffortCopy: Record<
   high: { label: "高", description: "更充分的推理与实现检查" },
   medium: { label: "中", description: "兼顾速度与质量" },
   low: { label: "低", description: "优先快速响应" },
+};
+
+const inputModalitiesFrom = (
+  value: unknown,
+): AgentModelOption["input"] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const input = value.filter(
+    (item, index, all): item is "text" | "image" =>
+      (item === "text" || item === "image") && all.indexOf(item) === index,
+  );
+  return input.length > 0 ? input : undefined;
 };
 
 const modelOptionsFromState = (state: Record<string, unknown> | undefined) => {
@@ -288,6 +193,11 @@ const modelOptionsFromState = (state: Record<string, unknown> | undefined) => {
           {
             id,
             name: stringValue(model?.name) ?? id,
+            ...(inputModalitiesFrom(wireValue(meta, "input", "input"))
+              ? {
+                  input: inputModalitiesFrom(wireValue(meta, "input", "input")),
+                }
+              : {}),
             contextWindowTokens: numberValue(
               wireValue(meta, "totalContextTokens", "total_context_tokens"),
             ),

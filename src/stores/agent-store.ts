@@ -6,11 +6,9 @@ import {
   appendSessionError,
   settleSessionProjection,
 } from "@/domain/session-projection";
-import {
-  isTauriRuntime,
-  sendAcp,
-  upsertPermissionRule,
-} from "@/lib/melody-bridge";
+import { sendAgentCommand } from "@/lib/agent-client";
+import type { JsonObject } from "@/domain/agent/contract";
+import { isTauriRuntime, upsertPermissionRule } from "@/lib/melody-bridge";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
@@ -29,9 +27,13 @@ import {
   previewTimeline,
 } from "./agent-store-runtime";
 import type { AgentStore } from "./agent-store-types";
-import { beginAgentSession } from "./agent-store-session";
+import {
+  beginAgentSession,
+  beginArchivedSession as beginArchivedSessionFn,
+} from "./agent-store-session";
 import { receiveAgentAcp } from "./agent-store-receive";
 import { submitAgentPrompt } from "./agent-store-submit";
+import { receiveAgentEvent, resetPiEventProjection } from "./agent-store-pi";
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
   activeSessionId: isTauriRuntime() ? "" : "implement-acp-bridge",
@@ -48,10 +50,17 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   subagents: {},
   stderr: [],
   availableModels: [],
+  unavailableModels: [],
+  modelRefreshErrors: {},
+  capabilityDiagnostics: [],
+  monitorNotifications: [],
+  scheduleRevision: 0,
+  configRevision: 0,
   availableSessionModes: [],
   permissionMode: useAppSettingsStore.getState().defaultPermissionMode,
   runningSessions: {},
   chatStatus: "ready",
+  archivedReadOnly: false,
   setStatus: (status) => {
     const current = get();
     const sessionLost =
@@ -88,6 +97,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
   resetSessionView: () => {
     clearTransientState();
+    resetPiEventProjection();
     set({
       activeSessionId: isTauriRuntime() ? "" : "implement-acp-bridge",
       localSessionId: undefined,
@@ -97,16 +107,25 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       acpCursor: undefined,
       timeline: isTauriRuntime() ? [] : previewTimeline,
       contextUsage: undefined,
+      capabilities: undefined,
+      capabilityDiagnostics: [],
+      monitorNotifications: [],
+      scheduleRevision: 0,
+      configRevision: 0,
       availableSessionModes: [],
       selectedSessionModeId: undefined,
       pendingSessionModeId: undefined,
+      archivedReadOnly: false,
       chatStatus: "ready",
     });
   },
   appendStderr: (line) =>
     set((state) => ({ stderr: [...state.stderr.slice(-49), line] })),
   beginSession: (...args) => beginAgentSession({ get, set }, ...args),
+  beginArchivedSession: (...args) =>
+    beginArchivedSessionFn({ get, set }, ...args),
   receiveAcp: (message) => receiveAgentAcp({ get, set }, message),
+  receiveAgentEvent: (event) => receiveAgentEvent({ get, set }, event),
   submitPrompt: (...args) => submitAgentPrompt({ get, set }, ...args),
   cancelPrompt: async (reason = "user") => {
     const stateBeforeCancel = get();
@@ -134,18 +153,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       "发送请求后 30 秒内未收到任何 ACP 进展事件，已自动停止。";
     try {
       if (sessionId && isTauriRuntime()) {
-        await sendAcp({
-          jsonrpc: "2.0",
-          method: "session/cancel",
-          params: {
+        await sendAgentCommand({
+          protocolVersion: 1,
+          requestId: `cancel-${sessionId}-${Date.now()}`,
+          sessionId,
+          command: {
+            type: "turn.cancel",
             sessionId,
-            _meta: {
-              ...(pendingPrompt
-                ? { cancelPromptId: pendingPrompt.promptId }
-                : {}),
-              cancelSubagents: true,
-              cancelTrigger: reason === "timeout" ? "timeout" : "mouse",
-            },
+            ...(pendingPrompt ? { promptId: pendingPrompt.promptId } : {}),
+            cancelSubagents: true,
+            reason,
           },
         });
       }
@@ -196,8 +213,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
     if (!state.acpSessionId) {
+      const selectedModel = state.availableModels.find(
+        (model) => model.id === modelId,
+      );
       set({
         selectedModelId: modelId,
+        selectedReasoningEffort: selectedModel?.reasoningEffort,
         contextUsage: contextUsageForModel(state.availableModels, modelId),
         status: {
           ...state.status,
@@ -208,12 +229,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
     set({ pendingModelId: modelId });
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: SET_MODEL_REQUEST_ID,
-        method: "session/set_model",
-        params: {
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: SET_MODEL_REQUEST_ID,
+        sessionId: state.acpSessionId,
+        command: {
+          type: "session.configure",
           sessionId: state.acpSessionId,
+          expectedRevision: state.configRevision,
           modelId,
         },
       });
@@ -242,14 +265,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
     set({ pendingReasoningEffort: effort });
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: SET_REASONING_EFFORT_REQUEST_ID,
-        method: "session/set_model",
-        params: {
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: SET_REASONING_EFFORT_REQUEST_ID,
+        sessionId: state.acpSessionId,
+        command: {
+          type: "session.configure",
           sessionId: state.acpSessionId,
+          expectedRevision: state.configRevision,
           modelId: state.selectedModelId,
-          _meta: { reasoningEffort: effort },
+          reasoningEffort: effort,
         },
       });
     } catch (reason) {
@@ -276,13 +301,15 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
     set({ pendingSessionModeId: modeId });
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: SET_SESSION_MODE_REQUEST_ID,
-        method: "session/set_mode",
-        params: {
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: SET_SESSION_MODE_REQUEST_ID,
+        sessionId: state.acpSessionId,
+        command: {
+          type: "session.configure",
           sessionId: state.acpSessionId,
-          modeId,
+          expectedRevision: state.configRevision,
+          sessionModeId: modeId,
         },
       });
     } catch (reason) {
@@ -302,14 +329,15 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        method: "x.ai/yolo_mode_changed",
-        params: {
-          clientIdentifier: "melody-work",
-          permission_mode: mode,
-          yolo_mode: mode === "always-approve",
-          auto_mode: mode === "auto",
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: `permission-mode-${state.acpSessionId}-${Date.now()}`,
+        sessionId: state.acpSessionId,
+        command: {
+          type: "session.configure",
+          sessionId: state.acpSessionId,
+          expectedRevision: state.configRevision,
+          permissionMode: mode,
         },
       });
     } catch (reason) {
@@ -346,12 +374,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: entry.requestId,
-        result: {
-          outcome,
-          ...(normalizedFeedback ? { feedback: normalizedFeedback } : {}),
+      const sessionId = get().acpSessionId;
+      if (!sessionId) {
+        return;
+      }
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: entry.requestId,
+        sessionId,
+        command: {
+          type: "interaction.resolve",
+          sessionId,
+          interactionId: String(entry.requestId),
+          resolution: {
+            outcome,
+            ...(normalizedFeedback ? { feedback: normalizedFeedback } : {}),
+          },
         },
       });
     } catch (reason) {
@@ -374,7 +412,21 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
   },
   resolvePermission: async (entryId, optionId) => {
-    const entry = get().timeline.find((item) => item.id === entryId);
+    const state = get();
+    let entry = state.timeline.find((item) => item.id === entryId);
+    let backgroundSessionId: string | undefined;
+    if (!entry) {
+      for (const [sessionId, timeline] of Object.entries(
+        state.backgroundTimelines,
+      )) {
+        const candidate = timeline.find((item) => item.id === entryId);
+        if (candidate) {
+          entry = candidate;
+          backgroundSessionId = sessionId;
+          break;
+        }
+      }
+    }
     if (entry?.kind !== "tool" || entry.permissionRequestId === undefined) {
       return;
     }
@@ -406,22 +458,49 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       }
     }
 
-    set((state) => ({
-      timeline: state.timeline.map((item) =>
-        item.id === entryId ? { ...item, permission } : item,
-      ),
-    }));
+    set((current) =>
+      backgroundSessionId
+        ? {
+            backgroundTimelines: {
+              ...current.backgroundTimelines,
+              [backgroundSessionId]: current.backgroundTimelines[
+                backgroundSessionId
+              ].map((item) =>
+                item.id === entryId ? { ...item, permission } : item,
+              ),
+            },
+          }
+        : {
+            timeline: current.timeline.map((item) =>
+              item.id === entryId ? { ...item, permission } : item,
+            ),
+          },
+    );
 
     if (!isTauriRuntime()) {
       return;
     }
-    await sendAcp({
-      jsonrpc: "2.0",
-      id: entry.permissionRequestId,
-      result: {
-        outcome: {
-          outcome: "selected",
-          optionId: option.optionId,
+    // Pi child interactions are stored in a background timeline, but the
+    // ToolGateway also accepts the root product session as the authorization
+    // identity. Keep the command on that root instead of sending a child
+    // stream id that may not have a product binding of its own.
+    const sessionId = get().acpSessionId;
+    if (!sessionId) {
+      return;
+    }
+    await sendAgentCommand({
+      protocolVersion: 1,
+      requestId: entry.permissionRequestId,
+      sessionId,
+      command: {
+        type: "interaction.resolve",
+        sessionId,
+        interactionId: String(entry.permissionRequestId),
+        resolution: {
+          outcome: {
+            outcome: "selected",
+            optionId: option.optionId,
+          },
         },
       },
     });
@@ -450,19 +529,28 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       return;
     }
     const requestId = entry.question.requestId;
-    const wireResponse =
-      response.outcome === "chat_about_this" ||
-      response.outcome === "skip_interview"
-        ? {
-            outcome: response.outcome,
-            partial_answers: response.partialAnswers,
-          }
-        : response;
+    const wireResponse = (response.outcome === "chat_about_this" ||
+    response.outcome === "skip_interview"
+      ? {
+          outcome: response.outcome,
+          partial_answers: response.partialAnswers,
+        }
+      : response) as unknown as JsonObject;
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: requestId,
-        result: wireResponse,
+      const sessionId = entry.question.sessionId || backgroundSessionId;
+      if (!sessionId) {
+        return;
+      }
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId,
+        sessionId,
+        command: {
+          type: "interaction.resolve",
+          sessionId,
+          interactionId: String(requestId),
+          resolution: wireResponse,
+        },
       });
     } catch (reason) {
       set({

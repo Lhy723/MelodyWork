@@ -20,7 +20,7 @@ interface WorkspacePanelLayerProps {
   loading: boolean;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onNewTab: (kind: "files" | "terminal" | "review") => void;
+  onNewTab: (kind: "files" | "terminal" | "review" | "browser") => void;
   onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   onRefreshGit: () => void | Promise<void>;
@@ -30,6 +30,7 @@ interface WorkspacePanelLayerProps {
   panelWidth: number;
   resizing?: ResizeState;
   root: string;
+  sessionId?: string;
   subagents: Record<string, AgentSubagent>;
   tabs: WorkspaceTab[];
   open: boolean;
@@ -53,6 +54,7 @@ export function WorkspacePanelLayer({
   panelWidth,
   resizing,
   root,
+  sessionId,
   subagents,
   tabs,
   open,
@@ -90,6 +92,7 @@ export function WorkspacePanelLayer({
         maxPanelWidth={MAX_WORKSPACE_PANEL_WIDTH}
         minPanelWidth={MIN_WORKSPACE_PANEL_WIDTH}
         root={root}
+        sessionId={sessionId}
         subagents={subagents}
         tabs={tabs}
       />

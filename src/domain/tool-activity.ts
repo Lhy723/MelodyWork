@@ -39,7 +39,12 @@ const operationFromKind = (
   title: string,
   variant: string | undefined,
 ): AgentToolOperation => {
-  const haystack = `${kind ?? ""} ${variant ?? ""} ${title}`.toLowerCase();
+  // Normalized worker tool names commonly use snake_case (for example
+  // `workspace_read_file`). Treat separators as spaces before inferring the
+  // product operation so Pi/ACP tool names do not collapse into `other`.
+  const haystack = `${kind ?? ""} ${variant ?? ""} ${title}`
+    .toLowerCase()
+    .replaceAll(/[_-]/gu, " ");
   if (/\b(search|grep|glob|find)\b/u.test(haystack)) {
     return "search";
   }

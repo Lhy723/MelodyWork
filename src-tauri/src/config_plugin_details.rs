@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use tauri::{AppHandle, State};
@@ -30,10 +30,8 @@ fn read_json_file(path: &Path) -> Option<serde_json::Value> {
 }
 
 fn find_plugin_manifest(root: &Path, expected_name: &str) -> Option<(PathBuf, serde_json::Value)> {
-    for candidate in manifest_candidates(root) {
-        if let Some(value) = read_json_file(&candidate) {
-            return Some((candidate, value));
-        }
+    if let Some((path, value)) = direct_plugin_manifest(root) {
+        return Some((path, value));
     }
 
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -99,6 +97,262 @@ fn plugin_root_from_manifest(manifest_path: &Path) -> PathBuf {
     parent.to_path_buf()
 }
 
+fn direct_plugin_manifest(root: &Path) -> Option<(PathBuf, serde_json::Value)> {
+    manifest_candidates(root).into_iter().find_map(|candidate| {
+        let relative = candidate.strip_prefix(root).ok()?.to_string_lossy();
+        let path = safe_plugin_path(root, &relative, false)?;
+        let value = read_json_file(&path)?;
+        value.is_object().then_some((path, value))
+    })
+}
+
+/// Resolve a plugin-owned path without following symlinks or allowing it to
+/// escape the plugin root. Plugin manifests are untrusted input: even a
+/// read-only inventory must not expose files outside the package to the
+/// renderer/worker.
+fn safe_plugin_path(root: &Path, relative: &str, directory: bool) -> Option<PathBuf> {
+    let relative = relative.trim();
+    if relative.is_empty() {
+        return None;
+    }
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    let root_metadata = fs::symlink_metadata(root).ok()?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return None;
+    }
+    let canonical_root = root.canonicalize().ok()?;
+    let mut current = root.to_path_buf();
+    for component in relative_path.components() {
+        // `./` is a harmless relative prefix that plugin manifests commonly
+        // use; only components that can escape the plugin root are rejected.
+        let Component::Normal(name) = component else {
+            continue;
+        };
+        current.push(name);
+        let metadata = fs::symlink_metadata(&current).ok()?;
+        if metadata.file_type().is_symlink() {
+            return None;
+        }
+    }
+    let metadata = fs::symlink_metadata(&current).ok()?;
+    if directory && !metadata.is_dir() {
+        return None;
+    }
+    if !directory && !metadata.is_file() {
+        return None;
+    }
+    let canonical = current.canonicalize().ok()?;
+    canonical.starts_with(&canonical_root).then_some(canonical)
+}
+
+fn safe_plugin_directory(root: &Path, relative: &str) -> Option<PathBuf> {
+    safe_plugin_path(root, relative, true)
+}
+
+fn safe_plugin_json(root: &Path, relative: &str) -> Option<serde_json::Value> {
+    let path = safe_plugin_path(root, relative, false)?;
+    read_json_file(&path)
+}
+
+/// Return true when a direct manifest path exists but could not be loaded as a
+/// regular JSON object. Such a package is kept on ACP rather than silently
+/// projecting only a subset of its resources.
+fn has_direct_manifest_file(root: &Path) -> bool {
+    manifest_candidates(root)
+        .iter()
+        .any(|candidate| fs::symlink_metadata(candidate).is_ok())
+}
+
+fn manifest_directories_are_safe(root: &Path, value: Option<&serde_json::Value>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    match value {
+        serde_json::Value::String(path) => safe_plugin_directory(root, path).is_some(),
+        serde_json::Value::Array(paths) => paths.iter().all(|path| {
+            path.as_str()
+                .is_some_and(|path| safe_plugin_directory(root, path).is_some())
+        }),
+        _ => false,
+    }
+}
+
+fn manifest_component_paths_are_safe(root: &Path, value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::String(path)) => safe_plugin_path(root, path, false).is_some(),
+        _ => true,
+    }
+}
+
+fn has_unsafe_manifest_paths(root: &Path, manifest: &serde_json::Value) -> bool {
+    ["skills", "commands", "agents"]
+        .iter()
+        .any(|field| !manifest_directories_are_safe(root, manifest.get(field)))
+        || ["hooks", "mcpServers", "lspServers"]
+            .iter()
+            .any(|field| !manifest_component_paths_are_safe(root, manifest.get(field)))
+}
+
+fn safe_manifest_directories(
+    root: &Path,
+    value: Option<&serde_json::Value>,
+    fallback: &str,
+) -> Vec<PathBuf> {
+    manifest_paths(value, fallback)
+        .into_iter()
+        .filter_map(|relative| safe_plugin_directory(root, &relative))
+        .collect()
+}
+
+fn json_has_entries(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Array(values)) => !values.is_empty(),
+        Some(serde_json::Value::Object(values)) => !values.is_empty(),
+        Some(serde_json::Value::String(value)) => !value.trim().is_empty(),
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(serde_json::Value::Number(_)) => true,
+        _ => false,
+    }
+}
+
+fn directory_has_entries(path: &Path) -> bool {
+    fs::read_dir(path)
+        .ok()
+        .and_then(|mut entries| entries.next())
+        .is_some()
+}
+
+fn convention_plugin_root(root: &Path) -> bool {
+    [
+        "skills",
+        "commands",
+        "agents",
+        "hooks",
+        ".mcp.json",
+        ".lsp.json",
+    ]
+    .iter()
+    .any(|name| {
+        let path = root.join(name);
+        fs::symlink_metadata(path)
+            .map(|metadata| !metadata.file_type().is_symlink())
+            .unwrap_or(false)
+    })
+}
+
+/// Inspect a plugin directory without recursively searching its parent. This
+/// is used by the Host resource scanner so a marketplace/cache directory is
+/// never mistaken for a plugin merely because it contains a nested package.
+pub(crate) fn plugin_capability_from_directory(
+    root: &Path,
+    scope: &str,
+    enabled: bool,
+) -> Option<MelodyPluginCapability> {
+    let metadata = fs::symlink_metadata(root).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return None;
+    }
+    let canonical_root = root.canonicalize().ok()?;
+    let direct_manifest = direct_plugin_manifest(root);
+    let malformed_manifest = has_direct_manifest_file(root) && direct_manifest.is_none();
+    let manifest = direct_manifest
+        .map(|(_, value)| value)
+        .or_else(|| convention_plugin_root(root).then(|| serde_json::json!({})))
+        .or_else(|| malformed_manifest.then(|| serde_json::json!({})))?;
+
+    let skill_directories = safe_manifest_directories(root, manifest.get("skills"), "skills");
+    let prompt_directories = safe_manifest_directories(root, manifest.get("commands"), "commands");
+    let agent_directories = safe_manifest_directories(root, manifest.get("agents"), "agents");
+    let mut dynamic_components = Vec::new();
+    if malformed_manifest {
+        dynamic_components.push("manifest".to_string());
+    } else if has_unsafe_manifest_paths(root, &manifest) {
+        dynamic_components.push("resource-path".to_string());
+    }
+    // Only surfaces the Host would actually execute or spawn keep a plugin on
+    // the compatibility engine: hooks run commands, MCP/LSP declarations start
+    // processes, and manifest extensions are executable by definition.
+    //
+    // Everything else a plugin ships is declarative content: `skills/`,
+    // `commands/` and `agents/` are Markdown that Pi loads as untrusted
+    // material, and a `scripts/` or `bin/` directory is inert on its own --
+    // Melody never runs plugin scripts directly, only through a hook that is
+    // already detected here. A plugin is therefore projectable whenever it has
+    // no hooks, MCP/LSP servers, extensions or unsafe manifest paths, even if
+    // it ships helper scripts the model may later choose to run through the
+    // permission-gated Host terminal.
+    let component_json_fields = [
+        ("hooks", "hooks/hooks.json"),
+        ("mcpServers", ".mcp.json"),
+        ("lspServers", ".lsp.json"),
+    ];
+    for (field, fallback) in component_json_fields {
+        let component = component_json(&canonical_root, &manifest, field, fallback);
+        if json_has_entries(component.as_ref()) {
+            dynamic_components.push(field.to_string());
+        }
+    }
+    for field in ["extensions", "extension"] {
+        if json_has_entries(manifest.get(field)) {
+            dynamic_components.push(field.to_string());
+        }
+    }
+    let hooks_directory = canonical_root.join("hooks");
+    if fs::symlink_metadata(&hooks_directory)
+        .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())
+        .unwrap_or(false)
+        && directory_has_entries(&hooks_directory)
+    {
+        dynamic_components.push("hooks".to_string());
+    }
+    dynamic_components.sort();
+    dynamic_components.dedup();
+
+    let name = manifest
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            canonical_root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        })?;
+
+    Some(MelodyPluginCapability {
+        name,
+        path: canonical_root.to_string_lossy().into_owned(),
+        scope: scope.to_string(),
+        enabled,
+        static_resources: dynamic_components.is_empty(),
+        dynamic_components,
+        skill_roots: skill_directories
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+        prompt_roots: prompt_directories
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+        agent_roots: agent_directories
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+    })
+}
+
 fn manifest_paths(value: Option<&serde_json::Value>, fallback: &str) -> Vec<String> {
     match value {
         Some(serde_json::Value::String(path)) => vec![path.clone()],
@@ -114,8 +368,13 @@ fn manifest_paths(value: Option<&serde_json::Value>, fallback: &str) -> Vec<Stri
 fn collect_skill_names(root: &Path, paths: Vec<String>) -> Vec<String> {
     let mut names = Vec::new();
     for relative in paths {
-        let directory = root.join(relative);
-        if directory.join("SKILL.md").is_file() {
+        let Some(directory) = safe_plugin_directory(root, &relative) else {
+            continue;
+        };
+        if fs::symlink_metadata(directory.join("SKILL.md"))
+            .map(|metadata| metadata.file_type().is_file())
+            .unwrap_or(false)
+        {
             if let Some(name) = directory.file_name().and_then(|name| name.to_str()) {
                 names.push(name.to_string());
             }
@@ -126,7 +385,14 @@ fn collect_skill_names(root: &Path, paths: Vec<String>) -> Vec<String> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && path.join("SKILL.md").is_file() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir()
+                && fs::symlink_metadata(path.join("SKILL.md"))
+                    .map(|metadata| metadata.file_type().is_file())
+                    .unwrap_or(false)
+            {
                 names.push(entry.file_name().to_string_lossy().into_owned());
             }
         }
@@ -139,13 +405,20 @@ fn collect_skill_names(root: &Path, paths: Vec<String>) -> Vec<String> {
 fn collect_markdown_names(root: &Path, paths: Vec<String>) -> Vec<String> {
     let mut names = Vec::new();
     for relative in paths {
-        let directory = root.join(relative);
+        let Some(directory) = safe_plugin_directory(root, &relative) else {
+            continue;
+        };
         let Ok(entries) = fs::read_dir(directory) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|value| value.to_str()) == Some("md") {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_file()
+                && path.extension().and_then(|value| value.to_str()) == Some("md")
+            {
                 if let Some(name) = path.file_stem().and_then(|value| value.to_str()) {
                     names.push(name.to_string());
                 }
@@ -175,8 +448,8 @@ fn component_json(
 ) -> Option<serde_json::Value> {
     match manifest.get(field) {
         Some(value @ serde_json::Value::Object(_)) => Some(value.clone()),
-        Some(serde_json::Value::String(relative)) => read_json_file(&root.join(relative)),
-        _ => read_json_file(&root.join(fallback)),
+        Some(serde_json::Value::String(relative)) => safe_plugin_json(root, relative),
+        _ => safe_plugin_json(root, fallback),
     }
 }
 
@@ -429,7 +702,11 @@ pub(crate) fn allowed_skill_path_in_roots(
     if !allowed {
         return Err("Skill path is outside the allowed Melody skill directories".to_string());
     }
-    if !canonical.join("SKILL.md").is_file() {
+    let skill_file = canonical.join("SKILL.md");
+    if !fs::symlink_metadata(&skill_file)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+    {
         return Err("Skill directory does not contain SKILL.md".to_string());
     }
     Ok(canonical)

@@ -39,6 +39,7 @@ import {
 } from "@/components/ai-elements/model-selector";
 import {
   PromptInput,
+  PromptInputProvider,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
   PromptInputActionMenuContent,
@@ -75,10 +76,16 @@ import {
 } from "@/domain/model-provider";
 import { cn } from "@/lib/utils";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ReasoningEffortSlider } from "./reasoning-effort-slider";
+import {
+  readSessionComposerDraft,
+  writeSessionComposerDraft,
+} from "@/lib/session-composer-draft";
 
 interface AgentComposerProps {
+  archived?: boolean;
+  draftSessionId?: string;
   contextUsage?: AgentContextUsage;
   models: AgentModelOption[];
   modelChanging: boolean;
@@ -156,27 +163,44 @@ const sessionModeCopy: Record<
   },
 };
 
-const PromptInputAttachmentsDisplay = () => {
+const PromptInputAttachmentsDisplay = ({
+  supportsImages,
+}: {
+  supportsImages: boolean;
+}) => {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) {
     return null;
   }
 
+  const hasUnsupportedImages =
+    !supportsImages &&
+    attachments.files.some((attachment) =>
+      attachment.mediaType?.toLowerCase().startsWith("image/"),
+    );
+
   return (
-    <Attachments className="w-full" variant="inline">
-      {attachments.files.map((attachment) => (
-        <Attachment
-          className="max-w-52"
-          data={attachment}
-          key={attachment.id}
-          onRemove={() => attachments.remove(attachment.id)}
-        >
-          <AttachmentPreview />
-          <AttachmentInfo />
-          <AttachmentRemove />
-        </Attachment>
-      ))}
-    </Attachments>
+    <>
+      <Attachments className="w-full" variant="inline">
+        {attachments.files.map((attachment) => (
+          <Attachment
+            className="max-w-52"
+            data={attachment}
+            key={attachment.id}
+            onRemove={() => attachments.remove(attachment.id)}
+          >
+            <AttachmentPreview />
+            <AttachmentInfo />
+            <AttachmentRemove />
+          </Attachment>
+        ))}
+      </Attachments>
+      {hasUnsupportedImages ? (
+        <p className="px-2 pb-1 text-destructive text-xs">
+          当前模型不支持图片输入，请移除图片或切换到支持视觉的模型。
+        </p>
+      ) : null}
+    </>
   );
 };
 
@@ -195,6 +219,8 @@ const ModelProviderMark = ({ provider }: { provider: ModelProvider }) => (
 );
 
 export function AgentComposer({
+  archived,
+  draftSessionId,
   contextUsage,
   models,
   modelChanging,
@@ -214,12 +240,23 @@ export function AgentComposer({
   onSubmit,
 }: AgentComposerProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
-  const [composerText, setComposerText] = useState("");
+  const [composerText, setComposerText] = useState(() =>
+    readSessionComposerDraft(draftSessionId),
+  );
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      setComposerText(value);
+      writeSessionComposerDraft(draftSessionId, value);
+    },
+    [draftSessionId],
+  );
   const sendShortcut = useAppSettingsStore((state) => state.sendShortcut);
   const showContextUsage = useAppSettingsStore(
     (state) => state.showContextUsage,
   );
   const selectedModel = models.find((model) => model.id === selectedModelId);
+  const selectedModelSupportsImages =
+    selectedModel?.input?.includes("image") ?? true;
   const selectedModelProvider = selectedModel
     ? modelProvider(selectedModel)
     : undefined;
@@ -245,134 +282,227 @@ export function AgentComposer({
   const SessionModeIcon = selectedSessionModeCopy?.icon ?? BotIcon;
 
   const handleSubmit = (message: PromptInputMessage) => {
-    setComposerText("");
+    if (
+      !selectedModelSupportsImages &&
+      message.files.some((file) =>
+        file.mediaType?.toLowerCase().startsWith("image/"),
+      )
+    ) {
+      // Throwing is intentional: PromptInput catches submission failures and
+      // preserves the draft/attachments, while the inline warning tells the
+      // user exactly why the turn was not accepted.
+      throw new Error("当前模型不支持图片输入");
+    }
     return onSubmit(message.text, message.files);
   };
 
   return (
-    <div className="harness-composer-wrap mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6">
-      <PromptInput
-        accept="image/*,.txt,.md,.json,.toml"
-        className="harness-composer [&_[data-slot=input-group]]:rounded-[18px]"
-        maxFileSize={8 * 1024 * 1024}
-        maxFiles={8}
-        multiple
-        onSubmit={handleSubmit}
-      >
-        <PromptInputHeader>
-          <PromptInputAttachmentsDisplay />
-        </PromptInputHeader>
-        <PromptInputBody>
-          <PromptInputTextarea
-            onChange={(event) => setComposerText(event.currentTarget.value)}
-            placeholder="让 Melody 构建、审查或解释…"
-            submitShortcut={sendShortcut}
-          />
-        </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools>
-            <PromptInputActionMenu>
-              <PromptInputActionMenuTrigger tooltip="添加附件">
-                <PaperclipIcon />
-              </PromptInputActionMenuTrigger>
-              <PromptInputActionMenuContent>
-                <PromptInputActionAddAttachments />
-              </PromptInputActionMenuContent>
-            </PromptInputActionMenu>
-            {models.length > 0 ? (
-              <ModelSelector
-                onOpenChange={setModelSelectorOpen}
-                open={modelSelectorOpen}
-              >
-                <PromptInputTooltip tooltip="选择智能体模型">
-                  <ModelSelectorTrigger asChild>
-                    <PromptInputButton
-                      aria-label="选择智能体模型"
-                      className="motion-view-enter max-w-56"
-                      disabled={modelChanging}
-                    >
-                      {modelChanging ? (
-                        <LoaderCircleIcon className="animate-spin" />
-                      ) : selectedModelProvider ? (
-                        <ModelProviderMark provider={selectedModelProvider} />
-                      ) : (
-                        <BotIcon />
-                      )}
-                      <span className="truncate">
-                        {selectedModel?.name ?? "选择模型"}
-                      </span>
-                      <ChevronDownIcon className="size-3.5" />
-                    </PromptInputButton>
-                  </ModelSelectorTrigger>
-                </PromptInputTooltip>
-                <ModelSelectorContent
-                  className="max-w-lg rounded-xl"
-                  title="选择智能体模型"
+    <PromptInputProvider
+      initialInput={composerText}
+      onInputChange={handleDraftChange}
+    >
+      <div className="harness-composer-wrap mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6">
+        <PromptInput
+          accept={
+            selectedModelSupportsImages
+              ? "image/*,.txt,.md,.json,.toml"
+              : ".txt,.md,.json,.toml"
+          }
+          className="harness-composer [&_[data-slot=input-group]]:rounded-[18px]"
+          maxFileSize={8 * 1024 * 1024}
+          maxFiles={8}
+          multiple
+          onSubmit={handleSubmit}
+        >
+          <PromptInputHeader>
+            <PromptInputAttachmentsDisplay
+              supportsImages={selectedModelSupportsImages}
+            />
+          </PromptInputHeader>
+          <PromptInputBody>
+            <PromptInputTextarea
+              disabled={archived}
+              placeholder="让 Melody 构建、审查或解释…"
+              submitShortcut={sendShortcut}
+            />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <PromptInputTools>
+              <PromptInputActionMenu>
+                <PromptInputActionMenuTrigger
+                  disabled={archived}
+                  tooltip={
+                    selectedModelSupportsImages
+                      ? "添加附件"
+                      : "添加文件（当前模型不支持图片）"
+                  }
                 >
-                  <ModelSelectorInput placeholder="搜索模型…" />
-                  <ModelSelectorList>
-                    <ModelSelectorEmpty>没有找到匹配的模型</ModelSelectorEmpty>
-                    {modelGroups.map(({ provider, models: groupModels }) => (
-                      <ModelSelectorGroup
-                        heading={provider.name}
-                        key={provider.id}
+                  <PaperclipIcon />
+                </PromptInputActionMenuTrigger>
+                <PromptInputActionMenuContent>
+                  <PromptInputActionAddAttachments
+                    label={selectedModelSupportsImages ? undefined : "添加文件"}
+                  />
+                </PromptInputActionMenuContent>
+              </PromptInputActionMenu>
+              {models.length > 0 ? (
+                <ModelSelector
+                  onOpenChange={setModelSelectorOpen}
+                  open={modelSelectorOpen}
+                >
+                  <PromptInputTooltip tooltip="选择智能体模型">
+                    <ModelSelectorTrigger asChild>
+                      <PromptInputButton
+                        aria-label="选择智能体模型"
+                        className="motion-view-enter max-w-56"
+                        disabled={archived || modelChanging}
                       >
-                        {groupModels.map((model) => (
-                          <ModelSelectorItem
-                            data-checked={model.id === selectedModelId}
-                            disabled={modelChanging}
-                            key={model.id}
-                            onSelect={() => {
-                              if (model.id !== selectedModelId) {
-                                onModelChange(model.id);
-                              }
-                              setModelSelectorOpen(false);
-                            }}
-                            value={`${model.name} ${model.id} ${provider.name}`}
+                        {modelChanging ? (
+                          <LoaderCircleIcon className="animate-spin" />
+                        ) : selectedModelProvider ? (
+                          <ModelProviderMark provider={selectedModelProvider} />
+                        ) : (
+                          <BotIcon />
+                        )}
+                        <span className="truncate">
+                          {selectedModel?.name ?? "选择模型"}
+                        </span>
+                        <ChevronDownIcon className="size-3.5" />
+                      </PromptInputButton>
+                    </ModelSelectorTrigger>
+                  </PromptInputTooltip>
+                  <ModelSelectorContent
+                    className="max-w-lg rounded-xl"
+                    title="选择智能体模型"
+                  >
+                    <ModelSelectorInput placeholder="搜索模型…" />
+                    <ModelSelectorList>
+                      <ModelSelectorEmpty>
+                        没有找到匹配的模型
+                      </ModelSelectorEmpty>
+                      {modelGroups.map(({ provider, models: groupModels }) => (
+                        <ModelSelectorGroup
+                          heading={provider.name}
+                          key={provider.id}
+                        >
+                          {groupModels.map((model) => (
+                            <ModelSelectorItem
+                              data-checked={model.id === selectedModelId}
+                              disabled={archived || modelChanging}
+                              key={model.id}
+                              onSelect={() => {
+                                if (model.id !== selectedModelId) {
+                                  onModelChange(model.id);
+                                }
+                                setModelSelectorOpen(false);
+                              }}
+                              value={`${model.name} ${model.id} ${provider.name}`}
+                            >
+                              <ModelProviderMark provider={provider} />
+                              <ModelSelectorName>
+                                {model.name}
+                              </ModelSelectorName>
+                              <span className="max-w-44 truncate text-muted-foreground text-xs">
+                                {model.id}
+                              </span>
+                            </ModelSelectorItem>
+                          ))}
+                        </ModelSelectorGroup>
+                      ))}
+                    </ModelSelectorList>
+                  </ModelSelectorContent>
+                </ModelSelector>
+              ) : (
+                <span className="px-2 text-muted-foreground text-xs">
+                  智能体 · 默认模型
+                </span>
+              )}
+              {selectedModel && selectedModel.reasoningEfforts.length > 0 ? (
+                <ReasoningEffortSlider
+                  disabled={
+                    archived || modelChanging || reasoningEffortChanging
+                  }
+                  loading={reasoningEffortChanging}
+                  onValueChange={onReasoningEffortChange}
+                  options={selectedModel.reasoningEfforts}
+                  value={selectedReasoningEffort}
+                />
+              ) : null}
+              {selectedSessionMode ? (
+                <DropdownMenu>
+                  <PromptInputTooltip tooltip="会话模式">
+                    <DropdownMenuTrigger asChild>
+                      <PromptInputButton
+                        aria-label="会话模式"
+                        className="max-w-36"
+                        disabled={archived || sessionModeChanging}
+                      >
+                        {sessionModeChanging ? (
+                          <LoaderCircleIcon className="animate-spin" />
+                        ) : (
+                          <SessionModeIcon />
+                        )}
+                        <span className="truncate">
+                          {selectedSessionModeCopy?.label ??
+                            selectedSessionMode.name}
+                        </span>
+                        <ChevronDownIcon className="size-3.5" />
+                      </PromptInputButton>
+                    </DropdownMenuTrigger>
+                  </PromptInputTooltip>
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-64 rounded-lg p-1"
+                    side="top"
+                    sideOffset={8}
+                  >
+                    <DropdownMenuRadioGroup
+                      onValueChange={onSessionModeChange}
+                      value={selectedSessionModeId}
+                    >
+                      {sessionModes.map((mode) => {
+                        const copy = sessionModeCopy[mode.id];
+                        const Icon = copy?.icon ?? BotIcon;
+                        return (
+                          <DropdownMenuRadioItem
+                            className="items-start gap-2 rounded-md px-2 py-1.5 pr-8"
+                            disabled={archived || sessionModeChanging}
+                            key={mode.id}
+                            value={mode.id}
                           >
-                            <ModelProviderMark provider={provider} />
-                            <ModelSelectorName>{model.name}</ModelSelectorName>
-                            <span className="max-w-44 truncate text-muted-foreground text-xs">
-                              {model.id}
+                            <Icon className="mt-px size-4" />
+                            <span className="min-w-0">
+                              <span className="block font-medium text-sm leading-4">
+                                {copy?.label ?? mode.name}
+                              </span>
+                              <span className="block whitespace-normal text-muted-foreground text-xs leading-4">
+                                {copy?.description ??
+                                  mode.description ??
+                                  mode.name}
+                              </span>
                             </span>
-                          </ModelSelectorItem>
-                        ))}
-                      </ModelSelectorGroup>
-                    ))}
-                  </ModelSelectorList>
-                </ModelSelectorContent>
-              </ModelSelector>
-            ) : (
-              <span className="px-2 text-muted-foreground text-xs">
-                智能体 · 默认模型
-              </span>
-            )}
-            {selectedModel && selectedModel.reasoningEfforts.length > 0 ? (
-              <ReasoningEffortSlider
-                disabled={modelChanging || reasoningEffortChanging}
-                loading={reasoningEffortChanging}
-                onValueChange={onReasoningEffortChange}
-                options={selectedModel.reasoningEfforts}
-                value={selectedReasoningEffort}
-              />
-            ) : null}
-            {selectedSessionMode ? (
+                          </DropdownMenuRadioItem>
+                        );
+                      })}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
               <DropdownMenu>
-                <PromptInputTooltip tooltip="会话模式">
+                <PromptInputTooltip tooltip="权限模式">
                   <DropdownMenuTrigger asChild>
                     <PromptInputButton
-                      aria-label="会话模式"
-                      className="max-w-36"
-                      disabled={sessionModeChanging}
-                    >
-                      {sessionModeChanging ? (
-                        <LoaderCircleIcon className="animate-spin" />
-                      ) : (
-                        <SessionModeIcon />
+                      aria-label="权限模式"
+                      className={cn(
+                        "max-w-40",
+                        permissionMode === "always-approve" &&
+                          "text-orange-600 hover:text-orange-600",
                       )}
+                      disabled={archived}
+                    >
+                      <PermissionIcon />
                       <span className="truncate">
-                        {selectedSessionModeCopy?.label ??
-                          selectedSessionMode.name}
+                        {selectedPermissionMode.shortLabel}
                       </span>
                       <ChevronDownIcon className="size-3.5" />
                     </PromptInputButton>
@@ -380,33 +510,49 @@ export function AgentComposer({
                 </PromptInputTooltip>
                 <DropdownMenuContent
                   align="start"
-                  className="w-64 rounded-lg p-1"
+                  className="w-72 rounded-lg p-1"
                   side="top"
                   sideOffset={8}
                 >
                   <DropdownMenuRadioGroup
-                    onValueChange={onSessionModeChange}
-                    value={selectedSessionModeId}
+                    onValueChange={(value) =>
+                      onPermissionModeChange(value as AgentPermissionMode)
+                    }
+                    value={permissionMode}
                   >
-                    {sessionModes.map((mode) => {
-                      const copy = sessionModeCopy[mode.id];
-                      const Icon = copy?.icon ?? BotIcon;
+                    {permissionModes.map((mode) => {
+                      const Icon = mode.icon;
                       return (
                         <DropdownMenuRadioItem
                           className="items-start gap-2 rounded-md px-2 py-1.5 pr-8"
-                          disabled={sessionModeChanging}
+                          disabled={archived}
                           key={mode.id}
                           value={mode.id}
                         >
-                          <Icon className="mt-px size-4" />
+                          <Icon
+                            className={cn(
+                              "mt-px size-4",
+                              mode.id === "always-approve" && "text-orange-600",
+                            )}
+                          />
                           <span className="min-w-0">
-                            <span className="block font-medium text-sm leading-4">
-                              {copy?.label ?? mode.name}
+                            <span
+                              className={cn(
+                                "block font-medium text-sm leading-4",
+                                mode.id === "always-approve" &&
+                                  "text-orange-600",
+                              )}
+                            >
+                              {mode.label}
                             </span>
-                            <span className="block whitespace-normal text-muted-foreground text-xs leading-4">
-                              {copy?.description ??
-                                mode.description ??
-                                mode.name}
+                            <span
+                              className={cn(
+                                "block whitespace-normal text-muted-foreground text-xs leading-4",
+                                mode.id === "always-approve" &&
+                                  "text-orange-600",
+                              )}
+                            >
+                              {mode.description}
                             </span>
                           </span>
                         </DropdownMenuRadioItem>
@@ -415,102 +561,34 @@ export function AgentComposer({
                   </DropdownMenuRadioGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : null}
-            <DropdownMenu>
-              <PromptInputTooltip tooltip="权限模式">
-                <DropdownMenuTrigger asChild>
-                  <PromptInputButton
-                    aria-label="权限模式"
-                    className={cn(
-                      "max-w-40",
-                      permissionMode === "always-approve" &&
-                        "text-orange-600 hover:text-orange-600",
-                    )}
-                  >
-                    <PermissionIcon />
-                    <span className="truncate">
-                      {selectedPermissionMode.shortLabel}
-                    </span>
-                    <ChevronDownIcon className="size-3.5" />
-                  </PromptInputButton>
-                </DropdownMenuTrigger>
-              </PromptInputTooltip>
-              <DropdownMenuContent
-                align="start"
-                className="w-72 rounded-lg p-1"
-                side="top"
-                sideOffset={8}
-              >
-                <DropdownMenuRadioGroup
-                  onValueChange={(value) =>
-                    onPermissionModeChange(value as AgentPermissionMode)
-                  }
-                  value={permissionMode}
+              {effectiveContextUsage && showContextUsage ? (
+                <Context
+                  cost={effectiveContextUsage.cost}
+                  maxTokens={effectiveContextUsage.maxTokens}
+                  usedTokens={effectiveContextUsage.usedTokens}
                 >
-                  {permissionModes.map((mode) => {
-                    const Icon = mode.icon;
-                    return (
-                      <DropdownMenuRadioItem
-                        className="items-start gap-2 rounded-md px-2 py-1.5 pr-8"
-                        key={mode.id}
-                        value={mode.id}
-                      >
-                        <Icon
-                          className={cn(
-                            "mt-px size-4",
-                            mode.id === "always-approve" && "text-orange-600",
-                          )}
-                        />
-                        <span className="min-w-0">
-                          <span
-                            className={cn(
-                              "block font-medium text-sm leading-4",
-                              mode.id === "always-approve" && "text-orange-600",
-                            )}
-                          >
-                            {mode.label}
-                          </span>
-                          <span
-                            className={cn(
-                              "block whitespace-normal text-muted-foreground text-xs leading-4",
-                              mode.id === "always-approve" && "text-orange-600",
-                            )}
-                          >
-                            {mode.description}
-                          </span>
-                        </span>
-                      </DropdownMenuRadioItem>
-                    );
-                  })}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {effectiveContextUsage && showContextUsage ? (
-              <Context
-                cost={effectiveContextUsage.cost}
-                maxTokens={effectiveContextUsage.maxTokens}
-                usedTokens={effectiveContextUsage.usedTokens}
-              >
-                <ContextTrigger
-                  aria-label="上下文窗口用量"
-                  className="motion-view-enter"
-                  size="sm"
-                />
-                <ContextContent align="end" side="top" sideOffset={8}>
-                  <ContextContentHeader />
-                  <ContextContentBody />
-                  <ContextContentFooter />
-                </ContextContent>
-              </Context>
-            ) : null}
-          </PromptInputTools>
-          <PromptInputSubmit
-            hasContent={composerText.trim().length > 0}
-            onStop={onStop}
-            status={status}
-          />
-        </PromptInputFooter>
-      </PromptInput>
-    </div>
+                  <ContextTrigger
+                    aria-label="上下文窗口用量"
+                    className="motion-view-enter"
+                    size="sm"
+                  />
+                  <ContextContent align="end" side="top" sideOffset={8}>
+                    <ContextContentHeader />
+                    <ContextContentBody />
+                    <ContextContentFooter />
+                  </ContextContent>
+                </Context>
+              ) : null}
+            </PromptInputTools>
+            <PromptInputSubmit
+              disabled={archived}
+              hasContent={composerText.trim().length > 0}
+              onStop={onStop}
+              status={status}
+            />
+          </PromptInputFooter>
+        </PromptInput>
+      </div>
+    </PromptInputProvider>
   );
 }

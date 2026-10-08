@@ -2,6 +2,7 @@ import {
   DownloadIcon,
   GitCompareArrowsIcon,
   PanelRightIcon,
+  RotateCcwIcon,
 } from "lucide-react";
 import type { CSSProperties } from "react";
 
@@ -12,14 +13,18 @@ import {
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
+import { ARCHIVE_STATUS_NOTICE } from "@/domain/agent/session-archive";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
+import { useAgentStore } from "@/stores/agent-store";
 import {
   DEFAULT_WORKSPACE_PANEL_WIDTH,
   sessionStatusLabel,
 } from "./agent-workspace-utils";
 import { AgentTimeline } from "./agent-timeline";
 import { SessionStatsLine } from "./session-stats-line";
+import { MonitorFeed } from "./monitor-feed";
+import { SchedulePanel } from "./schedule-panel";
 import { SubagentTray } from "./subagent-tray";
 import { TrajectoryView } from "./trajectory-view";
 import { WorkspacePanelLayer } from "./workspace-panel-layer";
@@ -28,6 +33,8 @@ import type { AgentWorkspaceViewProps } from "./agent-workspace-view-types";
 export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
   const {
     activeProject,
+    activePiFork,
+    relatedPiForks = [],
     activeSession,
     activeWorkspaceTabId,
     acpPhase,
@@ -44,12 +51,16 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     handleSessionTabKeyDown,
     installAppUpdate,
     installingUpdate,
+    piForkRecoveryBusy,
     isMacOS,
     onCloseWorkspaceTab,
     onNewWorkspaceToolTab,
     onOpenFilePreview,
     onOpenGit,
     onOpenProjectReference,
+    onExplore,
+    onBringBack,
+    onResumePiFork,
     onOpenSubagent,
     onSubmitPrompt,
     onToggleSessionInfo,
@@ -72,6 +83,10 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     updateWorkspacePanelWidth,
     visibleError,
     visibleSubagents,
+    monitorNotifications,
+    monitors,
+    onCancelMonitor,
+    schedules,
     workspacePanelOpen,
     workspacePanelResize,
     workspacePanelWidth,
@@ -79,6 +94,24 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     workspaceTabs,
     beginWorkspacePanelResize,
   } = props;
+
+  const archivedReadOnly = useAgentStore((state) => state.archivedReadOnly);
+  const relatedExplorerSessions = [
+    ...(activePiFork
+      ? [
+          Object.values(props.sessionsByProject)
+            .flat()
+            .find((session) => session.id === activePiFork.sourceSessionId),
+        ]
+      : []),
+    ...relatedPiForks.slice(0, 8).map((fork) =>
+      Object.values(props.sessionsByProject)
+        .flat()
+        .find((session) => session.id === fork.branchSessionId),
+    ),
+  ].filter((session): session is NonNullable<typeof session> =>
+    Boolean(session && session.id !== activeSession?.id),
+  );
 
   return (
     <>
@@ -248,6 +281,78 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
               </div>
             )}
           </Presence>
+          <Presence present={archivedReadOnly}>
+            {(motionState) => (
+              <div
+                aria-live="polite"
+                className="motion-banner border-b bg-muted/60 px-6 py-2 text-muted-foreground text-sm"
+                data-motion-state={motionState}
+                role="status"
+              >
+                {ARCHIVE_STATUS_NOTICE}
+              </div>
+            )}
+          </Presence>
+          {activePiFork && activePiFork.status !== "ready" ? (
+            <div
+              aria-live="polite"
+              className="flex items-center justify-between gap-3 border-b bg-amber-500/10 px-6 py-2 text-sm"
+              role="status"
+            >
+              <span className="min-w-0">
+                {activePiFork.status === "failed"
+                  ? `探索分支创建失败：${activePiFork.error ?? "可安全重试"}`
+                  : "探索分支尚未确认完成；可验证并恢复，不会覆盖不匹配的 Pi 文件。"}
+              </span>
+              <Button
+                className="shrink-0"
+                disabled={piForkRecoveryBusy}
+                onClick={() => void onResumePiFork?.()}
+                size="sm"
+                variant="outline"
+              >
+                <RotateCcwIcon aria-hidden="true" />
+                {piForkRecoveryBusy ? "正在恢复…" : "恢复分支"}
+              </Button>
+            </div>
+          ) : null}
+          {relatedExplorerSessions.length > 0 ? (
+            <nav
+              aria-label="Explorer 相关会话"
+              className="flex min-h-10 items-center gap-2 overflow-x-auto border-b px-6 py-1.5"
+            >
+              <span className="shrink-0 text-muted-foreground text-xs">
+                Explorer
+              </span>
+              {relatedExplorerSessions.map((session) => {
+                const fork = relatedPiForks.find(
+                  (candidate) => candidate.branchSessionId === session.id,
+                );
+                const statusLabel =
+                  fork?.status === "failed"
+                    ? " · 需恢复"
+                    : fork?.status === "pending"
+                      ? " · 创建中"
+                      : "";
+                return (
+                  <Button
+                    className="max-w-56 shrink-0"
+                    key={session.id}
+                    onClick={() => props.onSelectSession(session)}
+                    size="sm"
+                    title={session.title}
+                    variant="outline"
+                  >
+                    <GitCompareArrowsIcon aria-hidden="true" />
+                    <span className="truncate">
+                      {localizedSessionTitle(session.title)}
+                      {statusLabel}
+                    </span>
+                  </Button>
+                );
+              })}
+            </nav>
+          ) : null}
 
           <div
             className="harness-chat-layout"
@@ -273,6 +378,15 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                   onPlanDecision={resolvePlan}
                   onOpenFile={onOpenFilePreview}
                   onOpenProjectReference={onOpenProjectReference}
+                  onExplore={onExplore}
+                  onBringBack={
+                    activePiFork?.status === "ready" ? onBringBack : undefined
+                  }
+                  bringBackAfterNativeEntryId={
+                    activePiFork?.status === "ready"
+                      ? activePiFork.anchorNativeEntryId
+                      : undefined
+                  }
                   projectRoot={activeProject?.path ?? cwd}
                   turnRunning={
                     chatStatus === "submitted" || chatStatus === "streaming"
@@ -307,6 +421,16 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                       className="!mx-0 !max-w-none !justify-start !px-0 !pb-0"
                       onOpenSubagent={onOpenSubagent}
                       subagents={visibleSubagents}
+                    />
+                  </section>
+                  <section className="harness-session-info-section">
+                    <SchedulePanel schedules={schedules} />
+                  </section>
+                  <section className="harness-session-info-section">
+                    <MonitorFeed
+                      monitorNotifications={monitorNotifications}
+                      monitors={monitors}
+                      onCancelMonitor={onCancelMonitor}
                     />
                   </section>
                   <section className="harness-session-info-section">
@@ -351,6 +475,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
         open={workspacePanelOpen}
         panelWidth={workspacePanelWidth}
         root={activeProject?.path ?? cwd}
+        sessionId={activeSession?.id}
         resizing={workspacePanelResize}
         subagents={subagents}
         tabs={workspaceTabs}

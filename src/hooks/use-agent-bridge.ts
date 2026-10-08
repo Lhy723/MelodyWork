@@ -3,13 +3,24 @@ import { useEffect, useRef } from "react";
 import { toUserMessage } from "@/domain/app-error";
 import {
   getAgentStatus,
+  getPiAgentSessionBinding,
+  getPiWorkerStatus,
   isTauriRuntime,
   readStoredSessionTimeline,
   startAgent,
+  startPiWorker,
+  stopPiWorker,
   subscribeToAcp,
 } from "@/lib/melody-bridge";
+import {
+  createPiAgentEventStream,
+  setAgentSessionEngine as setSessionEngine,
+} from "@/lib/agent-client";
+import { getPiCapabilityReport } from "@/lib/pi-compatibility";
+import { isLegacyArchiveSession } from "@/domain/agent/session-archive";
 import type { SessionRecord } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 export const useAgentBridge = (
   session?: SessionRecord,
@@ -19,7 +30,12 @@ export const useAgentBridge = (
   const resetSessionView = useAgentStore((state) => state.resetSessionView);
   const appendStderr = useAgentStore((state) => state.appendStderr);
   const receiveAcp = useAgentStore((state) => state.receiveAcp);
+  const receiveAgentEvent = useAgentStore((state) => state.receiveAgentEvent);
   const beginSession = useAgentStore((state) => state.beginSession);
+  const beginArchivedSession = useAgentStore(
+    (state) => state.beginArchivedSession,
+  );
+  const configuredEngine = useAppSettingsStore((state) => state.agentEngine);
   const sessionId = session?.id;
   const sessionCwd = session?.cwd;
   const sessionRef = useRef(session);
@@ -28,6 +44,7 @@ export const useAgentBridge = (
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void)[] = [];
+    let piEventStream: ReturnType<typeof createPiAgentEventStream> | undefined;
 
     const removeListeners = (listeners: (() => void)[]) => {
       for (const unlisten of listeners) {
@@ -47,48 +64,267 @@ export const useAgentBridge = (
         return;
       }
       try {
-        const listeners = await subscribeToAcp(
-          receiveAcp,
-          appendStderr,
-          setStatus,
-        );
+        // Read the persisted timeline archive once, before any engine
+        // decision: legacy sessions are identified by it and every open
+        // path consumes the result.
+        let archiveReadFailed = false;
+        let archivedTimelineJson: string | undefined;
+        try {
+          archivedTimelineJson = await readStoredSessionTimeline(sessionId);
+        } catch {
+          // A corrupt or incomplete archive must never leave the old cursor
+          // looking trustworthy. The session loader will request a replay.
+          archiveReadFailed = true;
+        }
         if (disposed) {
-          removeListeners(listeners);
           return;
         }
-        unsubscribe = listeners;
-        const current = await getAgentStatus();
-        if (disposed) {
-          return;
-        }
-        setStatus(current);
-        const shouldInitialize = current.phase === "stopped";
-        let running = current;
-        if (current.phase === "stopped") {
-          running = await startAgent(sessionCwd);
-          if (!disposed) {
-            setStatus(running);
-          }
-        }
-        if (!disposed && (running.phase === "running" || !isTauriRuntime())) {
-          let archiveReadFailed = false;
-          let archivedTimelineJson: string | undefined;
+        if (isTauriRuntime()) {
+          let shouldArchive: boolean;
           try {
-            archivedTimelineJson = await readStoredSessionTimeline(sessionId);
+            const binding = await getPiAgentSessionBinding(sessionId);
+            shouldArchive = isLegacyArchiveSession({
+              piBindingEngine: binding?.engine,
+              acpSessionId: currentSession.acpSessionId,
+              hasPersistedTimeline:
+                typeof archivedTimelineJson === "string" &&
+                archivedTimelineJson.trim().length > 0,
+            });
           } catch {
-            // A corrupt or incomplete archive must never leave the old cursor
-            // looking trustworthy. The session loader will request a replay.
-            archiveReadFailed = true;
+            // An unreadable binding must never archive a session that might
+            // be Pi-bound; leave the decision to the normal open path.
+            shouldArchive = false;
           }
           if (disposed) {
             return;
           }
+          if (shouldArchive) {
+            // Legacy archive: seed the visible history, gate the composer,
+            // and touch no engine at all — no worker start, no ACP
+            // subscribe, no initialize or session.open.
+            useAgentStore.setState({
+              capabilityDiagnostics: [],
+              archivedReadOnly: true,
+            });
+            await beginArchivedSession(
+              sessionCwd,
+              sessionId,
+              currentSession.timelineJson,
+              archivedTimelineJson,
+              archiveReadFailed ? 0 : currentSession.timelineVersion,
+            );
+            return;
+          }
+        }
+        // Pi is a desktop-only engine for now. Browser preview keeps using
+        // the deterministic ACP fixture even if a persisted setting says Pi.
+        const usePi = isTauriRuntime() && configuredEngine === "pi";
+        // Peripheral capability gaps keep the session on Pi; the notice rides
+        // on the status message so the user sees what is unavailable without a
+        // dedicated UI surface for capabilityDiagnostics.
+        let degradationNotice: string | undefined;
+        const joinNotice = (messages: string[]): string | undefined => {
+          if (messages.length === 0) return undefined;
+          const joined = messages.slice(0, 3).join(" ");
+          return joined.length > 400 ? `${joined.slice(0, 400)}…` : joined;
+        };
+        if (usePi) {
+          try {
+            const report = await getPiCapabilityReport(sessionCwd);
+            if (disposed) {
+              return;
+            }
+            useAgentStore.setState({
+              capabilityDiagnostics: report.diagnostics,
+            });
+            if (report.blocksPiSession) {
+              // A session-level risk (unreadable config, unenforceable
+              // sandbox) must refuse to open rather than run on a silently
+              // weaker path. Pi-only mode never switches engines here.
+              const blocked = report.diagnostics
+                .map((item) => item.message)
+                .join(" ");
+              setStatus({
+                phase: "failed",
+                message: `无法以 Pi 打开该会话：${blocked}`,
+              });
+              return;
+            }
+            degradationNotice = joinNotice(
+              (report.degradations ?? []).map((item) => item.message),
+            );
+          } catch (reason) {
+            // A failed inspection must not allow Pi to run with an unknown
+            // extension/config surface. Refuse the session and leave a
+            // structured diagnostic for the renderer.
+            const detail =
+              reason instanceof Error ? reason.message : String(reason);
+            useAgentStore.setState({
+              capabilityDiagnostics: [
+                {
+                  code: "pi.compatibility_inspection_failed",
+                  capability: "compatibility-inspection",
+                  severity: "blocking",
+                  message: `无法确认当前工作区的 Pi 兼容性，已停止连接。 ${detail}`,
+                },
+              ],
+            });
+            setStatus({
+              phase: "failed",
+              message: `无法确认当前工作区的 Pi 兼容性，已停止连接：${detail}`,
+            });
+            return;
+          }
+        } else {
+          if (disposed) {
+            return;
+          }
+          useAgentStore.setState({ capabilityDiagnostics: [] });
+        }
+        if (disposed) {
+          return;
+        }
+        setSessionEngine(sessionId, usePi ? "pi" : "legacy-acp");
+        let listeners: (() => void)[] = [];
+        const subscribeFor = async (
+          engine: "legacy-acp" | "pi",
+        ): Promise<(() => void)[]> => {
+          if (engine === "pi") {
+            piEventStream = createPiAgentEventStream(
+              (event) => {
+                if (!disposed) {
+                  receiveAgentEvent(event);
+                }
+              },
+              (line) => {
+                if (!disposed) {
+                  appendStderr(line);
+                }
+              },
+              (status) => {
+                if (!disposed) {
+                  setStatus(
+                    degradationNotice
+                      ? {
+                          ...status,
+                          message: [status.message, degradationNotice]
+                            .filter(Boolean)
+                            .join("；"),
+                        }
+                      : status,
+                  );
+                }
+              },
+            );
+            return piEventStream.subscribe;
+          }
+          return subscribeToAcp(
+            (message) => {
+              if (!disposed) {
+                receiveAcp(message);
+              }
+            },
+            (line) => {
+              if (!disposed) {
+                appendStderr(line);
+              }
+            },
+            (status) => {
+              if (!disposed) {
+                setStatus(status);
+              }
+            },
+          );
+        };
+        const detachListeners = () => {
+          const active = Array.from(new Set([...listeners, ...unsubscribe]));
+          removeListeners(active);
+          listeners = [];
+          unsubscribe = [];
+        };
+        try {
+          listeners = await subscribeFor(usePi ? "pi" : "legacy-acp");
+          if (disposed) {
+            detachListeners();
+            return;
+          }
+          unsubscribe = listeners;
+        } catch (reason) {
+          if (!usePi) {
+            throw reason;
+          }
+          // The legacy engine is gone: a Pi worker failure is a hard error for
+          // this session, never a silent engine switch. Tear down any partial
+          // worker state so a retry starts clean.
+          const detail = toUserMessage(reason, "Pi worker 启动失败。");
+          detachListeners();
+          piEventStream?.stream.clear();
+          piEventStream = undefined;
+          try {
+            await stopPiWorker();
+          } catch {
+            // The worker may already have exited.
+          }
+          if (disposed) {
+            return;
+          }
+          useAgentStore.setState((state) => ({
+            capabilityDiagnostics: [
+              ...state.capabilityDiagnostics,
+              {
+                code: "pi.worker_unavailable",
+                capability: "worker",
+                severity: "blocking",
+                message: `Pi worker 无法启动：${detail}。已停止连接。`,
+                source: "pi-worker",
+              },
+            ],
+          }));
+          setStatus({
+            phase: "failed",
+            message: `Pi worker 启动失败：${detail}`,
+          });
+          return;
+        }
+
+        const current: Awaited<ReturnType<typeof getAgentStatus>> = usePi
+          ? await getPiWorkerStatus()
+          : await getAgentStatus();
+        if (disposed) {
+          return;
+        }
+        setStatus(current);
+        // Pi's worker is workspace-scoped: a running worker may need to
+        // be replaced when the user opens a session from another project.
+        // Call the idempotent start command for every Pi connection so the
+        // Host can compare the canonical cwd and restart with the right
+        // model and skill catalog. Legacy ACP keeps its historical
+        // stopped-only start behavior.
+        const shouldInitialize = current.phase === "stopped" || usePi;
+        let running = current;
+        if (usePi || current.phase === "stopped") {
+          running = usePi
+            ? await startPiWorker(sessionCwd)
+            : await startAgent(sessionCwd);
+        }
+        if (disposed) {
+          return;
+        }
+        if (usePi && running.phase !== "running") {
+          throw new Error(
+            running.message ?? `Pi worker 状态为 ${running.phase}。`,
+          );
+        }
+        if (!disposed) {
+          setStatus(running);
+        }
+        if (!disposed && (running.phase === "running" || !isTauriRuntime())) {
           await beginSession(
             sessionCwd,
             sessionId,
-            currentSession.acpSessionId,
+            currentSession.acpSessionId ?? undefined,
             currentSession.timelineJson,
-            currentSession.acpCursor,
+            currentSession.acpCursor ?? undefined,
             archiveReadFailed ? 0 : currentSession.timelineVersion,
             archivedTimelineJson,
             shouldInitialize,
@@ -109,10 +345,14 @@ export const useAgentBridge = (
     return () => {
       disposed = true;
       removeListeners(unsubscribe);
+      piEventStream?.stream.clear();
     };
   }, [
     appendStderr,
+    configuredEngine,
     beginSession,
+    beginArchivedSession,
+    receiveAgentEvent,
     receiveAcp,
     // Do not depend on session.acpSessionId here. The backend writes that
     // value while opening a session; reconnecting at that moment can create

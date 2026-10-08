@@ -29,6 +29,7 @@ jobs:
       - run: pnpm check:ui-font
       - run: pnpm check:architecture
       - run: pnpm test:unit
+      - run: pnpm test:pi-worker-smoke
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm build

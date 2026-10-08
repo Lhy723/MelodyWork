@@ -6,6 +6,31 @@ use super::database_core::{
     AppDatabase, PermissionRule, current_timestamp, permission_rule_from_row,
 };
 
+/// Resolve the persisted decision for a session-scoped tool. Keeping this
+/// lookup in the database module prevents the Pi worker from choosing a
+/// project or permission rule based on renderer-provided metadata.
+pub(crate) fn permission_decision_for_session(
+    database: &AppDatabase,
+    session_id: &str,
+    tool_key: &str,
+) -> Result<Option<String>, String> {
+    let connection = database
+        .connection
+        .lock()
+        .map_err(|_| "Database lock poisoned".to_string())?;
+    connection
+        .query_row(
+            "SELECT permission_rules.decision
+             FROM sessions
+             JOIN permission_rules ON permission_rules.project_id = sessions.project_id
+             WHERE sessions.id = ?1 AND permission_rules.tool_key = ?2",
+            params![session_id, tool_key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn list_permission_rules(
     database: State<'_, AppDatabase>,

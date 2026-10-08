@@ -24,13 +24,13 @@ ACP cursor，否则先展示归档并让 ACP 重放校验运行态，快照只�
 
 ## 已完成的优先序列
 
-| 顺序 | 领域               | 原问题                                                                          | 当前边界                                                                                       | 验证重点                                           |
-| ---- | ------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 1    | Session Projection | store 与 reducer 各维护一套事件投影，测试依赖大量回调                           | `session-projection.ts` 直接拥有消息、思考、工具、用量、失败与权限请求的投影规则               | 真实 timeline 结果、版本恢复、事件去重             |
-| 2    | Research Project   | 搜索结果、历史、追踪主题和论文集合由 UI 分步更新，容易产生半完成状态            | research store 提供原子 `recordSearchResult` 与 `refreshTrackingTopic` 工作流                  | 项目隔离、论文身份保留、追踪刷新一致性             |
-| 3    | Task Launch        | 新任务和 Research prompt 分别维护 pending ref/effect，存在重复投递风险          | `TaskLauncher` 统一创建、排队、ready 对齐与一次性投递                                          | session 对齐、at-most-once、使用真实创建结果       |
+| 顺序 | 领域               | 原问题                                                                          | 当前边界                                                                                                         | 验证重点                                           |
+| ---- | ------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 1    | Session Projection | store 与 reducer 各维护一套事件投影，测试依赖大量回调                           | `session-projection.ts` 直接拥有消息、思考、工具、用量、失败与权限请求的投影规则                                 | 真实 timeline 结果、版本恢复、事件去重             |
+| 2    | Research Project   | 搜索结果、历史、追踪主题和论文集合由 UI 分步更新，容易产生半完成状态            | research store 提供原子 `recordSearchResult` 与 `refreshTrackingTopic` 工作流                                    | 项目隔离、论文身份保留、追踪刷新一致性             |
+| 3    | Task Launch        | 新任务和 Research prompt 分别维护 pending ref/effect，存在重复投递风险          | `TaskLauncher` 统一创建、排队、ready 对齐与一次性投递                                                            | session 对齐、at-most-once、使用真实创建结果       |
 | 4    | ACP Policy         | 进程桥接、JSON-RPC 校验、pending request、权限选项和宿主确认混在一个 command 中 | `acp_policy.rs` 拥有协议与 pending 生命周期；Tauri 层只负责 workspace、SQLite 和 stdio，确认由应用内权限卡片处理 | 方法白名单、MCP 注入、TTL/容量、响应匹配、权限选项 |
-| 5    | Melody Capability  | 设置页自行组合发现/安装结果和刷新规则，Rust 配置同时维护互斥状态集合            | 前端 lifecycle 统一发现、合并与刷新；Rust lifecycle 统一 enabled/disabled 不变量               | 插件身份优先、技能刷新时序、配置集合一致性         |
+| 5    | Melody Capability  | 设置页自行组合发现/安装结果和刷新规则，Rust 配置同时维护互斥状态集合            | 前端 lifecycle 统一发现、合并与刷新；Rust lifecycle 统一 enabled/disabled 不变量                                 | 插件身份优先、技能刷新时序、配置集合一致性         |
 
 ## 当前结构
 

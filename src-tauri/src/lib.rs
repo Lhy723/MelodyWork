@@ -1,20 +1,33 @@
-mod acp_policy;
 mod agent_runtime;
 mod capability_lifecycle;
 mod config_io;
 mod config_runtime;
+mod cron_schedule;
 mod database;
 mod environment_runtime;
 mod git_runtime;
 mod melody_command;
 mod menu_bar;
+mod pi_browser_runtime;
+mod pi_codebase_runtime;
+mod pi_hook_runtime;
+mod pi_lsp_runtime;
+mod pi_mcp_runtime;
+mod pi_memory_runtime;
+mod pi_model_config;
+mod pi_monitor_runtime;
+mod pi_storage;
+mod pi_tool_gateway;
+mod pi_web_runtime;
+mod pi_worker_runtime;
 mod power_runtime;
 mod research_runtime;
+mod schedule_dispatch;
 mod update_runtime;
 mod workspace_access;
 mod workspace_runtime;
+mod workspace_sandbox;
 
-use agent_runtime::{AgentRuntime, agent_status, send_acp, start_agent, stop_agent};
 use database::AppDatabase;
 use environment_runtime::{get_environment_capabilities, get_file_opener_availability};
 use git_runtime::{
@@ -44,28 +57,57 @@ pub fn run() {
             app.manage(database);
             #[cfg(desktop)]
             menu_bar::initialize(app)?;
+            // Host-owned schedules are durable across restarts, so the
+            // dispatcher starts with the app rather than with a session. It
+            // only ever starts an ordinary turn in a Pi-bound session and
+            // records the worker's real acknowledgement.
+            schedule_dispatch::spawn_dispatch_loop(app.handle().clone());
             Ok(())
         })
-        .manage(AgentRuntime::default())
+        .manage(pi_worker_runtime::PiWorkerRuntime::default())
+        .manage(pi_browser_runtime::PiBrowserRuntime::default())
+        .manage(pi_mcp_runtime::PiMcpRuntime::default())
+        .manage(schedule_dispatch::DispatchRegistry::default())
         .manage(WorkspaceRegistry::default())
         .manage(TerminalRuntime::default())
         .manage(menu_bar::MenuBarState::default())
         .manage(power_runtime::SystemSleepState::default())
         .on_window_event(|window, event| {
             #[cfg(desktop)]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
                 let state = window.app_handle().state::<menu_bar::MenuBarState>();
                 if state.is_enabled() {
                     api.prevent_close();
                     let _ = window.hide();
                 }
             }
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(state) = window
+                    .app_handle()
+                    .try_state::<pi_browser_runtime::PiBrowserRuntime>()
+                {
+                    pi_browser_runtime::close_main_window(&state);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
-            agent_status,
-            start_agent,
-            send_acp,
-            stop_agent,
+            pi_worker_runtime::pi_worker_status,
+            pi_worker_runtime::start_pi_worker,
+            pi_worker_runtime::send_pi_agent_command,
+            pi_worker_runtime::stop_pi_worker,
+            pi_browser_runtime::pi_browser_open,
+            pi_browser_runtime::pi_browser_navigate,
+            pi_browser_runtime::pi_browser_snapshot,
+            pi_browser_runtime::pi_browser_screenshot,
+            pi_browser_runtime::pi_browser_close,
+            pi_browser_runtime::pi_browser_tab_open,
+            pi_browser_runtime::pi_browser_tab_select,
+            pi_browser_runtime::pi_browser_tab_close,
+            pi_browser_runtime::pi_browser_set_bounds,
+            pi_browser_runtime::pi_browser_set_popup_policy,
+            pi_browser_runtime::pi_browser_navigate_local_preview,
             git_changes,
             git_diff,
             git_branches,
@@ -87,7 +129,28 @@ pub fn run() {
             database::update_session,
             database::read_session_timeline,
             database::delete_session,
+            database::get_agent_session_binding,
+            database::get_pi_session_fork,
+            database::list_pi_session_forks,
+            database::read_pi_session_fork_reference,
+            database::prepare_pi_session_fork,
+            database::upsert_agent_session_binding,
+            database::delete_agent_session_binding,
+            database::begin_pi_migration,
+            database::list_pi_migration_journal,
+            database::fail_pi_migration,
+            database::read_agent_event_log,
+            database::inspect_pi_session_recovery,
+            database::create_agent_schedule,
+            database::list_agent_schedules,
+            database::set_agent_schedule_status,
+            database::list_agent_schedule_runs,
+            database::delete_agent_schedule,
             database::get_usage_statistics,
+            workspace_sandbox::read_workspace_sandbox_plan,
+            pi_monitor_runtime::start_agent_monitor,
+            pi_monitor_runtime::list_agent_monitors,
+            pi_monitor_runtime::cancel_agent_monitor,
             get_environment_capabilities,
             get_file_opener_availability,
             menu_bar::set_menu_bar_visibility,
@@ -102,6 +165,12 @@ pub fn run() {
             resize_terminal_session,
             close_terminal_session,
             config_runtime::read_melody_config,
+            config_runtime::read_melody_runtime_environment,
+            config_runtime::list_melody_agent_definitions,
+            config_runtime::list_melody_lsp_servers,
+            config_runtime::list_melody_hooks,
+            config_runtime::list_melody_plugin_capabilities,
+            config_runtime::rebuild_melody_memory_index,
             config_runtime::update_melody_config,
             config_runtime::list_melody_extensions,
             config_runtime::list_melody_skills,

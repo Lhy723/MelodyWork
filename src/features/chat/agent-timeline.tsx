@@ -14,6 +14,8 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Button } from "@/components/ui/button";
+import { CornerUpLeft, GitBranchPlus, LoaderCircle } from "lucide-react";
 import type {
   AgentPlanDecision,
   AgentQuestionResponse,
@@ -26,7 +28,13 @@ import { MessageCodeBlock } from "@/features/chat/message-code-block";
 import { PlanTimelineEntry } from "@/features/chat/plan-timeline-entry";
 import { ProjectInlineCitation } from "@/features/chat/project-inline-citation";
 import { TurnActivityGroup } from "@/features/chat/turn-activity-group";
-import { useEffect, useMemo, useRef, type ComponentProps } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 
 const CJK = /[\u2e80-\u9fff]/u;
 const STREAMING_REVEAL_RECENT_COMPLETION_MS = 2_000;
@@ -104,6 +112,9 @@ interface AgentTimelineProps {
   ) => void | Promise<void>;
   onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
+  onExplore?: (entry: AssistantMessageEntry) => void | Promise<void>;
+  onBringBack?: (entry: AssistantMessageEntry) => void | Promise<void>;
+  bringBackAfterNativeEntryId?: string;
   projectRoot: string;
   turnRunning?: boolean;
 }
@@ -116,9 +127,14 @@ export function AgentTimeline({
   onQuestion,
   onOpenFile,
   onOpenProjectReference,
+  onExplore,
+  onBringBack,
+  bringBackAfterNativeEntryId,
   projectRoot,
   turnRunning = false,
 }: AgentTimelineProps) {
+  const [forkingEntryId, setForkingEntryId] = useState<string>();
+  const [bringingBackEntryId, setBringingBackEntryId] = useState<string>();
   const messageComponents = useMemo(
     () => ({
       code: MessageCodeBlock,
@@ -150,6 +166,24 @@ export function AgentTimeline({
           };
 
           if (entry.kind === "message") {
+            const anchorIndex = bringBackAfterNativeEntryId
+              ? entries.findIndex(
+                  (candidate) =>
+                    candidate.kind === "message" &&
+                    candidate.nativeEntryId === bringBackAfterNativeEntryId,
+                )
+              : -1;
+            const messageIndex = entries.findIndex(
+              (candidate) =>
+                candidate.kind === "message" && candidate.id === entry.id,
+            );
+            const canBringBack =
+              Boolean(onBringBack) &&
+              entry.role === "assistant" &&
+              Boolean(entry.nativeEntryId) &&
+              !entry.streaming &&
+              anchorIndex >= 0 &&
+              messageIndex > anchorIndex;
             return (
               <Message
                 className="harness-chat-message motion-list-item"
@@ -192,6 +226,60 @@ export function AgentTimeline({
                     <MessageCitations content={entry.content} />
                   ) : null}
                 </MessageContent>
+                {entry.role === "assistant" &&
+                entry.nativeEntryId &&
+                !entry.streaming &&
+                (onExplore || canBringBack) ? (
+                  <div className="mt-1 flex justify-end gap-1">
+                    {onExplore ? (
+                      <Button
+                        aria-label="从此处创建探索分支"
+                        disabled={turnRunning || Boolean(forkingEntryId)}
+                        onClick={() => {
+                          setForkingEntryId(entry.id);
+                          void Promise.resolve()
+                            .then(() => onExplore(entry))
+                            .catch(() => undefined)
+                            .finally(() => setForkingEntryId(undefined));
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        <GitBranchPlus aria-hidden="true" />
+                        {forkingEntryId === entry.id
+                          ? "正在创建…"
+                          : "从此处探索"}
+                      </Button>
+                    ) : null}
+                    {canBringBack && onBringBack ? (
+                      <Button
+                        aria-label="将探索分支引用插入主会话草稿"
+                        disabled={turnRunning || Boolean(bringingBackEntryId)}
+                        onClick={() => {
+                          setBringingBackEntryId(entry.id);
+                          void Promise.resolve()
+                            .then(() => onBringBack(entry))
+                            .catch(() => undefined)
+                            .finally(() => setBringingBackEntryId(undefined));
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {bringingBackEntryId === entry.id ? (
+                          <LoaderCircle
+                            aria-hidden="true"
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <CornerUpLeft aria-hidden="true" />
+                        )}
+                        {bringingBackEntryId === entry.id
+                          ? "正在插入…"
+                          : "带回分支引用"}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </Message>
             );
           }

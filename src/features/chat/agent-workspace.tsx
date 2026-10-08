@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentPromptAttachment } from "@/domain/acp";
+import type { AgentPromptAttachment, TimelineEntry } from "@/domain/acp";
+import { appendExplorerSessionReferenceToDraft } from "@/domain/agent/explorer-branch";
+import { isComposerReadOnly } from "@/domain/agent/session-archive";
 import { toUserMessage } from "@/domain/app-error";
 import { TaskLauncher } from "@/domain/task-launch";
 import type { ResearchSection } from "@/features/sessions/app-sidebar";
@@ -8,8 +10,11 @@ import type { WorkspaceMode } from "@/features/sessions/sidebar-types";
 import type { ResearchMainDetail } from "@/features/research/research-main-workspace";
 import type { SettingsPage } from "@/features/settings/settings-workspace";
 import type { WorkspaceTab } from "@/features/workspace/workspace-side-panel";
+import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
 import { isIndependentProject } from "@/domain/workspace";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
+import { useAgentMonitors } from "@/hooks/use-agent-monitors";
+import { useAgentSchedules } from "@/hooks/use-agent-schedules";
 import { useAgentNotifications } from "@/hooks/use-agent-notifications";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
@@ -21,10 +26,20 @@ import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
+  createStoredSession,
+  forkPiSession,
+  getPiSessionFork,
   isTauriRuntime,
+  listPiSessionForks,
+  listStoredSessions,
+  updateStoredSession,
   type AppUpdateProgress,
   type AppUpdateStatus,
 } from "@/lib/melody-bridge";
+import {
+  readSessionComposerDraft,
+  writeSessionComposerDraft,
+} from "@/lib/session-composer-draft";
 import { useGlobalLiveActivity } from "@/components/interior/live-activity";
 import { AgentComposer } from "./agent-composer";
 import { useAgentWorkspaceActions } from "./agent-workspace-actions";
@@ -78,6 +93,7 @@ export function AgentWorkspace() {
   const acpSessionId = useAgentStore((state) => state.acpSessionId);
   const timeline = useAgentStore((state) => state.timeline);
   const chatStatus = useAgentStore((state) => state.chatStatus);
+  const archivedReadOnly = useAgentStore((state) => state.archivedReadOnly);
   const agentLocalSessionId = useAgentStore((state) => state.localSessionId);
   const contextUsage = useAgentStore((state) => state.contextUsage);
   const availableModels = useAgentStore((state) => state.availableModels);
@@ -91,6 +107,7 @@ export function AgentWorkspace() {
   const defaultIndependentChat = useAppSettingsStore(
     (state) => state.defaultIndependentChat,
   );
+  const agentEngine = useAppSettingsStore((state) => state.agentEngine);
   const translucentSidebar = useAppSettingsStore(
     (state) => state.translucentSidebar,
   );
@@ -167,6 +184,9 @@ export function AgentWorkspace() {
   const [appUpdateProgress, setAppUpdateProgress] =
     useState<AppUpdateProgress>();
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [activePiFork, setActivePiFork] = useState<PiSessionFork>();
+  const [relatedPiForks, setRelatedPiForks] = useState<PiSessionFork[]>([]);
+  const [piForkRecoveryBusy, setPiForkRecoveryBusy] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const sidebarWidthRef = useRef(sidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -182,6 +202,41 @@ export function AgentWorkspace() {
       index: -1,
     });
   const historyTraversalTarget = useRef<string | undefined>(undefined);
+
+  const activeSessionIdForFork = activeSession?.id;
+  useEffect(() => {
+    let current = true;
+    if (!activeSessionIdForFork || agentEngine !== "pi" || !isTauriRuntime()) {
+      setActivePiFork(undefined);
+      setRelatedPiForks([]);
+      return () => {
+        current = false;
+      };
+    }
+    void Promise.all([
+      getPiSessionFork(activeSessionIdForFork),
+      listPiSessionForks(activeSessionIdForFork),
+    ])
+      .then(([fork, forks]) => {
+        if (current) {
+          setActivePiFork(fork);
+          setRelatedPiForks(forks);
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setActivePiFork(undefined);
+          setRelatedPiForks([]);
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [activeSessionIdForFork, agentEngine]);
+  const activeSessionPiFork =
+    activePiFork?.branchSessionId === activeSession?.id
+      ? activePiFork
+      : undefined;
   const { setSidebarVisibility, toggleSessionInfo } = useAgentWorkspaceLayout({
     autoCheckForUpdates,
     updateChannel,
@@ -216,6 +271,16 @@ export function AgentWorkspace() {
   const visibleSubagents = useMemo(
     () => subagentsForSession(subagents, acpSessionId),
     [subagents, acpSessionId],
+  );
+  const monitorNotifications = useAgentStore(
+    (state) => state.monitorNotifications,
+  );
+  const { monitors, cancelMonitor } = useAgentMonitors(cwd);
+  const scheduleRevision = useAgentStore((state) => state.scheduleRevision);
+  const schedules = useAgentSchedules(
+    activeSession?.id,
+    activeSession?.projectId,
+    scheduleRevision,
   );
   const sessionIsActive =
     status.phase === "starting" ||
@@ -393,27 +458,225 @@ export function AgentWorkspace() {
       content: string,
       attachments: AgentPromptAttachment[],
     ) => void | Promise<void>,
-  ) => (
-    <AgentComposer
-      contextUsage={contextUsage}
-      modelChanging={Boolean(pendingModelId)}
-      models={availableModels}
-      onModelChange={(modelId) => void selectModel(modelId)}
-      onPermissionModeChange={(mode) => void selectPermissionMode(mode)}
-      onReasoningEffortChange={(effort) => void selectReasoningEffort(effort)}
-      onSessionModeChange={(modeId) => void selectSessionMode(modeId)}
-      onStop={() => void cancelPrompt()}
-      onSubmit={onSubmit}
-      permissionMode={permissionMode}
-      reasoningEffortChanging={Boolean(pendingReasoningEffort)}
-      sessionModeChanging={Boolean(pendingSessionModeId)}
-      sessionModes={availableSessionModes}
-      selectedModelId={selectedModelId}
-      selectedReasoningEffort={selectedReasoningEffort}
-      selectedSessionModeId={selectedSessionModeId}
-      status={chatStatus}
-    />
-  );
+  ) => {
+    const draftSessionId =
+      onSubmit === submitPrompt ? activeSession?.id : undefined;
+    const composerReadOnly = isComposerReadOnly({
+      archivedReadOnly,
+      creatingNewTask: newTaskOpen,
+    });
+    return (
+      <AgentComposer
+        key={
+          draftSessionId ??
+          (onSubmit === submitPrompt ? "no-session" : "task-launcher")
+        }
+        archived={composerReadOnly}
+        contextUsage={contextUsage}
+        draftSessionId={draftSessionId}
+        modelChanging={Boolean(pendingModelId)}
+        models={availableModels}
+        onModelChange={(modelId) => void selectModel(modelId)}
+        onPermissionModeChange={(mode) => void selectPermissionMode(mode)}
+        onReasoningEffortChange={(effort) => void selectReasoningEffort(effort)}
+        onSessionModeChange={(modeId) => void selectSessionMode(modeId)}
+        onStop={() => void cancelPrompt()}
+        onSubmit={onSubmit}
+        permissionMode={permissionMode}
+        reasoningEffortChanging={Boolean(pendingReasoningEffort)}
+        sessionModeChanging={Boolean(pendingSessionModeId)}
+        sessionModes={availableSessionModes}
+        selectedModelId={selectedModelId}
+        selectedReasoningEffort={selectedReasoningEffort}
+        selectedSessionModeId={selectedSessionModeId}
+        status={chatStatus}
+      />
+    );
+  };
+
+  const exploreFromMessage = async (
+    entry: Extract<TimelineEntry, { kind: "message" }>,
+  ) => {
+    const source = activeSession;
+    if (
+      !source ||
+      agentEngine !== "pi" ||
+      entry.role !== "assistant" ||
+      !entry.nativeEntryId
+    ) {
+      return;
+    }
+    const anchorIndex = timeline.findIndex(
+      (candidate) => candidate.kind === "message" && candidate.id === entry.id,
+    );
+    if (anchorIndex < 0) return;
+
+    let recoveryRecord:
+      Awaited<ReturnType<typeof createStoredSession>> | undefined;
+    try {
+      const branch = await createStoredSession(source.projectId, source.cwd);
+      recoveryRecord = branch;
+      const titleSeed = entry.content.replace(/\s+/gu, " ").trim();
+      const title = `探索：${(titleSeed || source.title).slice(0, 32)}`;
+      const branchTimeline = timeline.slice(0, anchorIndex + 1);
+      const preparedBranch = await updateStoredSession({
+        id: branch.id,
+        title,
+        timelineJson: JSON.stringify(branchTimeline),
+        timelineVersion: source.timelineVersion ?? 0,
+      });
+      recoveryRecord = preparedBranch;
+      await forkPiSession(source, preparedBranch, entry.nativeEntryId);
+
+      const workspace = useWorkspaceStore.getState();
+      const projectSessions = [
+        preparedBranch,
+        ...(workspace.sessionsByProject[source.projectId] ?? []).filter(
+          (session) => session.id !== preparedBranch.id,
+        ),
+      ];
+      const shouldActivate = workspace.activeSession?.id === source.id;
+      useWorkspaceStore.setState((state) => ({
+        sessionsByProject: {
+          ...state.sessionsByProject,
+          [source.projectId]: projectSessions,
+        },
+        ...(state.activeProject?.id === source.projectId
+          ? { sessions: projectSessions }
+          : {}),
+        ...(shouldActivate
+          ? {
+              activeProject: state.activeProject,
+              activeSession: preparedBranch,
+            }
+          : {}),
+        error: undefined,
+      }));
+    } catch (reason) {
+      const failedBranch = recoveryRecord;
+      if (failedBranch) {
+        useWorkspaceStore.setState((state) => {
+          const projectSessions = [
+            failedBranch,
+            ...(state.sessionsByProject[source.projectId] ?? []).filter(
+              (session) => session.id !== failedBranch.id,
+            ),
+          ];
+          return {
+            sessionsByProject: {
+              ...state.sessionsByProject,
+              [source.projectId]: projectSessions,
+            },
+            ...(state.activeProject?.id === source.projectId
+              ? { sessions: projectSessions }
+              : {}),
+            error: toUserMessage(reason, "创建 Pi 探索分支失败。"),
+          };
+        });
+        return;
+      }
+      useWorkspaceStore.setState({
+        error: toUserMessage(reason, "创建 Pi 探索分支失败。"),
+      });
+    }
+  };
+
+  const resumePiFork = async () => {
+    const fork = activeSessionPiFork;
+    const branch = activeSession;
+    if (!fork || fork.status === "ready" || !branch || piForkRecoveryBusy) {
+      return;
+    }
+    setPiForkRecoveryBusy(true);
+    try {
+      let sessions = sessionsByProject[branch.projectId] ?? [];
+      if (!sessions.some((session) => session.id === fork.sourceSessionId)) {
+        sessions = await listStoredSessions(branch.projectId);
+      }
+      const source = sessions.find(
+        (session) => session.id === fork.sourceSessionId,
+      );
+      if (!source) throw new Error("找不到 Explorer 分支对应的源会话。");
+      await forkPiSession(source, branch, fork.anchorNativeEntryId);
+      const recovered = await getPiSessionFork(branch.id);
+      if (recovered) setActivePiFork(recovered);
+      setRelatedPiForks(await listPiSessionForks(branch.id));
+      useWorkspaceStore.setState({ error: undefined });
+    } catch (reason) {
+      const latest = await getPiSessionFork(branch.id).catch(() => undefined);
+      if (latest) setActivePiFork(latest);
+      useWorkspaceStore.setState({
+        error: toUserMessage(reason, "恢复 Pi 探索分支失败。"),
+      });
+    } finally {
+      setPiForkRecoveryBusy(false);
+    }
+  };
+
+  const bringBackExplorerConclusion = async (
+    entry: Extract<TimelineEntry, { kind: "message" }>,
+  ) => {
+    const fork = activeSessionPiFork;
+    const branch = activeSession;
+    if (
+      !fork ||
+      fork.status !== "ready" ||
+      !branch ||
+      entry.role !== "assistant" ||
+      entry.streaming ||
+      !entry.content.trim()
+    ) {
+      return;
+    }
+    const anchorIndex = timeline.findIndex(
+      (candidate) =>
+        candidate.kind === "message" &&
+        candidate.nativeEntryId === fork.anchorNativeEntryId,
+    );
+    const conclusionIndex = timeline.findIndex(
+      (candidate) => candidate.kind === "message" && candidate.id === entry.id,
+    );
+    if (anchorIndex < 0 || conclusionIndex <= anchorIndex) return;
+
+    let sessions = sessionsByProject[branch.projectId] ?? [];
+    try {
+      if (!sessions.some((session) => session.id === fork.sourceSessionId)) {
+        sessions = await listStoredSessions(branch.projectId);
+      }
+    } catch (reason) {
+      useWorkspaceStore.setState({
+        error: toUserMessage(reason, "读取 Explorer 源会话失败。"),
+      });
+      return;
+    }
+    const source = sessions.find(
+      (session) => session.id === fork.sourceSessionId,
+    );
+    if (!source) {
+      useWorkspaceStore.setState({
+        error: "找不到 Explorer 分支对应的源会话。",
+      });
+      return;
+    }
+
+    const nextDraft = appendExplorerSessionReferenceToDraft(
+      readSessionComposerDraft(source.id),
+      {
+        sourceSessionId: source.id,
+        branchSessionId: branch.id,
+        anchorNativeEntryId: fork.anchorNativeEntryId,
+      },
+    );
+    if (!nextDraft) return;
+    const saved = writeSessionComposerDraft(source.id, nextDraft);
+    if (!saved) {
+      useWorkspaceStore.setState({
+        error: "无法保存源会话草稿，请检查本机存储空间。",
+      });
+      return;
+    }
+    selectSession(source);
+  };
 
   const primaryViewKey = newTaskOpen
     ? "new-task"
@@ -430,6 +693,8 @@ export function AgentWorkspace() {
   return (
     <AgentWorkspaceView
       activeProject={activeProject}
+      activePiFork={activeSessionPiFork}
+      relatedPiForks={relatedPiForks}
       activeSession={activeSession}
       activeWorkspaceTabId={activeWorkspaceTabId}
       acpPhase={acpPhase}
@@ -478,6 +743,10 @@ export function AgentWorkspace() {
       onOpenFilePreview={openFilePreview}
       onOpenGit={openGit}
       onOpenProjectReference={openProjectReference}
+      onBringBack={bringBackExplorerConclusion}
+      onExplore={exploreFromMessage}
+      onResumePiFork={resumePiFork}
+      piForkRecoveryBusy={piForkRecoveryBusy}
       onOpenResearchPaper={openResearchPaper}
       onOpenResearchSection={openResearchSection}
       onOpenResearchTrackingTopic={openResearchTrackingTopic}
@@ -552,6 +821,10 @@ export function AgentWorkspace() {
       updateWorkspacePanelWidth={updateWorkspacePanelWidth}
       visibleError={visibleError}
       visibleSubagents={visibleSubagents}
+      monitorNotifications={monitorNotifications}
+      monitors={monitors}
+      onCancelMonitor={cancelMonitor}
+      schedules={schedules}
       workspaceLoading={workspaceLoading}
       workspaceMode={workspaceMode}
       workspaceError={workspaceError}

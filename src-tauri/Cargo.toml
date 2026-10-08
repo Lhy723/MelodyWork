@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
@@ -35,3 +35,18 @@ libc = "0.2"
 tauri-plugin-notification = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 semver = "1"
+chrono = "0.4.45"
+sha2 = "0.10"
+base64 = "0.22"
+ignore = "=0.4.24"
+glob = "0.3.4"
+tree-sitter = "0.25.10"
+tree-sitter-go = "0.25.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter-typescript = "0.23.2"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+xcap = { version = "0.9.8", default-features = false }

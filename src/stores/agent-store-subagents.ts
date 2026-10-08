@@ -1,10 +1,6 @@
 import type { AgentSubagent } from "@/domain/acp";
 
-import {
-  numberValue,
-  stringValue,
-  wireValue,
-} from "./agent-store-parsing";
+import { numberValue, stringValue, wireValue } from "./agent-store-parsing";
 
 export const applySubagentUpdate = (
   subagents: Record<string, AgentSubagent>,
@@ -67,6 +63,10 @@ export const applySubagentUpdate = (
         ),
         resumedFrom: stringValue(
           wireValue(update, "resumedFrom", "resumed_from"),
+        ),
+        isolation: stringValue(wireValue(update, "isolation", "isolation")),
+        worktreePath: stringValue(
+          wireValue(update, "worktreePath", "worktree_path"),
         ),
       },
     };

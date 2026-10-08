@@ -8,7 +8,7 @@ import {
   shouldCancelBeforeFirstEvent,
 } from "@/domain/prompt-timeout";
 import { SessionEventDeduplicator } from "@/domain/session-projection";
-import { sendAcp } from "@/lib/melody-bridge";
+import { sendAgentCommand } from "@/lib/agent-client";
 import type { AgentStore } from "./agent-store-types";
 
 export const armSetupTimeout = (
@@ -245,32 +245,31 @@ export const sendSessionOpen = async (
   modelId?: string,
   permissionMode: AgentPermissionMode = "ask",
   cursor?: string,
+  sessionModeId?: string,
+  reasoningEffort?: string,
 ) => {
   const requestId = nextSessionOpenRequestId--;
-  const meta = {
-    clientIdentifier: "melody-work",
-    yoloMode: permissionMode === "always-approve",
-    autoMode: permissionMode === "auto",
-    ...(modelId ? { modelId } : {}),
-    ...(cursor ? { cursor } : {}),
-  };
   pendingSessionOpens.set(requestId, {
     localSessionId,
     requestedSessionId: acpSessionId,
     createdAt: Date.now(),
   });
   try {
-    await sendAcp({
-      jsonrpc: "2.0",
-      id: requestId,
-      method: acpSessionId ? "session/load" : "session/new",
-      params: acpSessionId
-        ? { sessionId: acpSessionId, cwd, mcpServers: [], _meta: meta }
-        : {
-            cwd,
-            mcpServers: [],
-            _meta: meta,
-          },
+    await sendAgentCommand({
+      protocolVersion: 1,
+      requestId,
+      sessionId: acpSessionId,
+      command: {
+        type: "session.open",
+        ...(acpSessionId ? { sessionId: acpSessionId } : {}),
+        productSessionId: localSessionId,
+        cwd,
+        ...(modelId ? { modelId } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(sessionModeId ? { sessionModeId } : {}),
+        permissionMode,
+        ...(cursor ? { cursor } : {}),
+      },
     });
   } catch (reason) {
     pendingSessionOpens.delete(requestId);

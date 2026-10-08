@@ -3,6 +3,7 @@ import {
   FileCode2Icon,
   FilesIcon,
   GitCompareArrowsIcon,
+  GlobeIcon,
   LibraryIcon,
   PlusIcon,
   TerminalSquareIcon,
@@ -64,6 +65,11 @@ const TerminalPanel = lazy(() =>
     default: TerminalPanel,
   })),
 );
+const BrowserPanel = lazy(() =>
+  import("@/features/workspace/browser-panel").then(({ BrowserPanel }) => ({
+    default: BrowserPanel,
+  })),
+);
 const SubagentConversation = lazy(() =>
   import("@/features/workspace/subagent-conversation").then(
     ({ SubagentConversation }) => ({ default: SubagentConversation }),
@@ -74,6 +80,7 @@ export type WorkspaceTab =
   | { id: string; kind: "files"; label: string }
   | { id: string; kind: "terminal"; label: string }
   | { id: string; kind: "review"; label: string }
+  | { id: string; kind: "browser"; label: string; sessionId?: string }
   | {
       id: string;
       kind: "research";
@@ -102,7 +109,7 @@ interface WorkspaceSidePanelProps {
   gitLoading: boolean;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onNewTab: (kind: "files" | "terminal" | "review") => void;
+  onNewTab: (kind: "files" | "terminal" | "review" | "browser") => void;
   onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   onResizeBy: (delta: number) => void;
@@ -113,6 +120,7 @@ interface WorkspaceSidePanelProps {
   minPanelWidth: number;
   maxPanelWidth: number;
   root: string;
+  sessionId?: string;
   subagents: Record<string, AgentSubagent>;
   tabs: WorkspaceTab[];
 }
@@ -129,6 +137,9 @@ const tabIcon = (
   }
   if (tab.kind === "review") {
     return <GitCompareArrowsIcon />;
+  }
+  if (tab.kind === "browser") {
+    return <GlobeIcon />;
   }
   if (tab.kind === "subagent") {
     const subagent = subagents[tab.subagentId];
@@ -166,6 +177,7 @@ export function WorkspaceSidePanel({
   minPanelWidth,
   maxPanelWidth,
   root,
+  sessionId,
   subagents,
   tabs,
 }: WorkspaceSidePanelProps) {
@@ -324,6 +336,10 @@ export function WorkspaceSidePanel({
               <GitCompareArrowsIcon />
               新建审阅
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onNewTab("browser")}>
+              <GlobeIcon />
+              新建浏览器
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
@@ -359,6 +375,14 @@ export function WorkspaceSidePanel({
                 >
                   <TerminalSquareIcon />
                   终端
+                </Button>
+                <Button
+                  className="justify-start"
+                  onClick={() => onNewTab("browser")}
+                  variant="outline"
+                >
+                  <GlobeIcon />
+                  浏览器
                 </Button>
               </div>
             </div>
@@ -413,6 +437,11 @@ export function WorkspaceSidePanel({
                   <FilePreview path={tab.path} root={root} />
                 ) : tab.kind === "research" ? (
                   <ResearchPanel kind={tab.panel} />
+                ) : tab.kind === "browser" ? (
+                  <BrowserPanel
+                    active={activeTabId === tab.id}
+                    sessionId={tab.sessionId ?? sessionId}
+                  />
                 ) : subagents[tab.subagentId] ? (
                   <SubagentConversation
                     active={activeTabId === tab.id}

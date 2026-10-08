@@ -1,13 +1,35 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use crate::config_io::TextFileStore;
+use crate::pi_worker_runtime::PiWorkerRuntime;
 use crate::workspace_access::WorkspaceRegistry;
 
 pub(crate) const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+
+/// The subset of Melody's foreground terminal policy that the Pi Host can
+/// enforce without handing the worker an ambient shell.  Values are already
+/// normalized to milliseconds/bytes before they cross the gateway boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PiTerminalPolicy {
+    pub(crate) default_timeout_ms: u64,
+    pub(crate) max_timeout_ms: u64,
+    pub(crate) output_byte_limit: usize,
+}
+
+/// Host-projected waiting policy for Melody's interactive question tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PiQuestionTimeoutPolicy {
+    pub(crate) enabled: bool,
+    pub(crate) timeout_ms: u64,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +41,16 @@ pub struct MelodyConfigDocument {
     pub(crate) values: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parse_error: Option<String>,
+}
+
+/// Non-secret process settings that can change the agent trust boundary.
+///
+/// Only the sandbox profile is exposed here; the rest of the process
+/// environment must never be copied into the renderer or a worker.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MelodyRuntimeEnvironment {
+    pub(crate) sandbox_profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -118,6 +150,25 @@ pub struct PluginDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) manifest_path: Option<String>,
     pub(crate) components: Vec<PluginComponentGroup>,
+}
+
+/// Host-owned inventory for an installed plugin.  Pi may consume the
+/// Markdown-only roots (skills, commands and declarative agent definitions),
+/// while plugins with executable/dynamic surfaces remain on the ACP
+/// compatibility path.  The paths are canonicalized by the Host before they
+/// cross the renderer/worker boundary.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MelodyPluginCapability {
+    pub(crate) name: String,
+    pub(crate) path: String,
+    pub(crate) scope: String,
+    pub(crate) enabled: bool,
+    pub(crate) static_resources: bool,
+    pub(crate) dynamic_components: Vec<String>,
+    pub(crate) skill_roots: Vec<String>,
+    pub(crate) prompt_roots: Vec<String>,
+    pub(crate) agent_roots: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -241,6 +292,15 @@ pub fn read_melody_config(
     read_melody_config_inner(scope, cwd)
 }
 
+#[tauri::command]
+pub fn read_melody_runtime_environment() -> MelodyRuntimeEnvironment {
+    let sandbox_profile = env::var(crate::workspace_sandbox::PROFILE_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value.len() <= 128);
+    MelodyRuntimeEnvironment { sandbox_profile }
+}
+
 pub(crate) fn read_melody_config_inner(
     scope: String,
     cwd: String,
@@ -330,12 +390,31 @@ pub(crate) fn apply_patch(
 #[tauri::command]
 pub async fn update_melody_config(
     registry: State<'_, WorkspaceRegistry>,
+    runtime: State<'_, PiWorkerRuntime>,
     scope: String,
     cwd: String,
     patches: Vec<MelodyConfigPatch>,
 ) -> Result<MelodyConfigDocument, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    update_melody_config_inner(scope, cwd, patches)
+    let model_config_changed = patches.iter().any(|patch| {
+        patch.path.first().is_some_and(|key| {
+            matches!(key.as_str(), "model" | "models" | "endpoints" | "features")
+        })
+    });
+    let document = update_melody_config_inner(scope, cwd.clone(), patches)?;
+    if model_config_changed {
+        // Re-project the catalog and transient credentials immediately when
+        // Pi is already running. A failed refresh does not roll back the
+        // config write; the next worker generation will retry the projection.
+        let _ = runtime.refresh_models_if_workspace(Path::new(&cwd)).await;
+    }
+    // The running Pi worker receives a fresh disabled-name snapshot through
+    // its Host pipe. If Pi is not selected or not running, the next start
+    // will project the persisted config as usual.
+    let _ = runtime
+        .refresh_resources_if_workspace(Path::new(&cwd))
+        .await;
+    Ok(document)
 }
 
 pub(crate) fn update_melody_config_inner(

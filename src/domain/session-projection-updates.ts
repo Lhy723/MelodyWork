@@ -400,6 +400,7 @@ const upsertTool = (
   const completed =
     status === "completed" ||
     status === "failed" ||
+    status === "cancelled" ||
     (existing?.kind === "tool" && existing.permission === "denied");
   const next: TimelineEntry = {
     id: existing?.id ?? `tool-${toolCallId}`,

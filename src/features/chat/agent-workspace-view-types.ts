@@ -1,3 +1,7 @@
+import type { AgentMonitorNotification } from "@/domain/agent/event-to-session-update";
+import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
+import type { AgentMonitorSnapshot } from "@/lib/melody-bridge-monitors";
+import type { UseAgentSchedulesResult } from "@/hooks/use-agent-schedules";
 import type {
   Dispatch,
   KeyboardEvent,
@@ -32,6 +36,8 @@ import type { AppUpdateProgress, AppUpdateStatus } from "@/lib/melody-bridge";
 
 export interface AgentWorkspaceViewProps {
   activeProject?: ProjectRecord;
+  activePiFork?: PiSessionFork;
+  relatedPiForks?: PiSessionFork[];
   activeSession?: SessionRecord;
   activeWorkspaceTabId?: string;
   chatDockRef: RefObject<HTMLDivElement | null>;
@@ -68,6 +74,14 @@ export interface AgentWorkspaceViewProps {
   onOpenFilePreview: (path: string) => void;
   onOpenGit: () => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
+  onExplore: (
+    entry: Extract<TimelineEntry, { kind: "message" }>,
+  ) => void | Promise<void>;
+  onBringBack?: (
+    entry: Extract<TimelineEntry, { kind: "message" }>,
+  ) => void | Promise<void>;
+  onResumePiFork?: () => void | Promise<void>;
+  piForkRecoveryBusy?: boolean;
   onOpenResearchPaper: (paper: ResearchPaper) => void;
   onOpenResearchSection: (section: ResearchSection) => void;
   onOpenResearchTrackingTopic: (topicId: string) => void;
@@ -100,7 +114,9 @@ export interface AgentWorkspaceViewProps {
   ) => Promise<{ deleted: boolean; error?: string }>;
   onDeleteSession: (session: SessionRecord) => void;
   onModeChange: (mode: WorkspaceMode) => void;
-  onNewWorkspaceToolTab: (kind: "files" | "terminal" | "review") => void;
+  onNewWorkspaceToolTab: (
+    kind: "files" | "terminal" | "review" | "browser",
+  ) => void;
   onOpenSettings: (page?: SettingsPage) => void;
   onRestoreProject: (project: ProjectRecord) => void;
   onSelectProject: (project: ProjectRecord) => void;
@@ -152,6 +168,13 @@ export interface AgentWorkspaceViewProps {
   sidebarCollapsed: boolean;
   status: AgentStatus;
   subagents: Record<string, AgentSubagent>;
+  /** Bounded Host-owned monitor feed for the active session. */
+  monitorNotifications: AgentMonitorNotification[];
+  /** Running/finished monitors owned by this workspace, newest state first. */
+  monitors: AgentMonitorSnapshot[];
+  onCancelMonitor: (taskId: string) => void;
+  /** Host-owned schedules for the active session. */
+  schedules: UseAgentSchedulesResult;
   timeline: TimelineEntry[];
   updateSidebarWidth: (nextWidth: number) => void;
   updateWorkspacePanelWidth: (nextWidth: number) => void;

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, type Dispatch, type KeyboardEvent, type PointerEventHandler, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  type Dispatch,
+  type KeyboardEvent,
+  type PointerEventHandler,
+  type SetStateAction,
+} from "react";
 
 import type { AgentPromptAttachment, AgentSubagent } from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
@@ -51,7 +58,9 @@ type WorkspaceActionsOptions = {
   setActiveWorkspaceTabId: Dispatch<SetStateAction<string | undefined>>;
   setWorkspacePanelWidth: Dispatch<SetStateAction<number>>;
   workspacePanelWidthRef: { current: number };
-  setWorkspacePanelResize: Dispatch<SetStateAction<{ startWidth: number; startX: number } | undefined>>;
+  setWorkspacePanelResize: Dispatch<
+    SetStateAction<{ startWidth: number; startX: number } | undefined>
+  >;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setSettingsPage: Dispatch<SetStateAction<SettingsPage>>;
   setResearchDetail: Dispatch<SetStateAction<ResearchMainDetail | undefined>>;
@@ -61,13 +70,20 @@ type WorkspaceActionsOptions = {
   setWorkspaceMode: Dispatch<SetStateAction<WorkspaceMode>>;
   setSidebarWidth: Dispatch<SetStateAction<number>>;
   sidebarWidthRef: { current: number };
-  setSidebarResize: Dispatch<SetStateAction<{ startWidth: number; startX: number } | undefined>>;
+  setSidebarResize: Dispatch<
+    SetStateAction<{ startWidth: number; startX: number } | undefined>
+  >;
   setConversationView: Dispatch<SetStateAction<"chat" | "trajectory">>;
   setSidebarVisibility: (collapsed: boolean) => void;
   setSessionNavigation: Dispatch<SetStateAction<SessionNavigationHistory>>;
   selectSession: (session: SessionRecord) => void | Promise<void>;
-  createSession: (project?: ProjectRecord) => Promise<SessionRecord | undefined>;
-  submitPrompt: (content: string, attachments?: AgentPromptAttachment[]) => Promise<void>;
+  createSession: (
+    project?: ProjectRecord,
+  ) => Promise<SessionRecord | undefined>;
+  submitPrompt: (
+    content: string,
+    attachments?: AgentPromptAttachment[],
+  ) => Promise<void>;
 };
 
 export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
@@ -123,7 +139,13 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setSettingsPage(page);
       setSettingsOpen(true);
     },
-    [setActiveWorkspaceTabId, setSettingsOpen, setSettingsPage, setWorkspacePanelOpen, setWorkspaceTabs],
+    [
+      setActiveWorkspaceTabId,
+      setSettingsOpen,
+      setSettingsPage,
+      setWorkspacePanelOpen,
+      setWorkspaceTabs,
+    ],
   );
 
   const openWorkspaceTab = useCallback(
@@ -131,11 +153,18 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setSettingsOpen(false);
       setWorkspacePanelOpen(true);
       setWorkspaceTabs((current) =>
-        current.some((item) => item.id === tab.id) ? current : [...current, tab],
+        current.some((item) => item.id === tab.id)
+          ? current
+          : [...current, tab],
       );
       setActiveWorkspaceTabId(tab.id);
     },
-    [setActiveWorkspaceTabId, setSettingsOpen, setWorkspacePanelOpen, setWorkspaceTabs],
+    [
+      setActiveWorkspaceTabId,
+      setSettingsOpen,
+      setWorkspacePanelOpen,
+      setWorkspaceTabs,
+    ],
   );
 
   const openGit = useCallback(
@@ -194,28 +223,41 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
   );
 
   const newWorkspaceToolTab = useCallback(
-    (kind: "files" | "terminal" | "review") => {
-      const baseLabel = { files: "文件", terminal: "终端", review: "审阅" }[kind];
-      const matchingTabs = workspaceTabs.filter((tab) => tab.kind === kind).length;
+    (kind: "files" | "terminal" | "review" | "browser") => {
+      const baseLabel = {
+        files: "文件",
+        terminal: "终端",
+        review: "审阅",
+        browser: "浏览器",
+      }[kind];
+      const matchingTabs = workspaceTabs.filter(
+        (tab) => tab.kind === kind,
+      ).length;
       workspaceTabSequence.current += 1;
-      const label = matchingTabs === 0 ? baseLabel : `${baseLabel} ${matchingTabs + 1}`;
+      const label =
+        matchingTabs === 0 ? baseLabel : `${baseLabel} ${matchingTabs + 1}`;
       const id = `${kind}:new:${workspaceTabSequence.current}`;
       const tab: WorkspaceTab =
         kind === "files"
           ? { id, kind: "files", label }
           : kind === "terminal"
             ? { id, kind: "terminal", label }
-            : { id, kind: "review", label };
+            : kind === "review"
+              ? { id, kind: "review", label }
+              : { id, kind: "browser", label, sessionId: activeSessionId };
       openWorkspaceTab(tab);
     },
-    [openWorkspaceTab, workspaceTabSequence, workspaceTabs],
+    [activeSessionId, openWorkspaceTab, workspaceTabSequence, workspaceTabs],
   );
 
   const openResearchSection = useCallback(
     (section: ResearchSection) => {
       setResearchDetail(undefined);
       setResearchSection(section);
-      if (section !== "skills" && window.matchMedia("(max-width: 720px)").matches) {
+      if (
+        section !== "skills" &&
+        window.matchMedia("(max-width: 720px)").matches
+      ) {
         setSidebarVisibility(true);
       }
       if (section !== "skills") {
@@ -227,7 +269,15 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setResearchMainOpen(false);
       openSettings("skills");
     },
-    [openSettings, setResearchDetail, setResearchMainOpen, setSettingsOpen, setSidebarVisibility, setWorkspacePanelOpen, setResearchSection],
+    [
+      openSettings,
+      setResearchDetail,
+      setResearchMainOpen,
+      setSettingsOpen,
+      setSidebarVisibility,
+      setWorkspacePanelOpen,
+      setResearchSection,
+    ],
   );
 
   const openResearchPaper = useCallback(
@@ -241,7 +291,12 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setSettingsOpen(false);
       setWorkspacePanelOpen(false);
     },
-    [setResearchDetail, setResearchMainOpen, setSettingsOpen, setWorkspacePanelOpen],
+    [
+      setResearchDetail,
+      setResearchMainOpen,
+      setSettingsOpen,
+      setWorkspacePanelOpen,
+    ],
   );
 
   const openResearchTrackingTopic = useCallback(
@@ -252,11 +307,23 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setSettingsOpen(false);
       setWorkspacePanelOpen(false);
     },
-    [setResearchDetail, setResearchMainOpen, setResearchSection, setSettingsOpen, setWorkspacePanelOpen],
+    [
+      setResearchDetail,
+      setResearchMainOpen,
+      setResearchSection,
+      setSettingsOpen,
+      setWorkspacePanelOpen,
+    ],
   );
 
   const askResearchPaper = useCallback(
-    (paper: { abstract?: string; authors: string[]; doi?: string; title: string; url: string }) => {
+    (paper: {
+      abstract?: string;
+      authors: string[];
+      doi?: string;
+      title: string;
+      url: string;
+    }) => {
       const skillContext = buildResearchSkillContext();
       const content = [
         "请帮我分析这篇论文，并把结论和证据边界说清楚：",
@@ -267,7 +334,9 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
         paper.doi ? `DOI：${paper.doi}` : undefined,
         `来源：${paper.url}`,
         paper.abstract ? `摘要：${paper.abstract}` : undefined,
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       setWorkspaceMode("work");
       window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, "work");
@@ -278,12 +347,27 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       if (activeSession) {
         taskLauncherRef.current.queue(activeSession.id, { content });
         void taskLauncherRef.current.deliverIfReady(
-          { activeSessionId: activeSession.id, agentSessionId: agentLocalSessionId, ready: activeSessionReady },
+          {
+            activeSessionId: activeSession.id,
+            agentSessionId: agentLocalSessionId,
+            ready: activeSessionReady,
+          },
           submitPrompt,
         );
       }
     },
-    [activeSession, activeSessionReady, agentLocalSessionId, setNewTaskOpen, setResearchMainOpen, setSettingsOpen, setWorkspaceMode, setWorkspacePanelOpen, submitPrompt, taskLauncherRef],
+    [
+      activeSession,
+      activeSessionReady,
+      agentLocalSessionId,
+      setNewTaskOpen,
+      setResearchMainOpen,
+      setSettingsOpen,
+      setWorkspaceMode,
+      setWorkspacePanelOpen,
+      submitPrompt,
+      taskLauncherRef,
+    ],
   );
 
   const closeWorkspaceTab = useCallback(
@@ -292,7 +376,8 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
         const closingIndex = current.findIndex((tab) => tab.id === tabId);
         const nextTabs = current.filter((tab) => tab.id !== tabId);
         if (activeWorkspaceTabId === tabId) {
-          const nextActive = nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.id;
+          const nextActive =
+            nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.id;
           setActiveWorkspaceTabId(nextActive);
         }
         return nextTabs;
@@ -317,19 +402,20 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
     [setWorkspacePanelWidth, workspacePanelWidthRef],
   );
 
-  const beginWorkspacePanelResize: PointerEventHandler<HTMLDivElement> = useCallback(
-    (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-      event.preventDefault();
-      setWorkspacePanelResize({
-        startWidth: workspacePanelWidthRef.current,
-        startX: event.clientX,
-      });
-    },
-    [setWorkspacePanelResize, workspacePanelWidthRef],
-  );
+  const beginWorkspacePanelResize: PointerEventHandler<HTMLDivElement> =
+    useCallback(
+      (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        setWorkspacePanelResize({
+          startWidth: workspacePanelWidthRef.current,
+          startX: event.clientX,
+        });
+      },
+      [setWorkspacePanelResize, workspacePanelWidthRef],
+    );
 
   const returnToConversation = useCallback(() => {
     setSettingsOpen(false);
@@ -352,15 +438,33 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
         setWorkspacePanelOpen(false);
       }
     },
-    [openResearchSection, setNewTaskOpen, setResearchDetail, setResearchMainOpen, setSettingsOpen, setSidebarVisibility, setWorkspaceMode, setWorkspacePanelOpen],
+    [
+      openResearchSection,
+      setNewTaskOpen,
+      setResearchDetail,
+      setResearchMainOpen,
+      setSettingsOpen,
+      setSidebarVisibility,
+      setWorkspaceMode,
+      setWorkspacePanelOpen,
+    ],
   );
 
-  const updateSidebarWidth = useCallback((nextWidth: number) => {
-    const clampedWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, nextWidth));
-    sidebarWidthRef.current = clampedWidth;
-    setSidebarWidth(clampedWidth);
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(clampedWidth)));
-  }, [setSidebarWidth, sidebarWidthRef]);
+  const updateSidebarWidth = useCallback(
+    (nextWidth: number) => {
+      const clampedWidth = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, nextWidth),
+      );
+      sidebarWidthRef.current = clampedWidth;
+      setSidebarWidth(clampedWidth);
+      window.localStorage.setItem(
+        SIDEBAR_WIDTH_STORAGE_KEY,
+        String(Math.round(clampedWidth)),
+      );
+    },
+    [setSidebarWidth, sidebarWidthRef],
+  );
 
   const beginSidebarResize: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
@@ -443,11 +547,23 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       setWorkspacePanelOpen(false);
       void selectSession(session);
     },
-    [findSessionById, historyTraversalTarget, nextHistoryIndex, returnToConversation, selectSession, sessionNavigation.entries, setActiveWorkspaceTabId, setSessionNavigation, setWorkspacePanelOpen, setWorkspaceTabs],
+    [
+      findSessionById,
+      historyTraversalTarget,
+      nextHistoryIndex,
+      returnToConversation,
+      selectSession,
+      sessionNavigation.entries,
+      setActiveWorkspaceTabId,
+      setSessionNavigation,
+      setWorkspacePanelOpen,
+      setWorkspaceTabs,
+    ],
   );
 
   const usableActiveProject =
-    activeProject && (isIndependentProject(activeProject) || !activeProject.archived)
+    activeProject &&
+    (isIndependentProject(activeProject) || !activeProject.archived)
       ? activeProject
       : undefined;
   const newTaskProject =
@@ -486,7 +602,13 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
       },
       submitPrompt,
     );
-  }, [activeSessionId, activeSessionReady, agentLocalSessionId, submitPrompt, taskLauncherRef]);
+  }, [
+    activeSessionId,
+    activeSessionReady,
+    agentLocalSessionId,
+    submitPrompt,
+    taskLauncherRef,
+  ]);
 
   return {
     askResearchPaper,

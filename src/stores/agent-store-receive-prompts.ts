@@ -7,7 +7,8 @@ import {
   markPromptResponseReceived,
   promptResponseDisposition,
 } from "@/domain/prompt-timeout";
-import { findPermissionRule, sendAcp } from "@/lib/melody-bridge";
+import { sendAgentCommand } from "@/lib/agent-client";
+import { findPermissionRule } from "@/lib/melody-bridge";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   contextUsageFromResult,
@@ -205,13 +206,23 @@ export const handlePermissionRequest = async (
             : entry,
         ),
       }));
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: message.id,
-        result: {
-          outcome: {
-            outcome: "selected",
-            optionId: option.optionId,
+      const sessionId = stringValue(params.sessionId) ?? get().acpSessionId;
+      if (!sessionId) {
+        return true;
+      }
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: message.id,
+        sessionId,
+        command: {
+          type: "interaction.resolve",
+          sessionId,
+          interactionId: String(message.id),
+          resolution: {
+            outcome: {
+              outcome: "selected",
+              optionId: option.optionId,
+            },
           },
         },
       });

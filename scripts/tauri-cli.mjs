@@ -46,7 +46,12 @@ try {
     if (prepareStatus !== 0) {
       exitStatus = prepareStatus;
     } else {
-      exitStatus = run(tauriCommand, args);
+      const workerStatus = run(process.execPath, [
+        "scripts/prepare-agent-worker.mjs",
+        "--dev",
+      ]);
+      exitStatus =
+        workerStatus === 0 ? run(tauriCommand, args) : workerStatus;
     }
   } else {
     exitStatus = run(tauriCommand, args);

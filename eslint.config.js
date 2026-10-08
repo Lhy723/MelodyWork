@@ -20,7 +20,10 @@ export default tseslint.config(
     rules: {
       "no-undef": "off",
       "no-useless-escape": "off",
-      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
     },
@@ -31,6 +34,20 @@ export default tseslint.config(
       "no-undef": "off",
       "no-useless-escape": "off",
       "no-unused-vars": "warn",
+    },
+  },
+  {
+    // The agent contract/worker packages are TypeScript-first: types come from
+    // tsc, and the .mjs files are type-stripped tests with Node globals.
+    files: ["packages/**/*.{ts,mjs}"],
+    extends: [tseslint.configs.recommended],
+    rules: {
+      "no-undef": "off",
+      "no-useless-escape": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
 );

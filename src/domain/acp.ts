@@ -1,9 +1,7 @@
+import type { AgentAssistantMetadata } from "./agent/contract.ts";
+
 export type AgentPhase =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "missing"
-  | "failed";
+  "stopped" | "starting" | "running" | "missing" | "failed";
 
 export interface AgentStatus {
   phase: AgentPhase;
@@ -15,6 +13,8 @@ export interface AgentStatus {
 export interface AgentModelOption {
   id: string;
   name: string;
+  /** Explicit input modalities when the active engine can report them. */
+  input?: Array<"text" | "image">;
   contextWindowTokens?: number;
   reasoningEffort?: string;
   reasoningEfforts: AgentReasoningEffortOption[];
@@ -68,14 +68,12 @@ export interface AgentBillingUsage {
 }
 
 export type AgentSubagentStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "running" | "completed" | "failed" | "cancelled";
 
 export interface AgentSubagent {
   subagentId: string;
   parentSessionId: string;
+  parentTaskId?: string;
   childSessionId: string;
   subagentType: string;
   description: string;
@@ -97,16 +95,12 @@ export interface AgentSubagent {
   role?: string;
   capabilityMode?: string;
   resumedFrom?: string;
+  isolation?: string;
+  worktreePath?: string;
 }
 
 export type AgentToolOperation =
-  | "read"
-  | "search"
-  | "create"
-  | "edit"
-  | "delete"
-  | "execute"
-  | "other";
+  "read" | "search" | "create" | "edit" | "delete" | "execute" | "other";
 
 export type AgentPlanStatus =
   | "streaming"
@@ -172,11 +166,7 @@ export interface AgentQuestionAnnotation {
 }
 
 export type AgentQuestionOutcome =
-  | "pending"
-  | "accepted"
-  | "chat_about_this"
-  | "skip_interview"
-  | "cancelled";
+  "pending" | "accepted" | "chat_about_this" | "skip_interview" | "cancelled";
 
 export interface AgentQuestionRequest {
   requestId: JsonRpcId;
@@ -251,6 +241,10 @@ export type TimelineEntry =
       billingUsage?: AgentBillingUsage;
       reasoningEffort?: string;
       sessionModeId?: string;
+      /** Native Pi tree anchor for safe, product-level Explorer forks. */
+      nativeEntryId?: string;
+      /** Lossless Pi metadata used when reopening a native session. */
+      assistantMetadata?: AgentAssistantMetadata;
     }
   | {
       id: string;

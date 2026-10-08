@@ -1,0 +1,25 @@
+{
+  "name": "@melody/agent-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0 <25"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "start": "node --experimental-strip-types src/main.ts",
+    "test": "node --experimental-strip-types --test src/main.test.mjs src/worker-smoke.test.mjs src/transport.test.mjs src/idempotency.test.mjs src/pi/event-mapper.test.mjs src/pi/model-catalog.test.mjs src/pi/tool-gateway.test.mjs src/pi/todo-extension.test.mjs src/pi/goal-extension.test.mjs src/pi/compaction-extension.test.mjs src/pi/instruction-scope-extension.test.mjs src/pi/session-adapter.test.mjs src/pi/session-import.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.1",
+    "@earendil-works/pi-server": "1.0.1",
+    "@melody/agent-contract": "workspace:*",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "~5.8.3"
+  }
+}

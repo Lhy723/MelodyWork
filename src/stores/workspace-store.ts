@@ -17,8 +17,10 @@ import {
   pickWorkspaceDirectory,
   restoreProject as restoreStoredProject,
   stopAgent,
+  stopPiWorker,
   upsertProject,
 } from "@/lib/melody-bridge";
+import { clearAgentSessionEngine } from "@/lib/agent-client";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 interface WorkspaceStore {
@@ -198,11 +200,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (isIndependentProject(project)) {
       return { deleted: false, error: "独立任务不能删除。" };
     }
-    // Stop the active ACP session before removing its database rows. This
-    // prevents a final persistence flush from racing the project deletion.
+    // Stop the active engine before removing its database rows. This prevents
+    // a final persistence flush from racing project/native-history deletion.
     if (get().activeProject?.id === project.id) {
       try {
-        await stopAgent();
+        if (useAppSettingsStore.getState().agentEngine === "pi") {
+          await stopPiWorker();
+        } else {
+          await stopAgent();
+        }
       } catch {
         // Deleting the local project record remains possible if the agent has
         // already exited or the stop notification is unavailable.
@@ -336,7 +342,25 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
     set({ loading: true, error: undefined });
     try {
+      if (
+        get().activeProject?.id === project.id &&
+        useAppSettingsStore.getState().agentEngine === "pi"
+      ) {
+        try {
+          // Pi owns a workspace-scoped process and may still hold child
+          // sessions/background tasks that are not the visible session. Stop
+          // the generation first; it is restarted lazily by the bridge.
+          await stopPiWorker();
+        } catch {
+          // The worker may already have exited. The Host-side delete remains
+          // safe because no live process is required to remove the rows.
+        }
+      }
       await deleteStoredSession(session.id);
+      clearAgentSessionEngine(session.id);
+      if (session.acpSessionId) {
+        clearAgentSessionEngine(session.acpSessionId);
+      }
       const state = get();
       let projectSessions = (state.sessionsByProject[project.id] ?? []).filter(
         (item) => item.id !== session.id,

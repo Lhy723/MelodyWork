@@ -4,6 +4,8 @@ import { persist } from "zustand/middleware";
 export type UpdateChannel = "stable" | "beta";
 export type FileOpener = "system" | "vscode" | "cursor";
 export type UiFontPreset = "geist" | "system" | "custom";
+/** Agent implementation used for newly opened and resumed desktop sessions. */
+export type AgentEnginePreference = "legacy-acp" | "pi";
 
 export const DEFAULT_UI_FONT =
   '"Geist Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
@@ -27,6 +29,7 @@ export interface AppSettings {
   uiFontSize: number;
   codeFontSize: number;
   fontSmoothing: boolean;
+  agentEngine: AgentEnginePreference;
   defaultPermissionMode: "ask" | "auto" | "always-approve";
   autoCheckForUpdates: boolean;
   updateChannel: UpdateChannel;
@@ -68,6 +71,9 @@ const defaultSettings: AppSettings = {
   uiFontSize: 16,
   codeFontSize: 12,
   fontSmoothing: true,
+  // Pi is the only engine; legacy ACP is no longer selectable. A persisted
+  // "legacy-acp" value is coerced to "pi" on load (see merge below).
+  agentEngine: "pi",
   defaultPermissionMode: "ask",
   autoCheckForUpdates: true,
   updateChannel: "stable",
@@ -161,6 +167,14 @@ export const useAppSettingsStore = create<AppSettingsStore>()(
             persistedSettings.defaultFileOpener === "cursor"
               ? persistedSettings.defaultFileOpener
               : currentState.defaultFileOpener,
+          agentEngine:
+            // Pi is the only engine: coerce a persisted "legacy-acp" to "pi"
+            // on load. The stored key/value is kept as-is so old builds that
+            // still accept the raw value keep working after a rollback.
+            persistedSettings.agentEngine === "pi" ||
+            persistedSettings.agentEngine === "legacy-acp"
+              ? "pi"
+              : currentState.agentEngine,
         } as AppSettingsStore;
       },
       partialize: (settings) => {

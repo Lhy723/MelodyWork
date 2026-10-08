@@ -12,7 +12,7 @@ use crate::melody_command::MelodyCommandRunner;
 use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
-use super::config_extensions::extension_config_names;
+use super::config_extensions::PluginEnablement;
 
 #[tauri::command]
 pub async fn install_melody_plugin(
@@ -311,12 +311,15 @@ pub async fn list_installed_melody_plugins(
     }
     let entries: Vec<InstalledPluginEntry> = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("Melody returned an invalid plugin list: {error}"))?;
-    let disabled = extension_config_names("user", &cwd, "plugins", "disabled")?;
+    // Installed plugins are user-scope, and Melody activates them only when
+    // `[plugins].enabled` lists them; keeping the same rule here prevents the
+    // Settings list from reporting an installed-but-inactive plugin as active.
+    let enablement = PluginEnablement::for_workspace(&cwd)?;
     Ok(entries
         .into_iter()
         .filter(|entry| entry.status == "installed")
         .map(|entry| {
-            let enabled = !disabled.contains(&entry.name);
+            let enabled = enablement.is_enabled("user", &entry.path, &entry.name);
             MelodyExtension {
                 kind: "plugins".to_string(),
                 name: entry.name,

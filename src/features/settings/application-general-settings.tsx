@@ -53,6 +53,12 @@ export function ApplicationGeneralSettings() {
         <PreferenceRow label="默认文件打开目标">
           <FileOpenerPreference />
         </PreferenceRow>
+        <PreferenceRow
+          description="旧引擎创建的会话以只读归档打开；新会话始终使用 Pi。"
+          label="Agent 执行引擎"
+        >
+          <UnavailableControl label="Pi（唯一引擎）" />
+        </PreferenceRow>
         <PreferenceRow description="MelodyWork 界面使用的语言。" label="语言">
           <UnavailableControl label="简体中文 · 其他语言尚未实现" />
         </PreferenceRow>

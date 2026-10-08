@@ -23,9 +23,9 @@ export interface SessionRecord {
   projectId: string;
   title: string;
   cwd: string;
-  acpSessionId?: string;
+  acpSessionId?: string | null;
   timelineJson: string;
-  acpCursor?: string;
+  acpCursor?: string | null;
   timelineVersion: number;
   createdAt: number;
   updatedAt: number;

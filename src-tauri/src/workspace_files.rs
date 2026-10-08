@@ -50,6 +50,13 @@ fn safe_existing_path(root: &Path, relative_path: &str) -> Result<PathBuf, Strin
 }
 
 pub(crate) fn safe_write_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    // Callers normally pass a `WorkspaceRegistry`-canonical root, but the
+    // Pi gateway and unit tests also use this helper directly. Canonicalize
+    // once here so a relative path or a `/var` -> `/private/var` symlink
+    // cannot make an in-workspace parent look like it is outside the root.
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve workspace root: {error}"))?;
     let candidate = root.join(relative_path);
     if let Ok(metadata) = fs::symlink_metadata(&candidate) {
         if metadata.file_type().is_symlink() {
@@ -62,7 +69,7 @@ pub(crate) fn safe_write_path(root: &Path, relative_path: &str) -> Result<PathBu
     let canonical_parent = parent
         .canonicalize()
         .map_err(|error| format!("Failed to resolve {}: {error}", parent.display()))?;
-    if !canonical_parent.starts_with(root) {
+    if !canonical_parent.starts_with(&canonical_root) {
         return Err("Path is outside the workspace".to_string());
     }
     let name = candidate

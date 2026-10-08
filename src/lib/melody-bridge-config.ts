@@ -11,8 +11,27 @@ import type {
   PluginDetails,
   SkillDetails,
 } from "@/domain/config";
+import type {
+  AgentDefinitionSnapshot,
+  HookDefinitionSnapshot,
+  LspServerSnapshot,
+  PluginCapabilitySnapshot,
+} from "@/domain/agent/capability-report";
 import type { PermissionDecision, PermissionRule } from "@/domain/permission";
 import { isTauriRuntime } from "./melody-bridge-runtime";
+
+export interface MelodyRuntimeEnvironment {
+  /** Non-secret value of MELODY_SANDBOX, when configured by the host. */
+  sandboxProfile?: string;
+}
+
+/** Result of rebuilding the Host-owned persistent Pi memory sidecar. */
+export interface MemoryIndexSummary {
+  path: string;
+  chunkCount: number;
+  changed: boolean;
+  indexedAt: number;
+}
 
 export const readMelodyConfig = async (
   scope: MelodyConfigScope,
@@ -43,6 +62,112 @@ export const readMelodyConfig = async (
   }
   return invoke<MelodyConfigDocument>("read_melody_config", { scope, cwd });
 };
+
+/**
+ * Host preflight answer for `[sandbox].profile` / `MELODY_SANDBOX`.
+ *
+ * Only the Host knows whether the OS sandbox can actually confine a command on
+ * this platform, so the engine decision reads this instead of inferring from
+ * the presence of config.
+ */
+export interface WorkspaceSandboxPlan {
+  profile?: string;
+  enforceable: boolean;
+  reason?: string;
+  /**
+   * Machine-readable reason when `enforceable` is false. Only
+   * `platform-unsupported` (this OS has no enforcement implementation)
+   * degrades the session to unsandboxed with a prominent warning; every other
+   * code (profile asks for isolation the Host cannot express, or a broken
+   * platform runtime) refuses to open the session.
+   */
+  reasonCode?: string;
+}
+
+export const readWorkspaceSandboxPlan = async (
+  cwd: string,
+): Promise<WorkspaceSandboxPlan | undefined> => {
+  if (!isTauriRuntime()) {
+    return undefined;
+  }
+  try {
+    return await invoke<WorkspaceSandboxPlan>("read_workspace_sandbox_plan", {
+      cwd,
+    });
+  } catch {
+    // An unreadable plan must not become a silent grant: report "unknown" and
+    // let the preflight keep its conservative behaviour.
+    return undefined;
+  }
+};
+
+export const readMelodyRuntimeEnvironment =
+  async (): Promise<MelodyRuntimeEnvironment> =>
+    isTauriRuntime()
+      ? invoke<MelodyRuntimeEnvironment>("read_melody_runtime_environment")
+      : {};
+
+/** List effective agent definitions for Pi/ACP capability preflight. */
+export const listMelodyAgentDefinitions = async (
+  cwd: string,
+): Promise<AgentDefinitionSnapshot[]> =>
+  isTauriRuntime()
+    ? invoke<AgentDefinitionSnapshot[]>("list_melody_agent_definitions", {
+        cwd,
+      })
+    : [];
+
+/** List effective, Host-validated read-only LSP servers for Pi preflight. */
+export const listMelodyLspServers = async (
+  cwd: string,
+): Promise<LspServerSnapshot[]> =>
+  isTauriRuntime()
+    ? invoke<LspServerSnapshot[]>("list_melody_lsp_servers", { cwd })
+    : [];
+
+/** List Host-validated declarative command hooks for Pi preflight. */
+export const listMelodyHooks = async (
+  cwd: string,
+): Promise<HookDefinitionSnapshot[]> =>
+  isTauriRuntime()
+    ? invoke<HookDefinitionSnapshot[]>("list_melody_hooks", { cwd })
+    : [
+        {
+          name: "after-tool.sh",
+          path: `${cwd}/.melody/hooks/after-tool.sh`,
+          scope: "project",
+          enabled: true,
+          supported: false,
+          unsupportedFields: ["fileExtension"],
+        },
+      ];
+
+/** List Host-validated static/dynamic plugin surfaces for Pi preflight. */
+export const listMelodyPluginCapabilities = async (
+  cwd: string,
+): Promise<PluginCapabilitySnapshot[]> =>
+  isTauriRuntime()
+    ? invoke<PluginCapabilitySnapshot[]>("list_melody_plugin_capabilities", {
+        cwd,
+      })
+    : [
+        {
+          name: "git-tools",
+          path: `${cwd}/.melody/plugins/git-tools`,
+          scope: "project",
+          enabled: true,
+          staticResources: false,
+          dynamicComponents: ["hostInventory"],
+        },
+      ];
+
+/** Repair/rebuild the persistent memory index for a workspace. */
+export const rebuildMelodyMemoryIndex = async (
+  cwd: string,
+): Promise<MemoryIndexSummary | undefined> =>
+  isTauriRuntime()
+    ? invoke<MemoryIndexSummary>("rebuild_melody_memory_index", { cwd })
+    : undefined;
 
 const applyPreviewPatch = (
   target: Record<string, MelodyConfigValue>,

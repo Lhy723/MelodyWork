@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-pub(crate) const DATABASE_SCHEMA_VERSION: i64 = 5;
+pub(crate) const DATABASE_SCHEMA_VERSION: i64 = 13;
 pub(crate) const MAX_TIMELINE_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const INDEPENDENT_PROJECT_ID: &str = "__melody_independent__";
 pub(crate) const INDEPENDENT_PROJECT_DIRECTORY: &str = "independent-chat";
@@ -119,6 +119,118 @@ fn ensure_timeline_archive_schema(connection: &Connection) -> rusqlite::Result<(
     )
 }
 
+fn ensure_agent_session_binding_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS agent_session_bindings (
+            session_id TEXT PRIMARY KEY,
+            engine TEXT NOT NULL CHECK(engine IN ('melody-acp', 'pi')),
+            native_session_id TEXT,
+            worker_epoch TEXT,
+            last_seq INTEGER,
+            session_mode_id TEXT,
+            permission_mode TEXT,
+            model_id TEXT,
+            reasoning_effort TEXT,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS agent_session_bindings_engine
+            ON agent_session_bindings(engine, updated_at DESC);
+        ",
+    )?;
+
+    // v8 extends the engine binding with the last authoritative Pi workflow
+    // mode and permission mode. v9 adds the selected model and reasoning
+    // level. Keep this repairable for databases that were interrupted after
+    // creating an earlier table but before advancing
+    // user_version; named inserts elsewhere remain compatible with both
+    // layouts.
+    let mut columns = HashSet::new();
+    let mut statement = connection.prepare("PRAGMA table_info(agent_session_bindings)")?;
+    for column in statement.query_map([], |row| row.get::<_, String>(1))? {
+        columns.insert(column?);
+    }
+    if !columns.contains("session_mode_id") {
+        connection.execute(
+            "ALTER TABLE agent_session_bindings ADD COLUMN session_mode_id TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("permission_mode") {
+        connection.execute(
+            "ALTER TABLE agent_session_bindings ADD COLUMN permission_mode TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("model_id") {
+        connection.execute(
+            "ALTER TABLE agent_session_bindings ADD COLUMN model_id TEXT",
+            [],
+        )?;
+    }
+    if !columns.contains("reasoning_effort") {
+        connection.execute(
+            "ALTER TABLE agent_session_bindings ADD COLUMN reasoning_effort TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_agent_event_log_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS agent_event_log (
+            session_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            source_event_id TEXT,
+            worker_epoch TEXT,
+            seq INTEGER,
+            event_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(session_id, ordinal),
+            UNIQUE(session_id, event_id),
+            FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS agent_event_log_order
+            ON agent_event_log(session_id, ordinal);
+        CREATE INDEX IF NOT EXISTS agent_event_log_event
+            ON agent_event_log(session_id, event_id);
+        ",
+    )
+}
+
+fn ensure_migration_journal_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS migration_journal (
+            migration_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            source_engine TEXT NOT NULL CHECK(source_engine = 'melody-acp'),
+            target_engine TEXT NOT NULL CHECK(target_engine = 'pi'),
+            source_digest TEXT NOT NULL,
+            converter_version TEXT NOT NULL,
+            stage TEXT NOT NULL CHECK(stage IN ('planned', 'materializing', 'applied', 'failed', 'rolled-back')),
+            validation_report TEXT NOT NULL,
+            plan_json TEXT NOT NULL,
+            backup_requested INTEGER NOT NULL DEFAULT 1 CHECK(backup_requested IN (0, 1)),
+            backup_ref TEXT,
+            target_native_session_id TEXT,
+            error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS migration_journal_session_updated
+            ON migration_journal(session_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS migration_journal_active
+            ON migration_journal(session_id, stage, updated_at DESC);
+        ",
+    )
+}
+
 fn backfill_timeline_archive(connection: &Connection) -> rusqlite::Result<()> {
     let mut statement = connection.prepare("SELECT id, timeline_json, updated_at FROM sessions")?;
     let sessions = statement
@@ -159,9 +271,17 @@ pub(crate) fn migrate_schema(connection: &Connection) -> Result<(), Box<dyn std:
     }
 
     // v2 added the ACP replay cursor; v3 added the projection version; v4
-    // added the unbounded timeline archive; v5 added project archiving. The column/table checks also
-    // repair an interrupted/partially migrated database whose user_version
-    // was not advanced before the process exited.
+    // added the unbounded timeline archive; v5 added project archiving; v6
+    // added the engine-neutral native-session binding table; v7 added the
+    // Host-owned normalized Pi event log; v8 added the last Pi session mode
+    // and permission mode to the binding; v9 added the selected model and
+    // reasoning level; v10 added the durable ACP-to-Pi migration journal;
+    // v11 added Host-owned schedules and their run journal; v12 added cron
+    // expressions to schedules without rebuilding the referenced table; v13
+    // added durable Pi Explorer fork lineage and recovery state.
+    // The column/table checks also repair an
+    // interrupted/partially migrated database whose user_version was not
+    // advanced before the process exited.
     let mut columns = session_columns(connection)?;
     if version < 2 || !columns.contains("acp_cursor") {
         ensure_session_column(connection, &mut columns, "acp_cursor", "TEXT")?;
@@ -187,6 +307,11 @@ pub(crate) fn migrate_schema(connection: &Connection) -> Result<(), Box<dyn std:
             "INTEGER NOT NULL DEFAULT 0",
         )?;
     }
+    ensure_agent_session_binding_schema(connection)?;
+    ensure_agent_event_log_schema(connection)?;
+    ensure_migration_journal_schema(connection)?;
+    super::database_agent_schedules::ensure_agent_schedule_schema(connection)?;
+    super::database_agent_forks::ensure_pi_session_fork_schema(connection)?;
 
     connection.pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)?;
     Ok(())

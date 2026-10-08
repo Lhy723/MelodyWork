@@ -87,6 +87,12 @@ export function DynamicSection({
             ],
           },
           {
+            path: [...root, name, "input"],
+            label: "输入类型",
+            description: "每行填写 text 或 image；未填写时默认为纯文本。",
+            kind: "string-list",
+          },
+          {
             path: [...root, name, "api_key"],
             label: "API Key",
             description: "直接保存的密钥；优先建议使用环境变量。",

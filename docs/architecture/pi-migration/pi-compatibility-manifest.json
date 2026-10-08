@@ -1,0 +1,548 @@
+{
+  "schemaVersion": 1,
+  "pi": {
+    "version": "1.0.1",
+    "sourceTag": "v1.0.1",
+    "sourceCommit": "a7229ddc21810d6245105978033b7df645ecc2f7",
+    "npmPackages": {
+      "@earendil-works/pi-coding-agent": "1.0.1",
+      "@earendil-works/pi-server": "1.0.1"
+    },
+    "protocolVersion": 1,
+    "nativeSessionFormat": 3
+  },
+  "worker": {
+    "engine": "pi",
+    "runtimeFallback": "none",
+    "tools": [
+      "workspace_read_file",
+      "workspace_read_tool_output",
+      "workspace_search",
+      "workspace_list_directory",
+      "workspace_write_file",
+      "workspace_edit",
+      "workspace_apply_patch",
+      "run_terminal_command",
+      "monitor",
+      "scheduler_create",
+      "scheduler_list",
+      "scheduler_delete",
+      "ask_user_question",
+      "update_plan",
+      "spawn_subagent",
+      "run_background_task",
+      "task",
+      "get_command_or_subagent_output",
+      "wait_commands_or_subagents",
+      "kill_command_or_subagent",
+      "get_task_output",
+      "wait_tasks",
+      "kill_task",
+      "mcp_list_tools",
+      "mcp_call_tool",
+      "web_search",
+      "web_fetch",
+      "browser_navigate",
+      "browser_tabs",
+      "browser_snapshot",
+      "browser_wait",
+      "browser_screenshot",
+      "browser_click",
+      "browser_type",
+      "browser_tab_open",
+      "browser_tab_select",
+      "browser_tab_close",
+      "memory_search",
+      "memory_get",
+      "memory_remember",
+      "lsp",
+      "codebase_navigation",
+      "todo_write",
+      "update_goal"
+    ],
+    "sessionModes": ["default", "plan", "ask"],
+    "media": ["image-input"]
+  },
+  "hostBridges": {
+    "mcpTransports": ["stdio", "http", "sse"],
+    "sessionExplorer": {
+      "command": "session.fork",
+      "nativeAnchorField": "nativeEntryId",
+      "availableFor": "verified-completed-plain-text-assistant-messages",
+      "authorization": "Host requires a Pi-bound source and an unbound target in the same project and canonical workspace",
+      "materialization": "Pi SessionManager.createBranchedSession into a new opaque product-session file",
+      "productLineage": true,
+      "bringBack": true,
+      "bringBackMode": "bounded-post-anchor-assistant-text-appended-to-session-keyed-local-draft",
+      "bringBackMaxCodepoints": 12000,
+      "bringBackAutomaticSubmit": false,
+      "restartRecovery": "host-persisted-lineage-and-validated-existing-native-file",
+      "knownGaps": ["desktop end-to-end and failure-injection verification"]
+    },
+    "modelPolicySnapshot": {
+      "schemaVersion": 1,
+      "environmentVariable": "MELODY_PI_MODEL_POLICIES_PATH",
+      "thresholdEnvironmentVariable": "MELODY_AUTO_COMPACT_THRESHOLD_PERCENT",
+      "file": "pi/melody-model-policies.json",
+      "maxBytes": 1048576,
+      "maxModels": 1024,
+      "maxRetries": 10000,
+      "maxIdleTimeoutMs": 2147483000,
+      "maxAutoCompactThresholdPercent": 100
+    },
+    "promptTemplates": {
+      "environmentVariable": "MELODY_PI_PROMPT_PATHS_JSON",
+      "rootsEnvironmentVariable": "MELODY_PI_PROMPT_ROOTS_JSON",
+      "maxPaths": 512,
+      "maxFileBytes": 1048576,
+      "maxTotalBytes": 67108864,
+      "flatCommandsOnly": true
+    },
+    "skillPaths": {
+      "environmentVariable": "MELODY_PI_SKILL_PATHS_JSON",
+      "rootsEnvironmentVariable": "MELODY_PI_SKILL_ROOTS_JSON",
+      "maxPaths": 256,
+      "maxDepth": 6,
+      "maxFileBytes": 1048576,
+      "maxTotalBytes": 67108864,
+      "externalMarkdownOnly": true,
+      "pluginStaticResources": true,
+      "skillIgnore": {
+        "configPath": "skills.ignore",
+        "semantics": "path prefixes, not globs: ~ expanded, relative entries resolved against the workspace, matched against the canonical Skill path",
+        "appliesTo": ["native roots only"],
+        "maxPaths": 64,
+        "maxBytesPerPath": 4096,
+        "truncateWorkerClamp": "MAX_PI_SKILL_IGNORE_PATHS"
+      },
+      "pluginDynamicHandling": "pi-diagnostic-no-runtime-fallback",
+      "pluginActivation": {
+        "explicitEnablement": true,
+        "rule": "a discovered plugin is active only when [plugins].enabled lists it (plain name or Melody <scope>/<hex8>/<name> id) and [plugins].disabled does not; presence on disk is not enablement",
+        "legacySource": "melody-agent plugin registry: enabled = !is_disabled && explicitly_enabled",
+        "configuredPaths": {
+          "configPath": "plugins.paths",
+          "scope": "config",
+          "autoEnabled": true,
+          "maxEntries": 64
+        },
+        "nameConflictPrecedence": ["project", "user", "config"]
+      },
+      "maxPluginRoots": 128,
+      "maxPluginScanDepth": 5,
+      "maxPluginScanEntries": 4096
+    },
+    "subagentPolicy": {
+      "manifestField": "subagentPolicies",
+      "declarativeAgentSurfaces": [
+        "native-agent-files",
+        "inline-config",
+        "plugin-agents"
+      ],
+      "pluginAgentNaming": "<plugin>:<agent>, plus the bare name while nothing else claims it",
+      "agentFrontmatterSource": "melody-agent AgentDefinition (camelCase fields); keys outside that struct are inert",
+      "toolAllowlistMapping": {
+        "read-only": "no write or terminal tools",
+        "read-write": "write tools without a terminal",
+        "execute": "terminal without write tools",
+        "read-write-execute": "write tools and a terminal together",
+        "unrepresentableHandling": "pi-diagnostic-no-runtime-fallback"
+      },
+      "mcpToolGrants": {
+        "field": "mcpTools",
+        "pattern": "mcp__<server>__<tool>",
+        "maxTools": 64,
+        "maxServerBytes": 64,
+        "maxToolBytes": 96,
+        "appliesWhenCeiling": "any ceiling other than all",
+        "parentIntersection": true
+      }
+    },
+    "gitignorePolicy": {
+      "environmentVariable": "MELODY_RESPECT_GITIGNORE",
+      "manifestField": "respectGitignore",
+      "implementation": "host-tool-gateway",
+      "matchingLibrary": "ignore",
+      "appliesTo": [
+        "workspace_read_file",
+        "workspace_search",
+        "workspace_list_directory",
+        "workspace_edit",
+        "workspace_apply_patch"
+      ]
+    },
+    "terminalPolicy": {
+      "implementation": "host-tool-gateway",
+      "configPaths": [
+        "toolset.bash.timeout_secs",
+        "toolset.bash.max_timeout_secs",
+        "toolset.bash.output_byte_limit"
+      ],
+      "environmentVariables": [
+        "MELODY_TERMINAL_TIMEOUT_SECS",
+        "MELODY_TERMINAL_MAX_TIMEOUT_SECS",
+        "MELODY_TERMINAL_OUTPUT_BYTE_LIMIT"
+      ],
+      "maxTimeoutMs": 36000000,
+      "maxOutputBytes": 8388608
+    },
+    "backgroundTerminalTasks": {
+      "implementation": "host-terminal-task-registry",
+      "taskIdPrefix": "pi-terminal-task:",
+      "maxActiveTasks": 64,
+      "maxWaitTimeoutMs": 120000,
+      "outputPreviewBytes": 65536,
+      "cancellation": "host-owned-process-kill",
+      "workerStopCleanup": true
+    },
+    "agentSchedules": {
+      "implementation": "host-sqlite-scheduler",
+      "tools": ["scheduler_create", "scheduler_list", "scheduler_delete"],
+      "toolFields": {
+        "scheduler_create": [
+          "interval",
+          "cron",
+          "prompt",
+          "fire_immediately",
+          "task_id"
+        ],
+        "scheduler_list": [],
+        "scheduler_delete": ["task_id"]
+      },
+      "toolIdPrefix": "scheduler-",
+      "kinds": ["once", "interval", "cron"],
+      "intervalParsing": "s|m|h|d suffix, clamped to 60000..2592000000 ms",
+      "cronParsing": "restricted 5-field Vixie syntax in local timezone; minute/hour/day/month/weekday with lists, ranges and steps; minimum fire interval is one minute",
+      "missedPolicy": ["skip", "run-once"],
+      "identitySource": "the Host copies engine/session-mode/permission-mode/model from the schedule owner's live Pi binding; the model cannot widen it",
+      "refusedEngines": [
+        "sessions bound to the compatibility engine",
+        "sessions with no Pi binding"
+      ],
+      "maxIntervalMs": 2592000000,
+      "runJournal": true,
+      "orphanPurge": ["session deletion", "project deletion"],
+      "completionCorrelation": "a run is only recorded as succeeded after the worker accepts the dispatched turn"
+    },
+    "questionTimeoutPolicy": {
+      "implementation": "worker-gateway",
+      "manifestField": "questionTimeoutPolicy",
+      "environmentVariable": "MELODY_PI_QUESTION_TIMEOUT_POLICY_JSON",
+      "maxTimeoutMs": 2147483647
+    },
+    "webTools": {
+      "implementation": "host-tool-gateway",
+      "tools": ["web_search", "web_fetch"],
+      "searchEndpoint": "responses-api",
+      "maxQueryBytes": 2000,
+      "maxUrlBytes": 4096,
+      "maxResponseBytes": 10485760,
+      "maxFetchedTextBytes": 524288,
+      "redirects": "disabled"
+    },
+    "browser": {
+      "implementation": "host-session-embedded-webview",
+      "tools": [
+        "browser_navigate",
+        "browser_tabs",
+        "browser_snapshot",
+        "browser_wait",
+        "browser_screenshot",
+        "browser_click",
+        "browser_type",
+        "browser_tab_open",
+        "browser_tab_select",
+        "browser_tab_close"
+      ],
+      "windowModel": "embedded-tauri-child-webview",
+      "tabLimitPerSession": 8,
+      "profile": {
+        "isolation": "product-session-scoped",
+        "windowsLinux": "persistent-session-directory",
+        "macos14Plus": "persistent-webkit-data-store",
+        "macosBefore14": "ephemeral-store",
+        "ios": "ephemeral-store",
+        "android": "unavailable-fail-closed"
+      },
+      "navigation": "public-https-only; rejects localhost, local names, and private IP literals",
+      "localPreview": "explicit-opt-in-loopback-http-or-https",
+      "newWindowPolicy": "deny-unless-explicit-tab-opt-in-public-https",
+      "snapshotMaxTextBytes": 32768,
+      "snapshotMaxElements": 80,
+      "typeMaxBytes": 2048,
+      "passwordInputs": "never-exposed-or-typed",
+      "userActionApproval": "per-call-even-when-session-permission-mode-is-not-ask",
+      "screenshot": {
+        "capture": "application-window-cropped-to-embedded-browser-viewport",
+        "maxEncodedBytes": 524288,
+        "maxWidth": 1280,
+        "maxHeight": 960,
+        "approval": "per-call",
+        "linuxWayland": "unavailable-fail-closed"
+      },
+      "knownGaps": [
+        "desktop-end-to-end-and-capture-permission-verification",
+        "linux-wayland-screenshot-capture",
+        "dns-private-address-resolution-is-not-a-network-sandbox"
+      ]
+    },
+    "envrcProjection": {
+      "implementation": "host-direnv-export-json",
+      "environmentVariable": "MELODY_PI_LOAD_ENVRC",
+      "timeoutMs": 5000,
+      "maxOutputBytes": 1048576,
+      "maxEntries": 256,
+      "maxKeyBytes": 128,
+      "maxValueBytes": 16384,
+      "denyNames": [
+        "LD_PRELOAD",
+        "DYLD_INSERT_LIBRARIES",
+        "NODE_OPTIONS",
+        "RUSTFLAGS",
+        "BASH_ENV"
+      ]
+    },
+    "remoteModelCatalog": {
+      "implementation": "host-model-config",
+      "configKeys": [
+        "endpoints.models_list_url",
+        "endpoints.models_base_url",
+        "endpoints.models_api_key",
+        "features.remote_fetch"
+      ],
+      "environmentVariables": [
+        "MELODY_MODELS_LIST_URL",
+        "MELODY_MODELS_BASE_URL",
+        "MELODY_MODELS_API_KEY",
+        "MELODY_PI_ALLOW_MODEL_NETWORK"
+      ],
+      "cacheFile": "pi/melody-remote-models.json",
+      "defaultSource": "pi-signed-catalog",
+      "maxResponseBytes": 4194304,
+      "maxModels": 1024,
+      "redirects": "disabled"
+    },
+    "memoryTools": {
+      "implementation": "host-memory-gateway",
+      "tools": ["memory_search", "memory_get", "memory_remember"],
+      "root": "~/.melody/memory",
+      "ranking": "bm25-source-weight-temporal-decay",
+      "maxQueryBytes": 2048,
+      "maxFileBytes": 2097152,
+      "maxTotalBytes": 67108864,
+      "maxFiles": 512,
+      "maxOutputBytes": 524288,
+      "maxNoteBytes": 16384,
+      "writeScopes": ["workspace", "global"],
+      "persistentIndex": {
+        "implementation": "host-sqlite-lexical",
+        "file": "index.sqlite",
+        "schemaVersion": 1,
+        "autoSync": ["before-memory-search", "after-memory-write"],
+        "rebuildCommand": "rebuild_melody_memory_index",
+        "authoritativeSource": "markdown"
+      },
+      "firstTurnInjection": true,
+      "sessionEndSnapshot": true,
+      "flushCommand": "/flush",
+      "semanticIndexHandling": "pi-diagnostic-no-runtime-fallback"
+    },
+    "goalSafety": {
+      "implementation": "host-manifest-pi-extension",
+      "manifestField": "goalPolicy",
+      "environmentVariable": "MELODY_PI_GOAL_POLICY_JSON",
+      "configSections": ["goal", "goal_orchestration"],
+      "environmentVariables": [
+        "MELODY_GOAL_TOKEN_BUDGET",
+        "MELODY_GOAL_STALL_DETECTION",
+        "MELODY_GOAL_STALL_TIMEOUT_SECS",
+        "MELODY_GOAL_MAX_BLOCKED_ATTEMPTS"
+      ],
+      "maxTokenBudget": 100000000,
+      "maxStallTimeoutSecs": 604800,
+      "maxBlockedAttempts": 100,
+      "advancedUnavailable": [
+        "classifier",
+        "planner",
+        "verifier",
+        "retry",
+        "model-pins"
+      ]
+    },
+    "lspBridge": {
+      "implementation": "host-lsp-stdio",
+      "tools": ["lsp"],
+      "configFiles": ["~/.melody/lsp.json", ".melody/lsp.json"],
+      "projectTrustField": "trusted",
+      "operations": [
+        "goToDefinition",
+        "findReferences",
+        "hover",
+        "goToImplementation",
+        "documentSymbol",
+        "workspaceSymbol"
+      ],
+      "transports": ["stdio", "local"],
+      "maxConfigBytes": 1048576,
+      "maxDocumentBytes": 2097152,
+      "maxOutputBytes": 262144,
+      "startupTimeoutMs": 30000,
+      "requestTimeoutMs": 30000,
+      "unsupportedHandling": "pi-diagnostic-no-runtime-fallback"
+    },
+    "codebaseIndex": {
+      "implementation": "host-tree-sitter",
+      "tool": "codebase_navigation",
+      "languages": ["rust", "typescript", "javascript", "python", "go"],
+      "operations": [
+        "definition",
+        "references",
+        "documentSymbols",
+        "workspaceSymbols",
+        "status",
+        "rebuild",
+        "refresh"
+      ],
+      "configPath": "features.codebase_indexing",
+      "configValues": ["boolean", "glob[]"],
+      "maxPatterns": 64,
+      "maxPatternBytes": 512,
+      "maxWorkspaceIndexes": 16,
+      "maxFiles": 4096,
+      "maxFileBytes": 2097152,
+      "maxTotalBytes": 67108864,
+      "maxResults": 100,
+      "readOnly": true,
+      "incrementalRefresh": true,
+      "strictGraphHandling": "pi-diagnostic-no-runtime-fallback"
+    },
+    "hooks": {
+      "implementation": "host-command-hooks",
+      "configRoots": ["~/.melody/hooks", ".melody/hooks"],
+      "events": [
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PermissionDenied",
+        "SessionStart",
+        "SessionEnd",
+        "PreCompact",
+        "PostCompact",
+        "SubagentStart",
+        "SubagentStop"
+      ],
+      "commandOnly": true,
+      "maxFiles": 64,
+      "maxHooks": 256,
+      "maxFileBytes": 1048576,
+      "maxCommandBytes": 4096,
+      "maxInputBytes": 262144,
+      "maxOutputBytes": 65536,
+      "maxTimeoutMs": 30000,
+      "unsupportedHandling": "pi-diagnostic-no-runtime-fallback"
+    },
+    "toolOutputArchive": {
+      "directory": ".melody/pi/tool-output",
+      "maxFileBytes": 67108864,
+      "maxFiles": 32,
+      "maxTotalBytes": 536870912
+    },
+    "sandbox": {
+      "implementation": "host-terminal-sandbox",
+      "appliesTo": [
+        "run_terminal_command",
+        "background terminal tasks",
+        "monitor"
+      ],
+      "mechanism": {
+        "macos": "seatbelt via /usr/bin/sandbox-exec -p",
+        "linux": "pre-exec Landlock ruleset (ABI >= 3), pending real-hardware acceptance",
+        "windows": "none — session degrades to unsandboxed with a prominent warning"
+      },
+      "profiles": {
+        "builtin": ["workspace", "devbox", "read-only", "strict", "off"],
+        "customFiles": [
+          "~/.melody/sandbox.toml",
+          "<workspace>/.melody/sandbox.toml"
+        ],
+        "projectMayAddNamesOnly": true
+      },
+      "pathRule": "allow and deny paths are canonicalized before they reach the kernel (Seatbelt matches the resolved path; Linux Landlock receives opened canonical path handles)",
+      "writableSubtrees": ["workspace", "melody-state", "temp", "device-files"],
+      "failClosed": [
+        "profiles that also restrict child networking (read-only, strict)",
+        "glob deny entries",
+        "platform-broken runtimes (missing sandbox-exec, Landlock ABI < 3)"
+      ],
+      "preflightCommand": "read_workspace_sandbox_plan",
+      "notCovered": [
+        "Host-constructed internal commands (for example the subagent worktree git call)",
+        "configured MCP/LSP services started by the Host"
+      ],
+      "platformUnsupportedSemantics": "reason_code platform-unsupported degrades the session to unsandboxed with a prominent warning; all other unenforceable reasons refuse to open"
+    },
+    "compaction": {
+      "implementation": "worker-inline-extension",
+      "entryPoint": "session_before_compact",
+      "passes": [
+        "bounded durable-memory note from the active model",
+        "Pi public compact() with that note plus the task digest as explicit focus"
+      ],
+      "taskDigest": {
+        "sources": ["melody.todo_state", "melody.goal_state"],
+        "maxChars": 4000,
+        "survivesFailedFirstPass": true
+      },
+      "failOpen": "any missing auth, aborted request, or failed pass delegates to Pi's native one-pass compaction",
+      "commands": ["/flush"]
+    }
+  },
+  "capabilityHandling": {
+    "model": "peripheral-degradation",
+    "description": "预检只对会话级风险阻断 Pi（配置不可读、沙箱无法表达/平台运行时损坏）；外设能力缺失与无沙箱实现的平台降级为 warning 诊断，会话留在 Pi",
+    "blockedInPi": [
+      "config-unreadable",
+      "sandbox-profile-not-expressible",
+      "sandbox-platform-broken"
+    ],
+    "degradedInPi": [
+      "dynamic-plugin-surfaces",
+      "dynamic-hooks",
+      "strict-codebase-graph",
+      "memory-semantic-index",
+      "remote-media",
+      "headless-oauth",
+      "external-auth-provider",
+      "oidc-authentication",
+      "subagent-policy",
+      "custom-subagent-policy",
+      "goal-orchestration",
+      "sandbox-platform-unsupported"
+    ]
+  },
+  "legacyEngine": {
+    "agentRole": "removed",
+    "runtimeFallback": "removed",
+    "blockingPreflightBehavior": "refuse-to-open",
+    "cliRole": "retained",
+    "cliConsumers": ["config_marketplace", "config_extensions inspect"],
+    "vendorRemoval": {
+      "measured": "release CLI binary is 161MB (contains the entire retired TUI engine); local 12GB debug cache and 400MB debug sidecar were deleted",
+      "blockedOn": "porting melody-plugin-marketplace (plugin install/update/uninstall/list) and melody inspect to native Rust",
+      "consumers": [
+        "scan_marketplace_plugins",
+        "install_melody_plugin",
+        "plugin update/uninstall",
+        "list_installed_melody_plugins",
+        "run_melody_inspect"
+      ]
+    }
+  },
+  "retiredCapabilities": [
+    {
+      "capability": "workflows",
+      "reason": "the Rhai workflow engine is out of migration scope by product decision; periodic work is served by Host-owned schedules",
+      "legacyKey": "config.workflows.enabled"
+    }
+  ]
+}

@@ -23,6 +23,14 @@ import {
   providerTemplates,
 } from "./model-settings-utils";
 
+const inputModalities = (value: unknown): Array<"text" | "image"> =>
+  Array.isArray(value)
+    ? value.filter(
+        (item, index, all): item is "text" | "image" =>
+          (item === "text" || item === "image") && all.indexOf(item) === index,
+      )
+    : [];
+
 function ModelOverrideField({
   definition,
   draft,
@@ -155,6 +163,14 @@ export function ModelEditorDialog({
         .filter((item): item is string => typeof item === "string")
         .join(", ")
     : "";
+  const inheritedInput = inputModalities(
+    valueAt(globalValues, ["models", "input"]),
+  );
+  const inputOverride =
+    draft.input === undefined ? undefined : inputModalities(draft.input);
+  const supportsImageInput = (inputOverride ?? inheritedInput).includes(
+    "image",
+  );
   const nameConflict = !editing && existingNames.includes(alias.trim());
 
   return (
@@ -378,6 +394,38 @@ export function ModelEditorDialog({
                     }
                   />
                 </label>
+                <div className="flex items-center justify-between gap-4 rounded-lg bg-muted/40 px-3 py-2">
+                  <span>
+                    <span className="block font-medium text-xs">图片输入</span>
+                    <span className="text-muted-foreground text-xs">
+                      {inputOverride === undefined
+                        ? `继承全局：${supportsImageInput ? "支持" : "仅文本"}`
+                        : "当前模型单独设置"}
+                    </span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {inputOverride !== undefined ? (
+                      <Button
+                        aria-label="恢复输入类型继承"
+                        onClick={() => setField("input", undefined)}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        继承
+                      </Button>
+                    ) : null}
+                    <Switch
+                      aria-label="支持图片输入"
+                      checked={supportsImageInput}
+                      onCheckedChange={(checked) =>
+                        setField(
+                          "input",
+                          checked ? ["text", "image"] : ["text"],
+                        )
+                      }
+                    />
+                  </div>
+                </div>
                 <label className="flex items-center justify-between gap-4 rounded-lg bg-muted/40 px-3 py-2">
                   <span>
                     <span className="block font-medium text-xs">

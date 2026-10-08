@@ -1,4 +1,6 @@
 import { toUserMessage as reasonMessage } from "@/domain/app-error";
+import { buildPiSessionImportPlan } from "@/domain/agent/pi-session-import";
+import type { JsonObject } from "@/domain/agent/contract";
 import {
   contextUsageFromTimeline,
   parseTimelineProjection,
@@ -6,8 +8,17 @@ import {
   TIMELINE_PROJECTION_VERSION,
   usableTimelineProjection,
 } from "@/domain/session-projection";
+import {
+  agentEngineForSession,
+  sendAgentCommand,
+  setAgentSessionEngine,
+} from "@/lib/agent-client";
+import {
+  beginPiMigration,
+  failPiMigration,
+} from "@/lib/melody-bridge-workspace";
 import { INITIALIZE_REQUEST_ID } from "./agent-store-runtime";
-import { isTauriRuntime, sendAcp } from "@/lib/melody-bridge";
+import { getPiAgentSessionBinding, isTauriRuntime } from "@/lib/melody-bridge";
 import {
   armSetupTimeout,
   fullReplayStarted,
@@ -17,34 +28,37 @@ import {
   sessionEventDeduplicator,
 } from "./agent-store-runtime";
 import { contextUsageForModel } from "./agent-store-parsing";
+import { resetPiEventProjection } from "./agent-store-pi";
+import { PI_SESSION_MODE_OPTIONS } from "@/domain/agent/pi-session-modes";
+import {
+  ARCHIVE_STATUS_NOTICE,
+  shouldImportPiSession,
+} from "@/domain/agent/session-archive";
 import type { AgentStore, AgentStoreAccess } from "./agent-store-types";
 
-export const beginAgentSession = async (
-  store: AgentStoreAccess,
-  ...args: Parameters<AgentStore["beginSession"]>
-) => {
-  const [
-    cwd,
-    localSessionId,
-    acpSessionId,
-    timelineJson,
-    acpCursor,
-    timelineVersion,
-    archivedTimelineJson,
-    forceInitialize = false,
-  ] = args;
-  const { get, set } = store;
-
-  const projectionTimelineJson = archivedTimelineJson ?? timelineJson;
-  // The archive can restore the display independently. A cursor is only
-  // safe when the bounded snapshot was written as a complete projection;
-  // version 0 deliberately forces ACP replay after compaction or migration.
-  const projectionVersion = timelineVersion;
+/**
+ * Shared timeline-seeding used by both open paths: restore the visible
+ * history from the persisted archive (preferred) or the bounded snapshot.
+ * A cursor is only safe when the bounded snapshot was written as a complete
+ * projection; version 0 deliberately forces ACP replay after compaction or
+ * migration.
+ */
+const restoreSessionHistory = (input: {
+  timelineJson?: string;
+  archivedTimelineJson?: string;
+  acpCursor?: string;
+  timelineVersion?: number;
+}) => {
+  const projectionTimelineJson =
+    input.archivedTimelineJson ?? input.timelineJson;
+  const projectionVersion = input.timelineVersion;
   const projectionCursor =
-    projectionVersion === TIMELINE_PROJECTION_VERSION ? acpCursor : undefined;
+    projectionVersion === TIMELINE_PROJECTION_VERSION
+      ? input.acpCursor
+      : undefined;
   const fallbackTimeline = parseTimelineProjection(projectionTimelineJson);
-  const archivedProjection = archivedTimelineJson
-    ? readTimelineProjection(archivedTimelineJson)
+  const archivedProjection = input.archivedTimelineJson
+    ? readTimelineProjection(input.archivedTimelineJson)
     : undefined;
   const projectionRead = readTimelineProjection(projectionTimelineJson);
   const restoredTimeline = archivedProjection
@@ -61,6 +75,63 @@ export const beginAgentSession = async (
     (archivedProjection?.status ?? projectionRead.status) === "valid"
       ? projectionCursor
       : undefined;
+  return {
+    fallbackTimeline,
+    restoredTimeline,
+    restoredCursor,
+    archivedProjection,
+    projectionRead,
+  };
+};
+
+export const beginAgentSession = async (
+  store: AgentStoreAccess,
+  ...args: Parameters<AgentStore["beginSession"]>
+) => {
+  const [
+    cwd,
+    localSessionId,
+    acpSessionId,
+    timelineJson,
+    acpCursor,
+    timelineVersion,
+    archivedTimelineJson,
+    forceInitialize = false,
+  ] = args;
+  const { get, set } = store;
+  const currentState = get();
+  const piSelected =
+    isTauriRuntime() && agentEngineForSession(localSessionId) === "pi";
+  const expectedEngineSessionId = piSelected ? localSessionId : acpSessionId;
+  const currentEngineMatches =
+    currentState.acpSessionId === expectedEngineSessionId;
+  // Keep the routing decision visible to every command issued after the
+  // session opens (turns, configuration, permissions and interactions).
+  setAgentSessionEngine(localSessionId, piSelected ? "pi" : "legacy-acp");
+  if (acpSessionId) {
+    setAgentSessionEngine(acpSessionId, piSelected ? "pi" : "legacy-acp");
+  }
+  const previousEngineSessionId = acpSessionId;
+  // Pi uses the product session ID as the renderer-facing execution key. ACP
+  // native IDs are intentionally not sent to Pi: they are not valid Pi tree
+  // cursors and would make a resumed session open the wrong history.
+  const engineSessionId = piSelected ? localSessionId : acpSessionId;
+  if (currentState.localSessionId !== localSessionId || !currentEngineMatches) {
+    resetPiEventProjection(localSessionId);
+  }
+
+  const {
+    fallbackTimeline,
+    restoredTimeline,
+    restoredCursor,
+    archivedProjection,
+    projectionRead,
+  } = restoreSessionHistory({
+    timelineJson,
+    archivedTimelineJson,
+    acpCursor,
+    timelineVersion,
+  });
   const persistedContextUsage = contextUsageFromTimeline(restoredTimeline);
   const state = get();
   if (!isTauriRuntime()) {
@@ -78,18 +149,21 @@ export const beginAgentSession = async (
       contextUsage:
         contextUsageFromTimeline(displayTimeline) ??
         contextUsageForModel(state.availableModels, state.selectedModelId),
+      configRevision: 0,
       acpPhase: "initializing",
       chatStatus: "submitted",
+      archivedReadOnly: false,
     });
     try {
-      await sendAcp({
-        jsonrpc: "2.0",
-        id: INITIALIZE_REQUEST_ID,
-        method: "initialize",
-        params: {
-          protocolVersion: 1,
+      await sendAgentCommand({
+        protocolVersion: 1,
+        requestId: INITIALIZE_REQUEST_ID,
+        sessionId: localSessionId,
+        command: {
+          type: "runtime.health",
+          sessionId: localSessionId,
+          clientType: "melody-work-preview",
           clientCapabilities: { fs: {}, terminal: false },
-          _meta: { clientType: "melody-work-preview" },
         },
       });
       armSetupTimeout(
@@ -111,6 +185,7 @@ export const beginAgentSession = async (
 
   if (
     state.localSessionId === localSessionId &&
+    currentEngineMatches &&
     (state.acpPhase === "initializing" ||
       state.acpPhase === "authenticating" ||
       state.acpPhase === "creating" ||
@@ -180,18 +255,20 @@ export const beginAgentSession = async (
     activeSessionId: localSessionId,
     localSessionId,
     cwd,
-    acpSessionId,
-    acpCursor: sessionLoadCursor,
+    acpSessionId: engineSessionId,
+    acpCursor: piSelected ? undefined : sessionLoadCursor,
     timeline: finalTimeline,
     backgroundTimelines,
     backgroundCursors,
     contextUsage:
       restoredContextUsage ??
       contextUsageForModel(state.availableModels, state.selectedModelId),
+    configRevision: 0,
     backgroundContextUsage,
-    availableSessionModes: [],
-    selectedSessionModeId: undefined,
+    availableSessionModes: piSelected ? PI_SESSION_MODE_OPTIONS : [],
+    selectedSessionModeId: piSelected ? "default" : undefined,
     pendingSessionModeId: undefined,
+    archivedReadOnly: false,
     acpPhase:
       forceInitialize ||
       state.acpPhase === "idle" ||
@@ -202,6 +279,192 @@ export const beginAgentSession = async (
     chatStatus: "submitted",
   });
   try {
+    if (piSelected) {
+      // A worker health request is cheap and idempotent. Send it whenever the
+      // worker was just started (or the store was not already ready), then
+      // request the same catalog the picker uses before opening a session.
+      const protocolReady =
+        !forceInitialize &&
+        state.acpPhase !== "idle" &&
+        state.acpPhase !== "error" &&
+        state.acpPhase !== "initializing";
+      if (!protocolReady) {
+        await sendAgentCommand({
+          protocolVersion: 1,
+          requestId: INITIALIZE_REQUEST_ID,
+          sessionId: localSessionId,
+          command: {
+            type: "runtime.health",
+            sessionId: localSessionId,
+            clientType: "melody-work",
+            clientVersion: "0.1.0",
+            clientCapabilities: {
+              normalizedEvents: true,
+              hostToolGateway: true,
+              nativeSessionImport: true,
+            },
+          },
+        });
+        await sendAgentCommand({
+          protocolVersion: 1,
+          requestId: `${INITIALIZE_REQUEST_ID}-models`,
+          sessionId: localSessionId,
+          command: {
+            type: "runtime.models.list",
+            sessionId: localSessionId,
+            refresh: false,
+          },
+        });
+      }
+
+      const binding = await getPiAgentSessionBinding(localSessionId);
+      const latestState = get();
+      const persistedSessionModeId = PI_SESSION_MODE_OPTIONS.some(
+        (option) => option.id === binding?.sessionModeId,
+      )
+        ? (binding?.sessionModeId ?? "default")
+        : "default";
+      const persistedPermissionMode =
+        binding?.permissionMode === "ask" ||
+        binding?.permissionMode === "auto" ||
+        binding?.permissionMode === "always-approve"
+          ? binding.permissionMode
+          : latestState.permissionMode;
+      // Bindings written by schema v10 are the durable source of truth for the
+      // model controls as well. Keep an unavailable model only when the
+      // catalog has not arrived yet; once a catalog is present, fall back to
+      // the renderer's known-good selection so reopening cannot be bricked by
+      // a deleted provider/model entry.
+      const bindingModelId =
+        typeof binding?.modelId === "string" && binding.modelId.trim()
+          ? binding.modelId
+          : undefined;
+      const bindingModelIsKnown =
+        bindingModelId === undefined ||
+        latestState.availableModels.length === 0 ||
+        latestState.availableModels.some(
+          (model) => model.id === bindingModelId,
+        );
+      const persistedModelId = bindingModelIsKnown
+        ? (bindingModelId ?? latestState.selectedModelId)
+        : latestState.selectedModelId;
+      const selectedModel = latestState.availableModels.find(
+        (model) => model.id === persistedModelId,
+      );
+      const persistedReasoningEffort =
+        typeof binding?.reasoningEffort === "string" &&
+        binding.reasoningEffort.trim()
+          ? binding.reasoningEffort
+          : undefined;
+      // A binding can outlive a provider/model that was removed from the
+      // catalog. When that happens we deliberately fall back to the current
+      // renderer selection; carrying the old model's thinking level along
+      // could make Pi reject the otherwise valid replacement model and turn a
+      // recoverable catalog change into a session-open failure.
+      const usablePersistedReasoningEffort = bindingModelIsKnown
+        ? persistedReasoningEffort
+        : undefined;
+      const persistedSelectedReasoningEffort =
+        usablePersistedReasoningEffort ??
+        latestState.selectedReasoningEffort ??
+        selectedModel?.reasoningEffort;
+      // The binding is the durable source of truth after a worker restart.
+      // Apply it before opening/importing so the composer and the first turn
+      // do not briefly advertise the renderer's stale defaults.
+      set({
+        selectedModelId: persistedModelId,
+        selectedReasoningEffort: persistedSelectedReasoningEffort,
+        selectedSessionModeId: persistedSessionModeId,
+        permissionMode: persistedPermissionMode,
+      });
+      const needsImport = shouldImportPiSession({
+        piBindingEngine: binding?.engine,
+        acpSessionId: previousEngineSessionId,
+      });
+      if (needsImport) {
+        const archiveIsComplete =
+          archivedTimelineJson !== undefined &&
+          archivedProjection?.status === "valid";
+        const snapshotIsComplete =
+          archivedTimelineJson === undefined &&
+          timelineVersion === TIMELINE_PROJECTION_VERSION &&
+          Boolean(finalCursor) &&
+          projectionRead.status === "valid";
+        const importPlan = buildPiSessionImportPlan({
+          sessionId: localSessionId,
+          ...(previousEngineSessionId
+            ? { acpSessionId: previousEngineSessionId }
+            : {}),
+          ...(finalCursor ? { acpCursor: finalCursor } : {}),
+          timelineComplete: archiveIsComplete || snapshotIsComplete,
+          timeline: finalTimeline,
+        });
+        if (importPlan.readiness === "blocked") {
+          throw new Error(
+            `该会话暂时不能迁移到 Pi：${importPlan.blockers[0] ?? "迁移计划未通过安全检查。"}`,
+          );
+        }
+        const importPlanValue = importPlan as unknown as JsonObject;
+        const journal = await beginPiMigration({
+          sessionId: localSessionId,
+          sourceDigest: importPlan.sourceDigest,
+          converterVersion: importPlan.converterVersion,
+          validationReport: importPlanValue,
+          plan: importPlanValue,
+          backup: true,
+        });
+        if (journal.stage !== "applied") {
+          try {
+            await sendAgentCommand({
+              protocolVersion: 1,
+              requestId: `pi-import-${localSessionId}-${Date.now()}`,
+              sessionId: localSessionId,
+              command: {
+                type: "session.import",
+                sessionId: localSessionId,
+                migrationId: journal.migrationId,
+                cwd,
+                ...(persistedModelId ? { modelId: persistedModelId } : {}),
+                ...(persistedSelectedReasoningEffort
+                  ? { reasoningEffort: persistedSelectedReasoningEffort }
+                  : {}),
+                sessionModeId: persistedSessionModeId,
+                permissionMode: persistedPermissionMode,
+                plan: importPlanValue,
+                backup: journal.backupRequested,
+              },
+            });
+          } catch (error) {
+            try {
+              await failPiMigration(journal.migrationId, localSessionId, error);
+            } catch {
+              // Preserve the original failure; the journal remains available
+              // for a later retry/recovery action.
+            }
+            throw error;
+          }
+        }
+      } else {
+        await sendSessionOpen(
+          localSessionId,
+          cwd,
+          localSessionId,
+          persistedModelId,
+          persistedPermissionMode,
+          undefined,
+          persistedSessionModeId,
+          persistedSelectedReasoningEffort,
+        );
+      }
+      armSetupTimeout(
+        localSessionId,
+        "creating",
+        "打开 Pi 会话超时。",
+        get,
+        set,
+      );
+      return;
+    }
     const protocolReady =
       !forceInitialize &&
       state.acpPhase !== "idle" &&
@@ -225,24 +488,23 @@ export const beginAgentSession = async (
       );
       return;
     }
-    await sendAcp({
-      jsonrpc: "2.0",
-      id: INITIALIZE_REQUEST_ID,
-      method: "initialize",
-      params: {
-        protocolVersion: 1,
+    await sendAgentCommand({
+      protocolVersion: 1,
+      requestId: INITIALIZE_REQUEST_ID,
+      sessionId: localSessionId,
+      command: {
+        type: "runtime.health",
+        sessionId: localSessionId,
+        clientType: "melody-work",
+        clientVersion: "0.1.0",
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
         },
-        _meta: {
-          startupHints: {
-            nonInteractive: false,
-            skipGitStatus: false,
-            skipProjectLayout: false,
-          },
-          clientType: "melody-work",
-          clientVersion: "0.1.0",
+        startupHints: {
+          nonInteractive: false,
+          skipGitStatus: false,
+          skipProjectLayout: false,
         },
       },
     });
@@ -263,4 +525,76 @@ export const beginAgentSession = async (
       },
     });
   }
+};
+
+/**
+ * Opens a legacy-engine session as a read-only archive. History is seeded
+ * from the persisted data exactly like a normal open, but no engine process
+ * is started, nothing is subscribed, and no initialize/session.open traffic
+ * is ever sent. The composer gate reads `archivedReadOnly`.
+ */
+export const beginArchivedSession = async (
+  store: AgentStoreAccess,
+  cwd: string,
+  localSessionId: string,
+  timelineJson?: string,
+  archivedTimelineJson?: string,
+  timelineVersion?: number,
+) => {
+  const { get, set } = store;
+  const state = get();
+  // Switching away from a live session must keep its in-memory timeline
+  // addressable, exactly like the normal open path (its later ACP messages,
+  // if any, keep appending to the buffer instead of being lost).
+  const oldAcpSessionId = state.acpSessionId;
+  const backgroundTimelines = { ...state.backgroundTimelines };
+  const backgroundCursors = { ...state.backgroundCursors };
+  const backgroundContextUsage = { ...state.backgroundContextUsage };
+  if (
+    oldAcpSessionId &&
+    state.localSessionId &&
+    state.localSessionId !== localSessionId
+  ) {
+    backgroundTimelines[oldAcpSessionId] = state.timeline;
+    if (state.acpCursor) {
+      backgroundCursors[oldAcpSessionId] = state.acpCursor;
+    }
+    if (state.contextUsage) {
+      backgroundContextUsage[oldAcpSessionId] = state.contextUsage;
+    }
+  }
+  const { restoredTimeline } = restoreSessionHistory({
+    timelineJson,
+    archivedTimelineJson,
+    // The archive is display-only: no cursor is advertised because nothing
+    // will ever replay against it.
+    acpCursor: undefined,
+    timelineVersion,
+  });
+  set({
+    activeSessionId: localSessionId,
+    localSessionId,
+    cwd,
+    // Deliberately unbound: every store action that would emit engine
+    // traffic bails out without an engine session id.
+    acpSessionId: undefined,
+    acpCursor: undefined,
+    timeline: restoredTimeline,
+    backgroundTimelines,
+    backgroundCursors,
+    backgroundContextUsage,
+    contextUsage:
+      contextUsageFromTimeline(restoredTimeline) ??
+      contextUsageForModel(state.availableModels, state.selectedModelId),
+    configRevision: 0,
+    availableSessionModes: [],
+    selectedSessionModeId: undefined,
+    pendingSessionModeId: undefined,
+    archivedReadOnly: true,
+    // No engine is attached, so the least-surprising phases are the neutral
+    // ones rather than an in-flight or failure state.
+    status: { phase: "stopped", message: ARCHIVE_STATUS_NOTICE },
+    acpPhase: "idle",
+    chatStatus: "ready",
+  });
 };
