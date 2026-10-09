@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupTurnActivity } from "./timeline-groups.ts";
+import { groupTurnActivity, toolIsRunning } from "./timeline-groups.ts";
 
 const message = (id, role) => ({
   id,
@@ -123,4 +123,105 @@ test("keeps an active turn open between completed tool calls", () => {
 
   assert.equal(active?.running, true);
   assert.equal(completed?.running, false);
+});
+
+test("shows a running placeholder while waiting for the first Pi event", () => {
+  const userMessage = { ...message("user-waiting", "user"), startedAt: 1_000 };
+
+  assert.deepEqual(groupTurnActivity([userMessage], true), [
+    userMessage,
+    {
+      id: "activity-group-pending-user-waiting",
+      kind: "activity-group",
+      items: [],
+      startedAt: 1_000,
+      running: true,
+    },
+  ]);
+  assert.deepEqual(groupTurnActivity([userMessage], false), [userMessage]);
+});
+
+test("does not add a waiting placeholder after assistant streaming begins", () => {
+  const userMessage = message("user-1", "user");
+  const assistantMessage = {
+    ...message("assistant-1", "assistant"),
+    streaming: true,
+  };
+  const projected = groupTurnActivity([userMessage, assistantMessage], true);
+
+  assert.equal(
+    projected.some((entry) => entry.kind === "activity-group"),
+    false,
+  );
+});
+
+test("does not show a stale tool as running after its turn has ended", () => {
+  const pending = { ...tool("legacy-pending"), status: "pending" };
+  const cancelled = { ...tool("cancelled"), status: "cancelled" };
+
+  assert.equal(toolIsRunning(pending), true);
+  assert.equal(toolIsRunning(pending, false), false);
+  assert.equal(toolIsRunning(cancelled), false);
+});
+
+test("folds intermediate assistant updates and activity into one completed turn", () => {
+  const entries = [
+    { ...message("user-turn", "user"), startedAt: 1_000 },
+    {
+      id: "thought-before-progress",
+      kind: "thought",
+      content: "Starting the inspection",
+      startedAt: 2_000,
+      completedAt: 2_200,
+    },
+    {
+      ...message("assistant-progress", "assistant"),
+      content: "Let me check the environment.",
+      startedAt: 2_200,
+      completedAt: 2_500,
+    },
+    { ...tool("read-config"), status: "completed", startedAt: 2_500 },
+    {
+      ...message("assistant-blank", "assistant"),
+      content: " \n ",
+      startedAt: 3_000,
+      completedAt: 4_000,
+    },
+    {
+      id: "thought-after-blank",
+      kind: "thought",
+      content: "Summarizing the result",
+      startedAt: 4_500,
+      completedAt: 5_000,
+    },
+    { ...tool("read-skills"), status: "completed", startedAt: 5_000 },
+    {
+      ...message("assistant-final", "assistant"),
+      content: "Here is the result.",
+      startedAt: 9_000,
+      completedAt: 10_000,
+    },
+  ];
+
+  const projected = groupTurnActivity(entries);
+  const activityGroups = projected.filter(
+    (entry) => entry.kind === "activity-group",
+  );
+
+  assert.equal(activityGroups.length, 1);
+  assert.deepEqual(
+    projected.map((entry) => entry.kind),
+    ["message", "activity-group", "message"],
+  );
+  assert.equal(activityGroups[0].startedAt, 1_000);
+  assert.equal(activityGroups[0].endedAt, 10_000);
+  assert.deepEqual(
+    activityGroups[0].items.map((item) => item.kind),
+    ["thought", "message", "tool-group", "thought", "tool-group"],
+  );
+  assert.equal(activityGroups[0].items[1].id, "assistant-progress");
+  assert.equal(
+    activityGroups[0].items.some((item) => item.id === "assistant-blank"),
+    false,
+  );
 });

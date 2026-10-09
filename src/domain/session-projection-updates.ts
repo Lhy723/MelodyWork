@@ -78,12 +78,20 @@ const textFromContent = (value: unknown): string | undefined => {
 };
 
 const toolCommand = (tool: JsonObject): string => {
-  const rawInput = objectValue(tool.rawInput);
-  return (
+  const input = objectValue(tool.rawInput);
+  const rawInput =
+    input?.gateway === "melody" ? objectValue(input.arguments) : input;
+  const displayInput =
     stringValue(rawInput?.command) ??
     stringValue(rawInput?.cmd) ??
     stringValue(rawInput?.path) ??
-    stringifyValue(tool.rawInput)
+    stringValue(rawInput?.file_path) ??
+    stringValue(rawInput?.filePath) ??
+    stringValue(rawInput?.target_directory) ??
+    stringValue(rawInput?.targetDirectory);
+  return (
+    displayInput ??
+    (input?.gateway === "melody" ? "" : stringifyValue(tool.rawInput))
   );
 };
 

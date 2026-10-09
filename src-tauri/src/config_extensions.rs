@@ -6,15 +6,14 @@ use std::{
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::capability_lifecycle::{CapabilityKind, capability_name, change_capability_state};
-use crate::melody_command::MelodyCommandRunner;
 use crate::pi_worker_runtime::PiWorkerRuntime;
 use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
-use super::config_plugin_details::allowed_skill_path;
+use super::config_plugin_details::{allowed_skill_path, skill_description_from_directory};
 use super::config_subagents::pi_subagent_policy_manifest;
 
 /// Effective `[plugins]` enablement for a workspace.
@@ -475,6 +474,30 @@ pub(crate) fn scan_pi_skill_root(
     paths: &mut Vec<PathBuf>,
     total_bytes: &mut u64,
 ) {
+    scan_pi_skill_root_by_status(root, disabled, ignore_paths, paths, total_bytes, false);
+}
+
+/// Collect only Skills disabled by the same name-based policy Pi receives.
+/// Keeping this as a separate bounded scan lets the Settings inventory show
+/// disabled Skills without changing the exact active path list sent to Pi.
+pub(crate) fn scan_pi_disabled_skill_root(
+    root: &Path,
+    disabled: &HashSet<String>,
+    ignore_paths: &[PathBuf],
+    paths: &mut Vec<PathBuf>,
+    total_bytes: &mut u64,
+) {
+    scan_pi_skill_root_by_status(root, disabled, ignore_paths, paths, total_bytes, true);
+}
+
+fn scan_pi_skill_root_by_status(
+    root: &Path,
+    disabled: &HashSet<String>,
+    ignore_paths: &[PathBuf],
+    paths: &mut Vec<PathBuf>,
+    total_bytes: &mut u64,
+    include_disabled: bool,
+) {
     if paths.len() >= MAX_PI_SKILL_PATHS {
         return;
     }
@@ -517,7 +540,7 @@ pub(crate) fn scan_pi_skill_root(
             let Some(name) = directory.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
-            if !name.starts_with('.') && !disabled.contains(name) {
+            if !name.starts_with('.') && disabled.contains(name) == include_disabled {
                 let Ok(canonical) = directory.canonicalize() else {
                     continue;
                 };
@@ -652,6 +675,132 @@ pub(crate) fn pi_skill_paths(cwd: &str) -> Result<Vec<PathBuf>, String> {
     }
     deduped.truncate(MAX_PI_SKILL_PATHS);
     Ok(deduped)
+}
+
+/// Return the active paths Pi receives plus the bounded, explicitly disabled
+/// Skills that Settings may offer to re-enable. The active half is delegated
+/// to `pi_skill_paths` unchanged so the UI cannot claim Pi will load a Skill
+/// that the worker does not receive.
+pub(crate) fn pi_skill_catalog_paths(cwd: &str) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
+    let active = pi_skill_paths(cwd)?;
+    let roots = pi_skill_scan_roots(cwd)?;
+    let mut disabled_paths = Vec::new();
+    let mut total_bytes = 0;
+    for root in roots {
+        scan_pi_disabled_skill_root(
+            &root.path,
+            &root.disabled,
+            &root.ignore_paths,
+            &mut disabled_paths,
+            &mut total_bytes,
+        );
+        if disabled_paths.len() >= MAX_PI_SKILL_PATHS {
+            break;
+        }
+    }
+    disabled_paths.retain(|path| !active.iter().any(|active| active == path));
+    let mut deduped = Vec::with_capacity(disabled_paths.len());
+    for path in disabled_paths {
+        if !deduped.iter().any(|existing| existing == &path) {
+            deduped.push(path);
+        }
+    }
+    Ok((active, deduped))
+}
+
+/// Map Pi's concrete, Host-validated paths to the existing Settings skill
+/// model. The directory basename is intentionally the displayed/toggled name:
+/// `[skills].disabled` is matched against that same name by the worker.
+pub(crate) fn pi_skill_extensions_from_catalog(
+    cwd: &str,
+    active_paths: &[PathBuf],
+    disabled_paths: &[PathBuf],
+    roots: &[PiSkillScanRoot],
+    plugins: &[MelodyPluginCapability],
+) -> Vec<MelodyExtension> {
+    let active = active_paths.iter().cloned().collect::<HashSet<_>>();
+    let mut extensions = Vec::new();
+    for path in active_paths.iter().chain(disabled_paths) {
+        let Ok(canonical) = path.canonicalize() else {
+            continue;
+        };
+        let Some(name) = canonical.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let containing_root = roots
+            .iter()
+            .filter_map(|root| {
+                let canonical_root = root.path.canonicalize().ok()?;
+                canonical
+                    .starts_with(&canonical_root)
+                    .then_some((canonical_root.components().count(), root))
+            })
+            .max_by_key(|(depth, _)| *depth)
+            .map(|(_, root)| root);
+        let plugin = plugins.iter().find(|plugin| {
+            plugin.enabled
+                && plugin.static_resources
+                && plugin.skill_roots.iter().any(|root| {
+                    Path::new(root)
+                        .canonicalize()
+                        .ok()
+                        .is_some_and(|root| canonical.starts_with(root))
+                })
+        });
+        let provider = if plugin.is_some() {
+            "plugin"
+        } else {
+            let path = canonical.to_string_lossy();
+            if path.contains("/.agents/") || path.contains("\\.agents\\") {
+                "agents"
+            } else if path.contains("/.claude/") || path.contains("\\.claude\\") {
+                "claude"
+            } else if path.contains("/.cursor/") || path.contains("\\.cursor\\") {
+                "cursor"
+            } else {
+                "melody"
+            }
+        };
+        let scope = containing_root
+            .map(|root| root.scope.as_str())
+            .unwrap_or("project");
+        extensions.push(MelodyExtension {
+            kind: "skills".to_string(),
+            name: name.to_string(),
+            path: canonical.to_string_lossy().into_owned(),
+            scope: scope.to_string(),
+            provider: provider.to_string(),
+            managed: plugin.is_some(),
+            enabled: active.contains(&canonical),
+            description: skill_description_from_directory(&canonical),
+            source: Some(if plugin.is_some() { "plugin" } else { "pi" }.to_string()),
+            plugin_name: plugin.map(|plugin| plugin.name.clone()),
+            user_invocable: None,
+            compatibility_status: None,
+            deletable: allowed_skill_path(cwd, &canonical).is_ok(),
+        });
+    }
+    extensions.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.scope.cmp(&right.scope))
+            .then(left.provider.cmp(&right.provider))
+            .then(left.path.cmp(&right.path))
+    });
+    extensions
+}
+
+pub(crate) fn pi_skill_extensions(cwd: &str) -> Result<Vec<MelodyExtension>, String> {
+    let (active_paths, disabled_paths) = pi_skill_catalog_paths(cwd)?;
+    let roots = pi_skill_scan_roots(cwd)?;
+    let plugins = pi_plugin_resources(cwd)?;
+    Ok(pi_skill_extensions_from_catalog(
+        cwd,
+        &active_paths,
+        &disabled_paths,
+        &roots,
+        &plugins,
+    ))
 }
 
 /// One trusted Skill root plus the policy snapshots used by both the initial
@@ -1546,110 +1695,13 @@ pub fn list_melody_extensions(
     Ok(extensions)
 }
 
-pub(crate) async fn run_melody_inspect(
-    app: &AppHandle,
-    cwd: &str,
-) -> Result<MelodyInspectDocument, String> {
-    let mut command =
-        MelodyCommandRunner::new(app).command(&["inspect", "--json"], Some(Path::new(cwd)))?;
-    let output = command
-        .output()
-        .await
-        .map_err(|error| format!("Failed to inspect Melody skills: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("Melody inspection failed with status {}", output.status)
-        } else {
-            stderr
-        });
-    }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("Melody returned an invalid inspection document: {error}"))
-}
-
-pub(crate) fn inspect_skill_directory(path: &Path) -> Option<PathBuf> {
-    if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-        path.parent().map(Path::to_path_buf)
-    } else if path.join("SKILL.md").is_file() {
-        Some(path.to_path_buf())
-    } else {
-        None
-    }
-}
-
-fn inspect_skill_provider(skill: &MelodyInspectSkill, directory: &Path) -> String {
-    if let Some(vendor) = skill.vendor.as_deref() {
-        return vendor.to_string();
-    }
-    if skill.source.kind == "plugin" {
-        return "plugin".to_string();
-    }
-    let path = directory.to_string_lossy();
-    if path.contains("/.agents/") || path.contains("\\.agents\\") {
-        "agents".to_string()
-    } else if path.contains("/.claude/") || path.contains("\\.claude\\") {
-        "claude".to_string()
-    } else if path.contains("/.cursor/") || path.contains("\\.cursor\\") {
-        "cursor".to_string()
-    } else {
-        "melody".to_string()
-    }
-}
-
-pub(crate) fn melody_skill_extensions(
-    cwd: &str,
-    document: MelodyInspectDocument,
-) -> Vec<MelodyExtension> {
-    let project = PathBuf::from(cwd).canonicalize().ok();
-    document
-        .skills
-        .into_iter()
-        .filter_map(|skill| {
-            let source_path = skill.source.path.as_deref()?;
-            let directory = inspect_skill_directory(source_path)?;
-            let canonical = directory
-                .canonicalize()
-                .unwrap_or_else(|_| directory.clone());
-            let scope = if matches!(skill.source.kind.as_str(), "local" | "repo" | "project")
-                || project
-                    .as_ref()
-                    .is_some_and(|root| canonical.starts_with(root))
-            {
-                "project"
-            } else {
-                "user"
-            };
-            let compatibility_disabled = skill.compatibility_status.as_deref() == Some("disabled");
-            let provider = inspect_skill_provider(&skill, &canonical);
-            Some(MelodyExtension {
-                kind: "skills".to_string(),
-                name: skill.name,
-                path: canonical.to_string_lossy().into_owned(),
-                scope: scope.to_string(),
-                provider,
-                managed: matches!(skill.source.kind.as_str(), "plugin" | "server" | "bundled"),
-                enabled: !skill.disabled && !compatibility_disabled,
-                description: skill.description,
-                source: Some(skill.source.kind),
-                plugin_name: skill.source.plugin_name,
-                user_invocable: skill.user_invocable,
-                compatibility_status: skill.compatibility_status,
-                deletable: allowed_skill_path(cwd, &canonical).is_ok(),
-            })
-        })
-        .collect()
-}
-
 #[tauri::command]
-pub async fn list_melody_skills(
-    app: AppHandle,
+pub fn list_melody_skills(
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
 ) -> Result<Vec<MelodyExtension>, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    let document = run_melody_inspect(&app, &cwd).await?;
-    Ok(melody_skill_extensions(&cwd, document))
+    pi_skill_extensions(&cwd)
 }
 
 #[cfg(test)]

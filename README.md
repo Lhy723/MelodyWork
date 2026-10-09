@@ -4,7 +4,7 @@
 
 # MelodyWork
 
-> A local-first desktop workspace for building with [Melody Build](https://github.com/Lhy723/melody-build).
+> A local-first desktop workspace for AI-assisted software work.
 
 Talk through a task, inspect the result, review the diff, and ship directly from the project already on your machine. MelodyWork keeps the agent loop grounded in the repository, with visible tool activity and explicit permission boundaries.
 
@@ -115,22 +115,18 @@ The current beta has no account system or cloud sync.
 
 ## Getting Started
 
-MelodyWork is currently built from source. You will need Node.js 22, pnpm, Rust, [DotSlash](https://dotslash-cli.com), ripgrep, and the Tauri 2 system dependencies for your platform.
-
-Melody Build is pinned as the `vendor/melody-build` Git submodule. On a fresh clone:
+MelodyWork is currently built from source. You will need Node.js 22, pnpm, Rust, Bun 1.3+, Git, and the Tauri 2 system dependencies for your platform. Git Marketplace sources and workspace Git features use the system Git executable.
 
 ```bash
-git submodule update --init --recursive
 pnpm install
-cargo install dotslash --locked
 pnpm tauri dev
 ```
 
-See the [development guide](docs/development.md) for validation commands and sidecar behavior.
+See the [development guide](docs/development.md) for setup and validation commands. The application bundles the Pi worker; the retired Melody Build sidecar and its vendor submodule have been removed.
 
 ## Documentation
 
-- [Development guide](docs/development.md): prerequisites, commands, and sidecar resolution
+- [Development guide](docs/development.md): prerequisites and commands
 - [Release guide](docs/releasing.md): tags, updater signing, and platform release notes
 
 ## Contributing
@@ -140,7 +136,7 @@ Contributions are welcome. Before opening a pull request:
 1. Keep the change focused and explain the user-facing behavior it changes.
 2. Run `pnpm check`, `pnpm test:unit`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml` when the change touches the relevant surface.
 3. Include or update tests and documentation when behavior or public workflows change.
-4. Do not commit generated sidecars, build output, credentials, or updater private keys.
+4. Do not commit generated worker binaries, build output, credentials, or updater private keys.
 
 For bugs, include the operating system, reproduction steps, expected behavior, and relevant logs. For larger changes, open an issue first so the implementation can stay aligned with the project direction.
 

@@ -192,6 +192,7 @@ const validateResourceRoot = (
 const subagentCapabilityModes = new Set([
   "read-only",
   "read-write",
+  "read-write-execute",
   "execute",
   "all",
 ]);

@@ -1,6 +1,6 @@
 # MelodyWork → Pi 迁移设计
 
-状态：2026-10-05。**Pi 已是唯一 Agent runtime，桌面 Agent 会话默认 Pi；旧 ACP 会话只读归档，不作为 Pi 失败时的运行时回退。** vendored Melody-build 代码仍保留给 marketplace/config CLI 等非 Agent 用途。Pi worker、Host ToolGateway、产品事件投影、原生会话持久化、Browser/Explorer 有界交互及迁移导入已接通；Browser/Explorer 的目标平台真实桌面、权限及故障恢复验收仍未完成。版本与公开能力由 [`pi-compatibility-manifest.json`](./pi-compatibility-manifest.json) 维护，并在 `pnpm check` 中防漂移。当前差距、最新本地门禁与交接顺序以[交接文档](./handoff.md)、[功能对照](./feature-parity.md)和[验收报告](./acceptance-report.md)为准。
+状态：2026-10-08。**Pi 已是唯一 Agent runtime，桌面 Agent 会话默认 Pi；旧 ACP 会话只读归档，不作为 Pi 失败时的运行时回退。** 插件市场已迁为 Host 原生实现，旧 `melody-pager` 已退出构建、启动与发布；`vendor/melody-build` 子模块和 `.gitmodules` 已移除。Pi worker、Host ToolGateway、产品事件投影、原生会话持久化、Browser/Explorer 有界交互及迁移导入已接通；Browser/Explorer 的目标平台真实桌面、权限及故障恢复验收仍未完成。版本与公开能力由 [`pi-compatibility-manifest.json`](./pi-compatibility-manifest.json) 维护，并在 `pnpm check` 中防漂移。当前差距、最新本地门禁与交接顺序以[交接文档](./handoff.md)、[功能对照](./feature-parity.md)和[验收报告](./acceptance-report.md)为准。
 
 说明：以下章节保留原始迁移设计与阶段性观察，部分段落记录早期 opt-in/ACP fallback 方案，**不代表当前运行行为或能力状态**；若与上述交接文档、功能对照或兼容清单冲突，以它们为准。不要据旧文档执行引擎回退或 stable release。
 

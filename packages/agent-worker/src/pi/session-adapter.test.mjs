@@ -1663,3 +1663,109 @@ test("trusts a declared plugin Skill directory below a plugin root", async () =>
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("finishes a Pi run as failed when its settled assistant response errored", async () => {
+  const events = [];
+  const adapter = new PiSessionAdapter(async (event) => {
+    events.push(event);
+  });
+  const handle = {
+    session: { sessionManager: { getLeafEntry: () => undefined } },
+    nativeSessionId: "native-1",
+    rootSessionId: "session-1",
+    streamSessionId: "session-1",
+    runId: "session-1:prompt-1",
+    promptId: "prompt-1",
+    runFinished: false,
+    nextMessage: 0,
+    offsets: new Map(),
+    activeMessageIds: new Map(),
+    eventTail: Promise.resolve(),
+    permissionMode: "ask",
+    sessionModeId: "default",
+    reasoningEffort: "medium",
+    configRevision: 0,
+  };
+  adapter.sessions.set("session-1", handle);
+  const providerMessage =
+    '429: {"message":"inference exceeds tpm/rpm limit","type":"rate_limit_error","code":"RateLimitExceeded.EndpointTPMExceeded"}';
+  const providerMessageWithSecret = `${providerMessage} Authorization: Bearer sk-test-secret-token api_key=sk-another-test-secret`;
+
+  await adapter.onPiEvent("session-1", {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: providerMessageWithSecret,
+      provider: "melody-deepseek",
+      api: "openai-completions",
+      model: "deepseek-flash",
+      usage: { input: 0, output: 0, totalTokens: 0 },
+    },
+  });
+  await adapter.onPiEvent("session-1", { type: "agent_settled" });
+
+  const terminal = events.at(-1);
+  assert.equal(terminal.event.type, "run.finished");
+  assert.equal(terminal.event.status, "failed");
+  assert.equal(terminal.event.stopReason, "rate_limit");
+  assert.equal(terminal.event.error.code, "pi.provider_rate_limited");
+  assert.equal(
+    terminal.event.error.details.providerMessage,
+    `${providerMessage} Authorization: Bearer [redacted] api_key=[redacted]`,
+  );
+  assert.doesNotMatch(
+    terminal.event.error.details.providerMessage,
+    /sk-test-secret-token|sk-another-test-secret/,
+  );
+  assert.equal(terminal.event.error.details.provider, "melody-deepseek");
+  assert.equal(handle.runFinished, true);
+});
+
+test("a successful Pi response clears an earlier transient assistant error", async () => {
+  const events = [];
+  const adapter = new PiSessionAdapter(async (event) => {
+    events.push(event);
+  });
+  const handle = {
+    session: { sessionManager: { getLeafEntry: () => undefined } },
+    nativeSessionId: "native-1",
+    rootSessionId: "session-1",
+    streamSessionId: "session-1",
+    runId: "session-1:prompt-1",
+    promptId: "prompt-1",
+    runFinished: false,
+    nextMessage: 0,
+    offsets: new Map(),
+    activeMessageIds: new Map(),
+    eventTail: Promise.resolve(),
+    permissionMode: "ask",
+    sessionModeId: "default",
+    reasoningEffort: "medium",
+    configRevision: 0,
+  };
+  adapter.sessions.set("session-1", handle);
+
+  await adapter.onPiEvent("session-1", {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "temporary provider failure",
+    },
+  });
+  await adapter.onPiEvent("session-1", {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "Recovered" }],
+    },
+  });
+  await adapter.onPiEvent("session-1", { type: "agent_settled" });
+
+  const terminal = events.at(-1);
+  assert.equal(terminal.event.type, "run.finished");
+  assert.equal(terminal.event.status, "completed");
+  assert.equal(terminal.event.error, undefined);
+});

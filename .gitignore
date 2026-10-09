@@ -15,7 +15,13 @@ dist-ssr
 .env.*
 *.key
 *.key.pub
-/src-tauri/binaries/melody-pager-*
+.mimosa/
+.pnpm-store/
+.github/hooks/
+.impeccable/
+.v2c/
+/src-tauri/binaries/melody-agent-worker-*
+/src-tauri/binaries/*.js.map
 
 # Editor directories and files
 .vscode/*

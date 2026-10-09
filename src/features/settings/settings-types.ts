@@ -18,7 +18,7 @@ export const kindLabel: Record<MelodyExtensionKind, string> = {
 };
 
 export const kindDescription: Record<MelodyExtensionKind, string> = {
-  skills: "查看 Melody 运行时实际发现的技能，包括兼容目录、插件与额外路径。",
+  skills: "查看 Pi 会话实际加载的技能，以及当前停用的技能。",
   plugins: "管理 Melody 插件以及兼容的 Claude Code 插件。",
   hooks: "查看在 Melody 生命周期事件中运行的钩子。",
 };

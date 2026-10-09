@@ -145,7 +145,7 @@ export function SettingsExtensionPage({
                     [
                       ["all", "全部"],
                       ["enabled", "已启用"],
-                      ["disabled", "不可用"],
+                      ["disabled", "已停用"],
                     ] as const
                   ).map(([value, label]) => (
                     <Button
@@ -286,7 +286,7 @@ export function SettingsExtensionPage({
                     ? "尝试调整关键词或状态筛选。"
                     : extensionKind === "plugins"
                       ? "Melody 会自动扫描 .melody/plugins 和 .claude/plugins。"
-                      : "技能清单直接来自 Melody 运行时。"}
+                      : "技能清单直接来自 Pi 会话使用的 SKILL.md 目录。"}
                 </p>
               </div>
             ) : null}

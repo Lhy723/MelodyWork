@@ -1,13 +1,39 @@
 # MelodyWork Pi 迁移交接文档
 
-更新时间：2026-10-05
+更新时间：2026-10-09
 交接分支：`beta`
 基线提交：`ffa542f4`（`v0.3.3-beta.4`）
-当前状态：Pi 已是唯一 Agent runtime；在做 Proma 功能对齐与真实环境验收
+当前状态：Pi 已是唯一 Agent runtime；插件市场已迁为 Host 原生实现；正在整理并验收 `0.4.0-beta.1` 发布
 
-这份文档给下一位维护者使用。Pi 已替代 Melody-build 承担 Agent 会话；旧 ACP 会话作为只读归档，不再运行或作为 Pi 的兼容回退。vendored 代码目前只因 marketplace/config CLI 仍需而保留，不能据此称为双 Agent runtime。当前工作是补齐 Pi 上的产品交互与安全语义，并完成目标平台验收。**Rhai workflow 引擎已按产品决定删除**（设置项移除、预检不再回退、清单记入 `retiredCapabilities`）；周期任务由 Host schedule 承担。本文区分已实现、静态检查与目标平台实测，不能把 ACP 归档或警告诊断表述为 Pi 功能对等。
+这份文档给下一位维护者使用。Pi 已替代 Melody-build 承担 Agent 会话；旧 ACP 会话作为只读归档，不再运行或作为 Pi 的兼容回退。插件市场的扫描、安装、更新和卸载现由 Host 原生实现，旧 `melody-pager` 不再参与启动、构建或发布；`vendor/melody-build` Git 子模块及 `.gitmodules` 已移除。当前工作是补齐 Pi 上的产品交互与安全语义，并完成目标平台验收。**Rhai workflow 引擎已按产品决定删除**（设置项移除、预检不再回退、清单记入 `retiredCapabilities`）；周期任务由 Host schedule 承担。本文区分已实现、静态检查与目标平台实测，不能把 ACP 归档或警告诊断表述为 Pi 功能对等。
 
-## 0e 验收反馈修复（2026-10-05）
+## 0i 0.4.0-beta.1 发布整理（2026-10-09）
+
+- 本次版本汇总 Pi-only 对话、Host 原生插件市场、直接 API key 配置、Pi 技能目录、活动时间线/耗时分组、侧边栏层级和相关稳定性修复；用户可见变更见[发布说明](../../releases/0.4.0-beta.1.md)。
+- 发布版本号须在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 保持一致；从 `beta` 创建 `v0.4.0-beta.1` 测试版标签，不合并或同步到 `main`。
+- `.mimosa`、`.pnpm-store`、`.github/hooks`、`.impeccable`、`.v2c` 与本地 Pi worker 二进制/映射文件属于机器本地状态或生成物，保留在磁盘并由 `.gitignore` 排除，不进入发布提交。
+- 发布前仍须完成本次本地检查并等待 tag 驱动的 GitHub Actions 三平台构建、worker smoke test 和 updater 签名；此处不把静态检查等同于真实桌面/Provider 验收。
+
+## 0h 移除会话信息侧栏中的定时任务面板（2026-10-08）
+
+- 按产品要求移除 renderer 的 `SchedulePanel` 及其 `useAgentSchedules` 读取/管理层；会话信息侧栏不再展示定时任务。
+- 这只是移除侧栏 UI：Host 持久调度状态、派发器、Pi `scheduler_create`/`scheduler_list`/`scheduler_delete` 工具和数据库数据均保留。
+- `MonitorFeed`、子代理和会话统计仍留在会话信息侧栏。
+
+## 0f 原生插件市场与 Melody sidecar 移除（2026-10-08；历史状态，子模块后由 0g 移除）
+
+- **保留插件市场产品能力。** Marketplace 设置页和 Tauri command 名称保持不变；Host 原生实现本地/Git 来源扫描（含 Melody/Claude 插件索引及目录发现）、安装、更新、卸载。安装目录和 `registry.json` 继续沿用现有约定，旧安装记录可继续列出、更新和卸载；Git clone 使用浅克隆/缓存，支持来源 SHA 固定，并对相对路径、符号链接、清单读取和复制规模做边界校验。
+- **移除旧 sidecar 的执行与交付链路。** Tauri bundle 仅打包 Pi worker；`pnpm tauri dev` 只准备 Pi worker；build.rs、CI、release workflow 和清理脚本不再构建、查找或打包 `melody-pager`，也不再依赖 DotSlash、vendor checkout 或 sidecar 所需的 protobuf 编译器。release workflow 仍逐平台构建并 smoke-test Pi worker。
+- **当时暂留为惰性历史源码。** 0f 编写时 `.gitmodules` / `vendor/melody-build` 尚未删除、不参与常规构建；本机残余数据的处理与最终删除记录见 0g。
+- **本地门禁已通过：** Marketplace 原生 Rust 单测 10 项、全量 Rust `cargo test --locked --lib`（283）、`cargo check --locked`（无 warning）、`cargo fmt --all -- --check`、`pnpm check`、`pnpm test:unit`（386）、`pnpm test:pi-worker-smoke`（2）、`pnpm lint`、`pnpm format:check`、`pnpm build`、`git diff --check`。Vite 仍提示若干大 chunk；三平台 release 与桌面真实 Git/插件源操作仍需 CI/现场验收。
+
+## 0g 删除 Melody Build 子模块（2026-10-08）
+
+- 删除 `.gitmodules` 和 `vendor/melody-build` 工作树；Marketplace 保留 Host 原生实现，不再有 Melody Build 构建或运行依赖。
+- 删除子模块内 18GB 的 Cargo `target` 缓存（可从源码重建）。子模块仅余的 `.mimosa` hook-state 是旧的空快照（无 touched paths、baseline 或 findings），且根目录同会话状态更新、更完整；确认无恢复用途后已删除，根目录状态未改动。
+- 旧子模块 user-guide 的对照依据现改用固定上游提交链接；下方早期记录保留当时的历史状态。
+
+## 0e 验收反馈修复（2026-10-05；历史状态，已由 0f 更新）
 
 - **消除 Pi-only 运行时漂移。** Pi capability report 的 `requiresLegacyEngine` 改为 `blocksPiSession`，只表示配置风险会阻止打开 Pi；能力诊断不再携带 `fallbackEngine`，无法安全执行的会话明确失败，不切到 ACP。
 - **把真实能力写回声明。** Pi worker 能力限制现在准确说明 Browser 的嵌入式 WebView、最多 8 个标签、显式 loopback 预览、可选 HTTPS 登录弹窗，以及依赖桌面/OS 权限的视口截图；保留密码字段不接受 DOM typing、Linux Wayland 截图 fail-closed 等限制。兼容 manifest 对缺失能力统一记录为 Pi 内诊断，不再声明 ACP fallback。
@@ -32,7 +58,7 @@
 - **Linux 的边界已显式记录。** Landlock 只有 allow 规则，Linux 自定义 exact deny 与 glob deny 不会被静默忽略；这类配置继续拒绝打开。网络受限 profile 仍不在该桥接范围内；Windows 无实现，会话降级为无沙箱+显著警告（reason_code `platform-unsupported`，产品决定）。
 - **本机验证限制。** 本机为 macOS，已完成 Rust 编译检查；Linux 真实内核执法、平台包和 T09 矩阵仍需在目标 Linux 主机验收。当前运行环境禁止嵌套 `sandbox-exec`，因此 macOS monitor 的真实进程测试会被系统拒绝，不能把该环境结果误记为产品回归。
 
-## 0 最近一轮（2026-09-12）
+## 0 最近一轮（2026-09-12；历史记录）
 
 - **P0.1 真实配置盘点（脱敏）已完成第一轮。** 真实配置只有 `chat_completions` 模型、基础 Markdown Memory，没有 Hook/MCP/LSP/OIDC/沙箱/工作流；启用的 3 个插件里 2 个已安装、1 个已不存在。详见[验收报告](./acceptance-report.md#p01-真实配置盘点脱敏)。
 - **修复插件启用判定。** Melody 只在插件被 `[plugins].enabled` 显式列出且不在 `disabled` 时激活插件，Host 之前只判断“不在 disabled”，把 marketplace clone / install cache 里发现的每个插件都当成已启用。真实配置下预检把 49 个插件判为启用（实际 2 个），导致该配置的 Pi 会话每次都回退 ACP，并把从未启用插件的 Skill/命令投影给 Pi。修复后 Host 统一使用 `PluginEnablement`（项目覆盖用户、支持 `melody plugin add` 的 `<scope>/<hex8>/<name>` id、`disabled` 优先），Skill/Hook 保持 opt-out 语义；兼容清单新增 `pluginActivation` 事实源并由 `pnpm check:pi-compatibility` 防漂移。
@@ -115,12 +141,12 @@
 
 ## 1 当前结论
 
-- **当前事实（2026-10-05）：Pi 是唯一 Agent runtime，桌面 Agent 会话默认 Pi。** 旧 ACP 会话只能作为只读时间线归档展示；worker 失败或配置/沙箱不支持不会回退 ACP。无等价实现的能力按清单给出 warning 或阻断，ACP 代码只为 marketplace/config CLI 等非 Agent 用途保留。
+- **当前事实（2026-10-09）：Pi 是唯一 Agent runtime，桌面 Agent 会话默认 Pi。** 旧 ACP 会话只能作为只读时间线归档展示；worker 失败或配置/沙箱不支持不会回退 ACP。无等价实现的能力按清单给出 warning 或阻断，ACP 代码只为 marketplace/config CLI 等非 Agent 用途保留。
 - Host 拥有工作区、文件、终端、权限、MCP、Web、Memory、LSP、代码库索引、后台任务和生命周期；Pi worker 只负责 Pi SDK 会话循环与产品协议适配；React 只消费规范事件和 store patch。
 - 代码库导航由 Host-owned tree-sitter 索引提供，支持 Rust、TypeScript/JavaScript、Python、Go 的有限定义/引用/符号；严格跨文件语义图和未支持语言仍不等价，按兼容清单诊断处理，不回退 ACP。
-- 当前工作树包含大量未提交的迁移改动。没有执行 commit、push 或发布；下一位维护者必须先审阅 `git diff` 和 `git status`，不要把生成的二进制或用户的未跟踪目录误当成源代码提交。
+- 本次发布完成后，以 `v0.4.0-beta.1` 发布标签及 GitHub Actions 结果为准；本地缓存、工具状态目录和 Pi worker 构建物不应纳入提交。平台沙箱、Browser OS 权限、Explorer 恢复和真实 Provider 验收仍需按下方边界逐项确认。
 
-最近一次本地门禁结果（2026-10-05）：`pnpm test:unit` 382 passed，`pnpm test:agent-worker` 137 passed，`pnpm test:pi-worker-smoke` 2 passed，Rust `cargo test --locked` 271 passed；`pnpm check`、`pnpm lint`、`pnpm format:check`、架构/字体检查、`cargo check --locked`、`cargo fmt --all -- --check`、`git diff --check` 与 `pnpm build` 均通过（Vite 仍提示若干 bundle chunk 超过 500 KiB）。真实 provider、OAuth、三平台打包签名、Browser OS 截图权限/profile 与 Explorer 桌面恢复仍未完成现场验收。
+最近一次完整本地门禁结果（2026-10-05，历史记录）：`pnpm test:unit` 382 passed，`pnpm test:agent-worker` 137 passed，`pnpm test:pi-worker-smoke` 2 passed，Rust `cargo test --locked` 271 passed；`pnpm check`、`pnpm lint`、`pnpm format:check`、架构/字体检查、`cargo check --locked`、`cargo fmt --all -- --check`、`git diff --check` 与 `pnpm build` 均通过（Vite 仍提示若干 bundle chunk 超过 500 KiB）。本次发布门禁的最新结果见 CI 和 release workflow；真实 provider、OAuth、Browser OS 截图权限/profile 与 Explorer 桌面恢复仍未完成现场验收。
 
 ## 2 代码地图
 

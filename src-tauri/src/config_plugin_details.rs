@@ -3,14 +3,14 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use tauri::{AppHandle, State};
+use tauri::State;
 use toml_edit::Item;
 
 use crate::config_io::remove_directory;
 use crate::workspace_access::WorkspaceRegistry;
 
 use super::config_core::*;
-use super::config_extensions::{inspect_skill_directory, run_melody_inspect};
+use super::config_extensions::pi_skill_catalog_paths;
 use super::config_marketplace::read_user_config_document;
 
 fn manifest_candidates(root: &Path) -> [PathBuf; 3] {
@@ -622,6 +622,16 @@ fn skill_frontmatter_value(content: &str, key: &str) -> Option<String> {
     })
 }
 
+pub(crate) fn skill_description_from_directory(root: &Path) -> Option<String> {
+    let skill_path = root.join("SKILL.md");
+    let metadata = fs::symlink_metadata(&skill_path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES {
+        return None;
+    }
+    let content = fs::read_to_string(skill_path).ok()?;
+    skill_frontmatter_value(&content, "description")
+}
+
 fn collect_skill_files(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -726,8 +736,7 @@ pub(crate) fn allowed_skill_path(cwd: &str, path: &Path) -> Result<PathBuf, Stri
 }
 
 #[tauri::command]
-pub async fn get_melody_skill_details(
-    app: AppHandle,
+pub fn get_melody_skill_details(
     registry: State<'_, WorkspaceRegistry>,
     cwd: String,
     name: String,
@@ -737,18 +746,13 @@ pub async fn get_melody_skill_details(
     let root = PathBuf::from(path)
         .canonicalize()
         .map_err(|error| format!("Skill path is unavailable: {error}"))?;
-    let document = run_melody_inspect(&app, &cwd).await?;
-    let discovered = document.skills.iter().any(|skill| {
-        skill
-            .source
-            .path
-            .as_deref()
-            .and_then(inspect_skill_directory)
-            .and_then(|directory| directory.canonicalize().ok())
-            .is_some_and(|directory| directory == root)
-    });
+    let (active, disabled) = pi_skill_catalog_paths(&cwd)?;
+    let discovered = active
+        .iter()
+        .chain(disabled.iter())
+        .any(|directory| directory == &root);
     if !discovered {
-        return Err("Skill is no longer present in Melody's runtime catalog".to_string());
+        return Err("Skill is no longer present in Pi's skill catalog".to_string());
     }
     skill_details_from_directory(&root, &name)
 }

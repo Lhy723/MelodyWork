@@ -2,7 +2,7 @@
 
 关联：[总设计](./README.md) · [功能矩阵](./feature-parity.md) · [协议与数据](./protocol-and-data.md)。
 
-当前状态（2026-10-05）：本文件以下内容是带日期的实施过程记录，早期段落中的 `opt-in`、默认 ACP 和 ACP 运行时回退方案均已被后续决定取代。Pi 现为唯一 Agent runtime；旧 ACP 会话只读归档。能力缺口会在 Pi 内诊断为不可用，无法安全保留策略时阻止打开 Pi；不会切换到 ACP。当前验收请看[交接文档](./handoff.md)、[功能对照](./feature-parity.md)与[验收报告](./acceptance-report.md)。
+当前状态（2026-10-08）：本文件以下内容是带日期的实施过程记录，早期段落中的 `opt-in`、默认 ACP 和 ACP 运行时回退方案均已被后续决定取代。Pi 现为唯一 Agent runtime；旧 ACP 会话只读归档。能力缺口会在 Pi 内诊断为不可用，无法安全保留策略时阻止打开 Pi；不会切换到 ACP。定时任务 renderer 侧栏面板已移除，Host 调度和模型工具保留。当前验收请看[交接文档](./handoff.md)、[功能对照](./feature-parity.md)与[验收报告](./acceptance-report.md)。
 
 ## 1. 执行原则
 

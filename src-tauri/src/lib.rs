@@ -6,7 +6,6 @@ mod cron_schedule;
 mod database;
 mod environment_runtime;
 mod git_runtime;
-mod melody_command;
 mod menu_bar;
 mod pi_browser_runtime;
 mod pi_codebase_runtime;

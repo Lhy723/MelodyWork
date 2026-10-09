@@ -1,52 +1,33 @@
 # Development Guide
 
-This guide covers local setup, everyday validation commands, and how MelodyWork prepares the `melody-pager` sidecar.
+This guide covers local setup and everyday validation commands for the Pi-only desktop runtime.
 
 ## Prerequisites
 
 - Node.js 22
 - pnpm
 - Rust toolchain
-- [DotSlash](https://dotslash-cli.com)
-- ripgrep
+- Bun 1.3 or later (used to build the bundled Pi worker)
+- Git (workspace Git features and Git Marketplace sources)
 - Tauri 2 system dependencies for your platform
 
-The project pins Melody Build as the `vendor/melody-build` Git submodule. Initialize it on a fresh clone or whenever its pinned revision changes:
-
-```bash
-git submodule update --init --recursive
-pnpm install
-cargo install dotslash --locked
-```
+Install frontend dependencies with `pnpm install` after cloning. The retired `vendor/melody-build` submodule has been removed; it is not part of setup, build, or runtime.
 
 ## Common Commands
 
-| Command                                           | Purpose                                                               |
-| ------------------------------------------------- | --------------------------------------------------------------------- |
-| `pnpm dev`                                        | Run the Vite frontend development server.                             |
-| `pnpm tauri dev`                                  | Build or refresh the sidecar, then launch the desktop application.    |
-| `pnpm tauri:clean`                                | Remove the Rust build targets used by Tauri and the embedded sidecar. |
-| `pnpm check`                                      | Run the TypeScript type check.                                        |
-| `pnpm check:ui-font`                              | Check for UI font overrides that bypass the configured font preset.   |
-| `pnpm test:unit`                                  | Run frontend and domain unit tests.                                   |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests.                                                       |
-| `pnpm build`                                      | Produce a production frontend build.                                  |
+| Command                                           | Purpose                                                     |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| `pnpm dev`                                        | Run the Vite frontend development server.                   |
+| `pnpm tauri dev`                                  | Prepare the Pi worker, then launch the desktop application. |
+| `pnpm tauri:clean`                                | Remove the Rust build target used by Tauri.                 |
+| `pnpm check`                                      | Run the TypeScript type check.                              |
+| `pnpm check:ui-font`                              | Check for UI font overrides that bypass the configured font preset. |
+| `pnpm test:unit`                                  | Run frontend and domain unit tests.                         |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests.                                             |
+| `pnpm build`                                      | Produce a production frontend build.                        |
 
-Windows users need a system `git` installation available on `PATH` for Git workspace features.
+## Runtime and Build Notes
 
-## Sidecar Behavior
+`pnpm tauri dev` prepares the bundled Pi worker before launching Tauri and Vite. The worker is built with Bun; release builds bundle a target-specific worker, so end users do not need Bun. Marketplace operations are implemented in the Host and use the system Git executable only for Git-based sources. No Melody Build sidecar is compiled, resolved, or launched.
 
-`pnpm tauri dev` incrementally builds the local `melody-build` debug sidecar before launching Tauri and Vite. Preparing the sidecar first avoids file-watcher changes repeatedly reopening the application during startup. When the development process exits, the wrapper cleans both Rust `target` directories so stopped sessions do not leave multi-gigabyte build caches behind.
-
-Cleaning after each development session trades disk usage for startup time: the next `pnpm tauri dev` performs a fresh Rust build. To keep Cargo's incremental cache for a faster next start, run `MELODY_KEEP_TAURI_TARGET=1 pnpm tauri dev`. To clean the targets manually, run `pnpm tauri:clean`.
-
-For local development and direct Rust builds, MelodyWork resolves the `melody-pager` sidecar from the first usable source below:
-
-1. `MELODY_PAGER_SOURCE`, when it points to a local executable
-2. The incrementally compiled `vendor/melody-build/target/debug` output
-3. A compatible sibling `melody-build/target/debug` or `target/release` output
-4. `~/.melody/bin/melody` on macOS/Linux or `%USERPROFILE%\\.melody\\bin\\melody.exe` on Windows
-5. The legacy `~/.grok/bin/grok` fallback
-6. An existing `src-tauri/binaries/melody-pager-$TARGET_TRIPLE` binary
-
-Running `cargo build` or `cargo check --manifest-path src-tauri/Cargo.toml` also invokes `src-tauri/build.rs` to prepare a matching sidecar. If no usable artifact exists, run `node scripts/prepare-sidecar.mjs` first or set `MELODY_PAGER_SOURCE`.
+The development wrapper keeps Cargo's incremental cache unless `MELODY_CLEAN_TAURI_TARGET=1` is set. To keep the cache even when that override is configured, set `MELODY_KEEP_TAURI_TARGET=1`. Clean the Tauri target manually with `pnpm tauri:clean`.

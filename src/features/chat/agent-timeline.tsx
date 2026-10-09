@@ -25,7 +25,6 @@ import type { ProjectReference } from "@/domain/message-citations";
 import { groupTurnActivity } from "@/domain/timeline-groups";
 import { MessageCitations } from "@/features/chat/message-citations";
 import { MessageCodeBlock } from "@/features/chat/message-code-block";
-import { PlanTimelineEntry } from "@/features/chat/plan-timeline-entry";
 import { ProjectInlineCitation } from "@/features/chat/project-inline-citation";
 import { TurnActivityGroup } from "@/features/chat/turn-activity-group";
 import {
@@ -153,6 +152,134 @@ export function AgentTimeline({
     () => groupTurnActivity(entries, turnRunning),
     [entries, turnRunning],
   );
+  const messageIndexById = useMemo(() => {
+    const indexes = new Map<string, number>();
+    entries.forEach((entry, index) => {
+      if (entry.kind === "message" && !indexes.has(entry.id)) {
+        indexes.set(entry.id, index);
+      }
+    });
+    return indexes;
+  }, [entries]);
+  const bringBackAnchorIndex = useMemo(
+    () =>
+      bringBackAfterNativeEntryId
+        ? entries.findIndex(
+            (entry) =>
+              entry.kind === "message" &&
+              entry.nativeEntryId === bringBackAfterNativeEntryId,
+          )
+        : -1,
+    [bringBackAfterNativeEntryId, entries],
+  );
+
+  const renderMessage = (
+    entry: AssistantMessageEntry,
+    motionStyle?: ComponentProps<typeof Message>["style"],
+  ) => {
+    const messageIndex = messageIndexById.get(entry.id) ?? -1;
+    const canBringBack =
+      Boolean(onBringBack) &&
+      entry.role === "assistant" &&
+      Boolean(entry.nativeEntryId) &&
+      !entry.streaming &&
+      bringBackAnchorIndex >= 0 &&
+      messageIndex > bringBackAnchorIndex;
+    return (
+      <Message
+        className="harness-chat-message motion-list-item"
+        from={entry.role}
+        key={entry.id}
+        style={
+          motionStyle ?? {
+            animationDelay: `${Math.min(Math.max(messageIndex, 0), 6) * 24}ms`,
+          }
+        }
+      >
+        <MessageContent className="harness-chat-message-content">
+          {entry.attachments?.length ? (
+            <Attachments
+              className={entry.role === "user" ? "justify-end" : ""}
+              variant="inline"
+            >
+              {entry.attachments.map((attachment) => (
+                <Attachment data={attachment} key={attachment.id}>
+                  <AttachmentPreview />
+                  <AttachmentInfo />
+                </Attachment>
+              ))}
+            </Attachments>
+          ) : null}
+          {entry.role === "assistant" ? (
+            <AssistantMessageText
+              components={messageComponents}
+              entry={entry}
+              turnRunning={turnRunning}
+            />
+          ) : (
+            <MessageResponse components={messageComponents}>
+              {entry.content}
+            </MessageResponse>
+          )}
+          {entry.streaming ? (
+            <span aria-hidden="true" className="motion-streaming-indicator" />
+          ) : null}
+          {entry.role === "assistant" ? (
+            <MessageCitations content={entry.content} />
+          ) : null}
+        </MessageContent>
+        {entry.role === "assistant" &&
+        entry.nativeEntryId &&
+        !entry.streaming &&
+        (onExplore || canBringBack) ? (
+          <div className="mt-1 flex justify-end gap-1">
+            {onExplore ? (
+              <Button
+                aria-label="从此处创建探索分支"
+                disabled={turnRunning || Boolean(forkingEntryId)}
+                onClick={() => {
+                  setForkingEntryId(entry.id);
+                  void Promise.resolve()
+                    .then(() => onExplore(entry))
+                    .catch(() => undefined)
+                    .finally(() => setForkingEntryId(undefined));
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                <GitBranchPlus aria-hidden="true" />
+                {forkingEntryId === entry.id ? "正在创建…" : "从此处探索"}
+              </Button>
+            ) : null}
+            {canBringBack && onBringBack ? (
+              <Button
+                aria-label="将探索分支引用插入主会话草稿"
+                disabled={turnRunning || Boolean(bringingBackEntryId)}
+                onClick={() => {
+                  setBringingBackEntryId(entry.id);
+                  void Promise.resolve()
+                    .then(() => onBringBack(entry))
+                    .catch(() => undefined)
+                    .finally(() => setBringingBackEntryId(undefined));
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {bringingBackEntryId === entry.id ? (
+                  <LoaderCircle aria-hidden="true" className="animate-spin" />
+                ) : (
+                  <CornerUpLeft aria-hidden="true" />
+                )}
+                {bringingBackEntryId === entry.id
+                  ? "正在插入…"
+                  : "带回分支引用"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </Message>
+    );
+  };
 
   return (
     <Conversation className="harness-chat-scroll min-h-0">
@@ -166,142 +293,7 @@ export function AgentTimeline({
           };
 
           if (entry.kind === "message") {
-            const anchorIndex = bringBackAfterNativeEntryId
-              ? entries.findIndex(
-                  (candidate) =>
-                    candidate.kind === "message" &&
-                    candidate.nativeEntryId === bringBackAfterNativeEntryId,
-                )
-              : -1;
-            const messageIndex = entries.findIndex(
-              (candidate) =>
-                candidate.kind === "message" && candidate.id === entry.id,
-            );
-            const canBringBack =
-              Boolean(onBringBack) &&
-              entry.role === "assistant" &&
-              Boolean(entry.nativeEntryId) &&
-              !entry.streaming &&
-              anchorIndex >= 0 &&
-              messageIndex > anchorIndex;
-            return (
-              <Message
-                className="harness-chat-message motion-list-item"
-                from={entry.role}
-                key={entry.id}
-                style={motionStyle}
-              >
-                <MessageContent className="harness-chat-message-content">
-                  {entry.attachments?.length ? (
-                    <Attachments
-                      className={entry.role === "user" ? "justify-end" : ""}
-                      variant="inline"
-                    >
-                      {entry.attachments.map((attachment) => (
-                        <Attachment data={attachment} key={attachment.id}>
-                          <AttachmentPreview />
-                          <AttachmentInfo />
-                        </Attachment>
-                      ))}
-                    </Attachments>
-                  ) : null}
-                  {entry.role === "assistant" ? (
-                    <AssistantMessageText
-                      components={messageComponents}
-                      entry={entry}
-                      turnRunning={turnRunning}
-                    />
-                  ) : (
-                    <MessageResponse components={messageComponents}>
-                      {entry.content}
-                    </MessageResponse>
-                  )}
-                  {entry.streaming ? (
-                    <span
-                      aria-hidden="true"
-                      className="motion-streaming-indicator"
-                    />
-                  ) : null}
-                  {entry.role === "assistant" ? (
-                    <MessageCitations content={entry.content} />
-                  ) : null}
-                </MessageContent>
-                {entry.role === "assistant" &&
-                entry.nativeEntryId &&
-                !entry.streaming &&
-                (onExplore || canBringBack) ? (
-                  <div className="mt-1 flex justify-end gap-1">
-                    {onExplore ? (
-                      <Button
-                        aria-label="从此处创建探索分支"
-                        disabled={turnRunning || Boolean(forkingEntryId)}
-                        onClick={() => {
-                          setForkingEntryId(entry.id);
-                          void Promise.resolve()
-                            .then(() => onExplore(entry))
-                            .catch(() => undefined)
-                            .finally(() => setForkingEntryId(undefined));
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        <GitBranchPlus aria-hidden="true" />
-                        {forkingEntryId === entry.id
-                          ? "正在创建…"
-                          : "从此处探索"}
-                      </Button>
-                    ) : null}
-                    {canBringBack && onBringBack ? (
-                      <Button
-                        aria-label="将探索分支引用插入主会话草稿"
-                        disabled={turnRunning || Boolean(bringingBackEntryId)}
-                        onClick={() => {
-                          setBringingBackEntryId(entry.id);
-                          void Promise.resolve()
-                            .then(() => onBringBack(entry))
-                            .catch(() => undefined)
-                            .finally(() => setBringingBackEntryId(undefined));
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {bringingBackEntryId === entry.id ? (
-                          <LoaderCircle
-                            aria-hidden="true"
-                            className="animate-spin"
-                          />
-                        ) : (
-                          <CornerUpLeft aria-hidden="true" />
-                        )}
-                        {bringingBackEntryId === entry.id
-                          ? "正在插入…"
-                          : "带回分支引用"}
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </Message>
-            );
-          }
-
-          if (entry.kind === "plan") {
-            return (
-              <div
-                className="motion-list-item w-full"
-                key={entry.id}
-                style={motionStyle}
-              >
-                <PlanTimelineEntry
-                  entry={entry}
-                  onDecision={onPlanDecision}
-                  renderedContent={
-                    <MessageResponse components={messageComponents}>
-                      {entry.content}
-                    </MessageResponse>
-                  }
-                />
-              </div>
-            );
+            return renderMessage(entry, motionStyle);
           }
 
           return (
@@ -315,9 +307,13 @@ export function AgentTimeline({
                 endedAt={entry.endedAt}
                 items={entry.items}
                 onPermission={onPermission}
+                onPlanDecision={onPlanDecision}
                 onQuestion={onQuestion}
                 onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
+                messageComponents={messageComponents}
+                renderAssistantMessage={renderMessage}
+                reviewPending={entry.reviewPending}
                 running={entry.running}
                 startedAt={entry.startedAt}
               />

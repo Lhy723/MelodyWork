@@ -258,10 +258,9 @@ export const listMelodySkills = async (
           path: "~/.melody/skills/code-review",
           scope: "user",
           provider: "melody",
-          source: "user",
+          source: "pi",
           managed: false,
           enabled: true,
-          userInvocable: true,
           deletable: true,
         },
         {
@@ -271,10 +270,9 @@ export const listMelodySkills = async (
           path: "~/.agents/skills/ai-elements",
           scope: "user",
           provider: "agents",
-          source: "user",
+          source: "pi",
           managed: false,
           enabled: true,
-          userInvocable: true,
           deletable: false,
         },
         {
@@ -284,16 +282,14 @@ export const listMelodySkills = async (
           path: "~/.claude/skills/swiftui-patterns",
           scope: "user",
           provider: "claude",
-          source: "user",
+          source: "pi",
           managed: false,
           enabled: false,
-          compatibilityStatus: "disabled",
-          userInvocable: true,
           deletable: false,
         },
         {
           kind: "skills",
-          name: "mattpocock-skills:implement",
+          name: "implement",
           description: "按照既定方案实现经过验证的代码变更。",
           path: "~/.melody/installed-plugins/mattpocock-skills/skills/implement",
           scope: "user",
@@ -302,7 +298,6 @@ export const listMelodySkills = async (
           pluginName: "mattpocock-skills",
           managed: true,
           enabled: true,
-          userInvocable: true,
           deletable: false,
         },
       ];
@@ -444,9 +439,10 @@ export const uninstallMelodyPlugin = async (
   cwd: string,
   name: string,
   keepData = false,
+  path?: string,
 ): Promise<string> =>
   isTauriRuntime()
-    ? invoke<string>("uninstall_melody_plugin", { cwd, name, keepData })
+    ? invoke<string>("uninstall_melody_plugin", { cwd, name, keepData, path })
     : `已删除插件 ${name}。`;
 
 export const getMelodyPluginDetails = async (

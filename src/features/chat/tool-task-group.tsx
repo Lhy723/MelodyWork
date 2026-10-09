@@ -41,7 +41,7 @@ export function ToolTaskGroup({
   turnRunning,
   tools,
 }: ToolTaskGroupProps) {
-  const running = tools.some(isRunning);
+  const running = tools.some((tool) => isRunning(tool, turnRunning));
   const [open, setOpen] = useState(turnRunning);
   const wasTurnRunning = useRef(turnRunning);
 
@@ -69,7 +69,7 @@ export function ToolTaskGroup({
   const HeaderIcon = tools.some((tool) => tool.question)
     ? MessageCircleQuestionIcon
     : operationIcon(headerOperation);
-  const title = groupTitle(tools);
+  const title = groupTitle(tools, turnRunning);
 
   return (
     <Task
@@ -114,7 +114,7 @@ export function ToolTaskGroup({
                 key={`${tool.id}-${change.path}`}
                 onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
-                running={isRunning(tool)}
+                running={turnRunning && isRunning(tool)}
               />
             )),
             ...extraPaths.map((path) => (
@@ -124,6 +124,7 @@ export function ToolTaskGroup({
                 onOpenFile={onOpenFile}
                 pathOverride={path}
                 projectRoot={projectRoot}
+                toolRunning={turnRunning && isRunning(tool)}
                 tool={tool}
               />
             )),
@@ -135,6 +136,7 @@ export function ToolTaskGroup({
                 key={tool.id}
                 onOpenFile={onOpenFile}
                 projectRoot={projectRoot}
+                toolRunning={turnRunning && isRunning(tool)}
                 tool={tool}
               />,
             );

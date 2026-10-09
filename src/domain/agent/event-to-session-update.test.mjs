@@ -64,6 +64,35 @@ test("projects streamed text and repairs it with the completed message", () => {
   assert.equal(finished.state.timeline.at(-1).content, "你好，Pi（完整结果）");
 });
 
+test("shows a clear rate-limit error when a Pi run finishes with provider failure", () => {
+  const result = project(
+    createAgentEventProjectionState([
+      { id: "user-1", kind: "message", role: "user", content: "继续" },
+    ]),
+    "run-error",
+    {
+      type: "run.finished",
+      status: "failed",
+      stopReason: "rate_limit",
+      error: {
+        code: "pi.provider_rate_limited",
+        message: "模型请求受到限流（TPM/RPM），请稍后再试或切换模型。",
+        retriable: true,
+        scope: "run",
+        details: {
+          providerMessage: "429: RateLimitExceeded.EndpointTPMExceeded",
+        },
+      },
+    },
+  );
+
+  assert.equal(result.projection.completed, true);
+  assert.equal(
+    result.state.timeline.at(-1).content,
+    "Melody 无法完成请求：模型请求受到限流（TPM），请稍后再试或切换模型。",
+  );
+});
+
 test("treats Pi queue snapshots as a handled auxiliary event", () => {
   const result = project(createAgentEventProjectionState(), "queue", {
     type: "run.queue_updated",
@@ -179,6 +208,70 @@ test("projects tool lifecycle into one activity row", () => {
   assert.equal(tools[0].output, "完成");
   assert.equal(tools[0].activity.operation, "read");
   assert.equal(tools[0].activity.path, "src/App.tsx");
+});
+
+test("projects Host gateway arguments as a readable file activity", () => {
+  const result = project(createAgentEventProjectionState(), "tool-request", {
+    type: "tool.requested",
+    toolCallId: "call-host-read",
+    toolName: "workspace_read_file",
+    status: "pending",
+    activity: {
+      gateway: "melody",
+      arguments: { path: "src/App.tsx" },
+      cwd: "/workspace",
+    },
+  });
+  const tool = result.state.timeline[0];
+
+  assert.equal(tool.kind, "tool");
+  assert.equal(tool.activity.operation, "read");
+  assert.equal(tool.activity.path, "src/App.tsx");
+  assert.equal(tool.command, "src/App.tsx");
+});
+
+test("projects Host search targets and queries without exposing the JSON wrapper", () => {
+  const result = project(createAgentEventProjectionState(), "search-request", {
+    type: "tool.requested",
+    toolCallId: "call-host-search",
+    toolName: "workspace_search",
+    status: "pending",
+    activity: {
+      gateway: "melody",
+      arguments: { pattern: "useAgentStore", include: "src/**/*.ts" },
+      cwd: "/workspace",
+    },
+  });
+  const tool = result.state.timeline[0];
+
+  assert.equal(tool.activity.operation, "search");
+  assert.equal(tool.activity.query, "useAgentStore");
+  assert.equal(tool.activity.glob, "src/**/*.ts");
+  assert.equal(tool.command, "");
+});
+
+test("keeps a cancelled Host tool terminal instead of treating it as failed", () => {
+  let state = project(createAgentEventProjectionState(), "tool-request", {
+    type: "tool.requested",
+    toolCallId: "call-cancelled",
+    toolName: "workspace_read_file",
+    status: "pending",
+  }).state;
+  state = project(state, "tool-finish", {
+    type: "tool.finished",
+    toolCallId: "call-cancelled",
+    toolName: "workspace_read_file",
+    status: "cancelled",
+    error: {
+      code: "pi.tool_cancelled",
+      message: "Cancelled by user.",
+      retriable: false,
+      scope: "tool",
+    },
+  }).state;
+
+  assert.equal(state.timeline[0].status, "cancelled");
+  assert.equal(typeof state.timeline[0].completedAt, "number");
 });
 
 test("keeps internal instruction-scope lookups out of the session timeline", () => {

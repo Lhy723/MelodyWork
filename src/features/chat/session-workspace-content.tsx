@@ -24,7 +24,6 @@ import {
 import { AgentTimeline } from "./agent-timeline";
 import { SessionStatsLine } from "./session-stats-line";
 import { MonitorFeed } from "./monitor-feed";
-import { SchedulePanel } from "./schedule-panel";
 import { SubagentTray } from "./subagent-tray";
 import { TrajectoryView } from "./trajectory-view";
 import { WorkspacePanelLayer } from "./workspace-panel-layer";
@@ -86,7 +85,6 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     monitorNotifications,
     monitors,
     onCancelMonitor,
-    schedules,
     workspacePanelOpen,
     workspacePanelResize,
     workspacePanelWidth,
@@ -422,9 +420,6 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                       onOpenSubagent={onOpenSubagent}
                       subagents={visibleSubagents}
                     />
-                  </section>
-                  <section className="harness-session-info-section">
-                    <SchedulePanel schedules={schedules} />
                   </section>
                   <section className="harness-session-info-section">
                     <MonitorFeed

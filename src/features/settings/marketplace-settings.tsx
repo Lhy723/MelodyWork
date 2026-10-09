@@ -339,7 +339,10 @@ export function MarketplaceSettings({
       const result = await runPluginOperation(async () => {
         const actionResult =
           plugin.status === "installed"
-            ? await updateMelodyPlugin(cwd, plugin.name)
+            ? await updateMelodyPlugin(
+                cwd,
+                `${plugin.name}@${plugin.marketplace}`,
+              )
             : await installMelodyPlugin(cwd, key);
         const [nextPlugins] = await Promise.all([
           scanMarketplacePlugins(cwd),

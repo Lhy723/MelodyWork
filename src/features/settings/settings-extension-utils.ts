@@ -40,12 +40,12 @@ export const skillSourceGroups = [
   {
     id: "claude",
     label: "Claude",
-    description: "通过 Claude Code 兼容层发现的技能。",
+    description: "来自用户或项目 .claude/skills 目录的技能。",
   },
   {
     id: "cursor",
     label: "Cursor",
-    description: "通过 Cursor 兼容层发现的技能。",
+    description: "来自用户或项目 .cursor/skills 目录的技能。",
   },
   {
     id: "managed",
@@ -55,7 +55,7 @@ export const skillSourceGroups = [
   {
     id: "other",
     label: "其他来源",
-    description: "来自额外技能路径的其他技能。",
+    description: "来自 Pi 技能目录配置的其他技能。",
   },
 ] as const;
 

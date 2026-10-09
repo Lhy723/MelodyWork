@@ -38,21 +38,11 @@ let exitStatus = 1;
 
 try {
   if (isDevCommand) {
-    const prepareStatus = run(process.execPath, [
-      "scripts/prepare-sidecar.mjs",
+    const workerStatus = run(process.execPath, [
+      "scripts/prepare-agent-worker.mjs",
       "--dev",
     ]);
-
-    if (prepareStatus !== 0) {
-      exitStatus = prepareStatus;
-    } else {
-      const workerStatus = run(process.execPath, [
-        "scripts/prepare-agent-worker.mjs",
-        "--dev",
-      ]);
-      exitStatus =
-        workerStatus === 0 ? run(tauriCommand, args) : workerStatus;
-    }
+    exitStatus = workerStatus === 0 ? run(tauriCommand, args) : workerStatus;
   } else {
     exitStatus = run(tauriCommand, args);
   }

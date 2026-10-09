@@ -97,14 +97,16 @@ const diffFromContent = (value: unknown): AgentToolFileChange[] => {
           ) {
             return [];
           }
-          return [{
-            oldText: detailOldText,
-            newText: detailNewText,
-            oldStartLine,
-            newStartLine,
-            contextBefore: stringValue(detail?.context_before),
-            contextAfter: stringValue(detail?.context_after),
-          }];
+          return [
+            {
+              oldText: detailOldText,
+              newText: detailNewText,
+              oldStartLine,
+              newStartLine,
+              contextBefore: stringValue(detail?.context_before),
+              contextAfter: stringValue(detail?.context_after),
+            },
+          ];
         })
       : [];
     const operation =
@@ -113,23 +115,23 @@ const diffFromContent = (value: unknown): AgentToolFileChange[] => {
         : newText === ""
           ? "delete"
           : "edit";
-    return [{
-      path: normalizedPath(path),
-      operation,
-      oldText,
-      newText,
-      additions: hunks.length
-        ? hunks.reduce((total, hunk) => total + lineCount(hunk.newText), 0)
-        : lineCount(newText),
-      deletions: hunks.length
-        ? hunks.reduce((total, hunk) => total + lineCount(hunk.oldText), 0)
-        : lineCount(oldText),
-      oldStartLine:
-        numberValue(meta?.old_line) ?? numberValue(meta?.oldLine),
-      newStartLine:
-        numberValue(meta?.new_line) ?? numberValue(meta?.newLine),
-      hunks: hunks.length ? hunks : undefined,
-    } satisfies AgentToolFileChange];
+    return [
+      {
+        path: normalizedPath(path),
+        operation,
+        oldText,
+        newText,
+        additions: hunks.length
+          ? hunks.reduce((total, hunk) => total + lineCount(hunk.newText), 0)
+          : lineCount(newText),
+        deletions: hunks.length
+          ? hunks.reduce((total, hunk) => total + lineCount(hunk.oldText), 0)
+          : lineCount(oldText),
+        oldStartLine: numberValue(meta?.old_line) ?? numberValue(meta?.oldLine),
+        newStartLine: numberValue(meta?.new_line) ?? numberValue(meta?.newLine),
+        hunks: hunks.length ? hunks : undefined,
+      } satisfies AgentToolFileChange,
+    ];
   });
 };
 
@@ -159,7 +161,9 @@ export const extractToolActivity = (
   tool: JsonObject,
   previous?: AgentToolActivity,
 ): AgentToolActivity => {
-  const rawInput = objectValue(tool.rawInput);
+  const input = objectValue(tool.rawInput);
+  const rawInput =
+    input?.gateway === "melody" ? objectValue(input.arguments) : input;
   const title = stringValue(tool.title) ?? "";
   const files = diffFromContent(tool.content);
   const paths = locationPaths(tool.locations);
@@ -173,7 +177,7 @@ export const extractToolActivity = (
     files.length > 0
       ? files[0].operation
       : inferredOperation === "other"
-        ? previous?.operation ?? "other"
+        ? (previous?.operation ?? "other")
         : inferredOperation;
   const path =
     inputPath(rawInput) ??

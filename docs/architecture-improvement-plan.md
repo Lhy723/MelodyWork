@@ -123,7 +123,7 @@ git diff --check
 - `format:check` 已纳入本轮触及的文件，避免新增模块绕过格式检查。
 - CI 的 Check workflow 已固定执行类型检查、前端单测、Lint、格式检查和生产构建，避免架构回归只在本地被发现。
 - 新增 `check:architecture` 契约检查，确保 `src/domain` 不反向依赖 UI、store、lib 或 Tauri/React runtime。
-- `config_runtime.rs` 的配置文件读写已收口到 `TextFileStore`，采用大小限制、UTF-8 校验、临时文件同步和替换写入；技能删除使用真实目录检查，Melody sidecar 的二进制、工作目录和环境变量由 `MelodyCommandRunner` 统一配置。
+- `config_runtime.rs` 的配置文件读写已收口到 `TextFileStore`，采用大小限制、UTF-8 校验、临时文件同步和替换写入；技能删除使用真实目录检查，插件市场的扫描、安装、更新和卸载由 Host 原生实现，旧 sidecar 不再参与运行或打包。
 - Session 持久化已写入 SQLite `user_version`，现有 `acp_cursor`、`timeline_version` 与 `session_timeline_entries` 通过可重入迁移补齐；旧快照会在 v4 迁移时回填为归档 entry，遇到更新版本的数据库会拒绝继续写入，避免静默破坏数据。
 - timeline 快照与归档解码都会校验最小 entry 结构；损坏投影只保留健康条目供只读回退，并禁止带游标恢复，优先让 ACP 重放，避免坏 JSON 或半条目污染运行态。
 - Research 来源请求已收口到 `ResearchSourceClient`：每个来源拥有独立超时、重试退避、最小请求间隔和有上限的成功响应缓存；Research Project 工作流只处理来源结果，不再感知网络策略。

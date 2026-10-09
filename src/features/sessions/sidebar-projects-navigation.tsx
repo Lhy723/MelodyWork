@@ -5,7 +5,7 @@ import {
   FolderOpenIcon,
   MessageCircleIcon,
   MoreHorizontalIcon,
-  SquarePenIcon,
+  PlusIcon,
   Trash2Icon,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -134,17 +134,17 @@ function SidebarTaskSectionHeader({
     {
       id: "switch",
       icon: <MessageCircleIcon />,
-      label: "切换到任务",
+      label: "切换到独立任务",
       onSelect: () => onSelectProject(project),
     },
     {
       id: "new-session",
       disabled: project.archived,
-      icon: <SquarePenIcon />,
+      icon: <PlusIcon />,
       label:
         workspaceMode === "research"
-          ? "在任务中新建研究任务"
-          : "在任务中新建任务",
+          ? "在独立任务中新建研究任务"
+          : "在独立任务中新建任务",
       onSelect: () => onNewSession(project),
     },
   ];
@@ -153,20 +153,22 @@ function SidebarTaskSectionHeader({
     <ContextMenu
       className="min-w-0 flex-1 rounded-lg"
       items={contextMenuItems}
-      label="任务的操作"
+      label="独立任务的操作"
     >
       <div
         className={cn(
-          "group/section flex h-8 w-full items-center rounded-lg px-1 text-sidebar-foreground",
-          active && "bg-sidebar-selected font-medium",
+          "group/section flex h-9 w-full items-center rounded-lg px-1 text-muted-foreground transition-colors",
+          active
+            ? "bg-sidebar-selected text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/70 hover:bg-sidebar-selected"
+            : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         )}
       >
         <CollapsibleTrigger asChild>
           <button
             aria-controls={contentId}
             aria-expanded={open}
-            aria-label={`${open ? "收起" : "展开"}任务`}
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-left font-medium text-base outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            aria-label={`${open ? "收起" : "展开"}独立任务`}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-left font-medium text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             onClick={() => onSelectProject(project)}
             type="button"
           >
@@ -176,15 +178,15 @@ function SidebarTaskSectionHeader({
                 open && "rotate-90",
               )}
             />
-            <MessageCircleIcon className="size-4 shrink-0" />
-            <span className="truncate">任务</span>
+            <MessageCircleIcon className="size-3.5 shrink-0" />
+            <span className="truncate">独立任务</span>
           </button>
         </CollapsibleTrigger>
         <Button
           aria-label={
             workspaceMode === "research"
-              ? "在任务中新建研究任务"
-              : "在任务中新建任务"
+              ? "在独立任务中新建研究任务"
+              : "在独立任务中新建任务"
           }
           disabled={loading || project.archived}
           onClick={(event) => {
@@ -196,12 +198,12 @@ function SidebarTaskSectionHeader({
           size="icon-sm"
           title={
             workspaceMode === "research"
-              ? "在任务中新建研究任务"
-              : "在任务中新建任务"
+              ? "在独立任务中新建研究任务"
+              : "在独立任务中新建任务"
           }
           variant="ghost"
         >
-          <SquarePenIcon />
+          <PlusIcon />
         </Button>
       </div>
     </ContextMenu>
@@ -246,7 +248,7 @@ function buildProjectTreeNodes(
     return {
       id: projectNodeId(project.id),
       kind: "project",
-      label: independent ? "任务" : project.name,
+      label: independent ? "独立任务" : project.name,
       icon: independent ? (
         <MessageCircleIcon className="size-4 shrink-0" />
       ) : (
@@ -370,22 +372,22 @@ function SidebarTreeNodeContent({
 
   const independent = isIndependentProject(project);
   const active = project.id === activeProject?.id;
-  const label = independent ? "任务" : project.name;
+  const label = independent ? "独立任务" : project.name;
   const contextMenuItems: ContextMenuItem[] = [
     {
       id: "switch",
       icon: independent ? <MessageCircleIcon /> : <FolderOpenIcon />,
-      label: independent ? "切换到任务" : "切换到项目",
+      label: independent ? "切换到独立任务" : "切换到项目",
       onSelect: () => onSelectProject(project),
     },
     {
       id: "new-session",
       disabled: project.archived,
-      icon: <SquarePenIcon />,
+      icon: <PlusIcon />,
       label: independent
         ? workspaceMode === "research"
-          ? "在任务中新建研究任务"
-          : "在任务中新建任务"
+          ? "在独立任务中新建研究任务"
+          : "在独立任务中新建任务"
         : workspaceMode === "research"
           ? "在此项目新建研究任务"
           : "在此项目新建任务",
@@ -433,9 +435,7 @@ function SidebarTreeNodeContent({
       <div
         className={cn(
           "group/project flex min-w-0 flex-1 items-center rounded-md transition-colors",
-          active
-            ? "bg-sidebar-selected font-medium text-sidebar-foreground"
-            : "text-sidebar-foreground",
+          active && "font-medium text-sidebar-foreground",
         )}
       >
         <span
@@ -463,8 +463,8 @@ function SidebarTreeNodeContent({
             aria-label={
               independent
                 ? workspaceMode === "research"
-                  ? "在任务中新建研究任务"
-                  : "在任务中新建任务"
+                  ? "在独立任务中新建研究任务"
+                  : "在独立任务中新建任务"
                 : `在 ${project.name} 中新建${workspaceMode === "research" ? "研究任务" : "任务"}`
             }
             disabled={loading}
@@ -478,15 +478,15 @@ function SidebarTreeNodeContent({
             title={
               independent
                 ? workspaceMode === "research"
-                  ? "在任务中新建研究任务"
-                  : "在任务中新建任务"
+                  ? "在独立任务中新建研究任务"
+                  : "在独立任务中新建任务"
                 : workspaceMode === "research"
                   ? "在此项目新建研究任务"
                   : "在此项目新建任务"
             }
             variant="ghost"
           >
-            <SquarePenIcon />
+            <PlusIcon />
           </Button>
         ) : null}
       </div>
@@ -621,7 +621,8 @@ export function SidebarProjectsNavigation({
   );
 
   const treeClassName = "rounded-none border-0 bg-transparent p-0 shadow-none";
-  const treeSelectedClassName = "bg-sidebar-selected text-sidebar-foreground";
+  const treeSelectedClassName =
+    "bg-sidebar-selected font-medium text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/70 hover:bg-sidebar-selected";
   const projectsContentId = useId();
   const archivedContentId = useId();
   const tasksContentId = useId();
@@ -629,16 +630,16 @@ export function SidebarProjectsNavigation({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Collapsible
-        className={cn("shrink-0", workspaceMode === "research" && "mt-5")}
+        className={cn("shrink-0", workspaceMode === "research" && "mt-6")}
         onOpenChange={onSetProjectsExpanded}
         open={projectsExpanded || Boolean(normalizedQuery)}
       >
-        <div className="group/section flex h-8 w-full items-center rounded-lg px-1 text-sidebar-foreground">
+        <div className="group/section flex h-9 w-full items-center rounded-lg px-1 text-muted-foreground">
           <CollapsibleTrigger asChild>
             <button
               aria-label={`${projectsExpanded ? "收起" : "展开"}项目`}
               aria-controls={projectsContentId}
-              className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left font-medium text-base hover:text-sidebar-foreground"
+              className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left font-medium text-xs hover:text-sidebar-foreground"
               type="button"
             >
               <ChevronRightIcon
@@ -647,7 +648,7 @@ export function SidebarProjectsNavigation({
                   (projectsExpanded || Boolean(normalizedQuery)) && "rotate-90",
                 )}
               />
-              <FolderOpenIcon className="size-4 shrink-0" />
+              <FolderOpenIcon className="size-3.5 shrink-0" />
               <span className="truncate">项目</span>
             </button>
           </CollapsibleTrigger>
@@ -673,6 +674,9 @@ export function SidebarProjectsNavigation({
               renderNode={renderNode}
               selected={selectedNodeId}
               selectedClassName={treeSelectedClassName}
+              rowClassName="min-h-9"
+              listClassName="space-y-1"
+              indentClassName="ml-3 border-l border-border/70 pl-1 [&>li+li]:mt-1"
             />
             {!loading && visibleProjects.length === 0 ? (
               <p className="px-2 py-2 text-sidebar-foreground text-xs">
@@ -689,12 +693,12 @@ export function SidebarProjectsNavigation({
           onOpenChange={onSetArchivedExpanded}
           open={archivedExpanded || Boolean(normalizedQuery)}
         >
-          <div className="group/section flex h-8 w-full items-center rounded-lg px-1 text-sidebar-foreground">
+          <div className="group/section flex h-9 w-full items-center rounded-lg px-1 text-muted-foreground">
             <CollapsibleTrigger asChild>
               <button
                 aria-label={`${archivedExpanded ? "收起" : "展开"}已归档项目`}
                 aria-controls={archivedContentId}
-                className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left font-medium text-base hover:text-sidebar-foreground"
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left font-medium text-xs hover:text-sidebar-foreground"
                 type="button"
               >
                 <ChevronRightIcon
@@ -704,7 +708,7 @@ export function SidebarProjectsNavigation({
                       "rotate-90",
                   )}
                 />
-                <ArchiveIcon className="size-4 shrink-0" />
+                <ArchiveIcon className="size-3.5 shrink-0" />
                 <span className="truncate">已归档项目</span>
                 <span className="ml-auto pr-1 text-muted-foreground text-xs">
                   {archivedProjects.length}
@@ -733,6 +737,9 @@ export function SidebarProjectsNavigation({
                 renderNode={renderNode}
                 selected={selectedNodeId}
                 selectedClassName={treeSelectedClassName}
+                rowClassName="min-h-9"
+                listClassName="space-y-1"
+                indentClassName="ml-3 border-l border-border/70 pl-1 [&>li+li]:mt-1"
               />
             </nav>
           </SidebarTreeSectionContent>
@@ -741,7 +748,7 @@ export function SidebarProjectsNavigation({
 
       {visibleTask ? (
         <Collapsible
-          className="mt-3 shrink-0"
+          className="mt-6 shrink-0"
           onOpenChange={onSetTasksExpanded}
           open={tasksExpanded || Boolean(normalizedQuery)}
         >
@@ -759,18 +766,21 @@ export function SidebarProjectsNavigation({
             id={tasksContentId}
             open={tasksExpanded || Boolean(normalizedQuery)}
           >
-            <nav aria-label="任务" className="px-1 pb-2">
+            <nav aria-label="独立任务" className="px-1 pb-2">
               <TreeView
                 className={cn(
                   treeClassName,
-                  "ml-[15px] border-l border-border/70 pl-1.5",
+                  "ml-3 border-l border-border/70 pl-1",
                 )}
-                label="任务会话"
+                label="独立任务会话"
                 nodes={taskSessionNodes}
                 onSelectedChange={handleTreeSelection}
                 renderNode={renderNode}
                 selected={selectedNodeId}
                 selectedClassName={treeSelectedClassName}
+                rowClassName="min-h-9"
+                listClassName="space-y-1"
+                indentClassName="ml-3 border-l border-border/70 pl-1 [&>li+li]:mt-1"
               />
             </nav>
           </SidebarTreeSectionContent>

@@ -264,7 +264,8 @@ export function AppSidebar({
             <Button
               className={cn(
                 "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "overview" && "bg-sidebar-selected",
+                activeResearchSection === "overview" &&
+                  "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("overview")}
               variant="ghost"
@@ -275,7 +276,8 @@ export function AppSidebar({
             <Button
               className={cn(
                 "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "search" && "bg-sidebar-selected",
+                activeResearchSection === "search" &&
+                  "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("search")}
               variant="ghost"
@@ -286,7 +288,8 @@ export function AppSidebar({
             <Button
               className={cn(
                 "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "tracking" && "bg-sidebar-selected",
+                activeResearchSection === "tracking" &&
+                  "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("tracking")}
               variant="ghost"
@@ -297,7 +300,8 @@ export function AppSidebar({
             <Button
               className={cn(
                 "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
-                activeResearchSection === "inbox" && "bg-sidebar-selected",
+                activeResearchSection === "inbox" &&
+                  "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
               )}
               onClick={() => onSelectResearchSection("inbox")}
               variant="ghost"
@@ -322,7 +326,7 @@ export function AppSidebar({
             "h-9 justify-start rounded-lg px-2 text-base text-sidebar-foreground hover:text-sidebar-foreground",
             workspaceMode === "research" &&
               activeResearchSection === "capabilities" &&
-              "bg-sidebar-selected",
+              "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
           )}
           onClick={() =>
             workspaceMode === "research"
@@ -410,7 +414,8 @@ export function AppSidebar({
         <Button
           className={cn(
             "h-9 w-full justify-start rounded-lg px-2 text-sidebar-foreground hover:text-sidebar-foreground",
-            settingsActive && "bg-sidebar-selected hover:bg-sidebar-selected",
+            settingsActive &&
+              "bg-sidebar-selected font-medium hover:bg-sidebar-selected",
           )}
           onClick={onOpenSettings}
           variant="ghost"

@@ -276,6 +276,12 @@ export type TreeViewProps = {
   renderNode?: (node: TreeNode, row: TreeRow) => ReactNode;
   /** Override the selected row treatment when embedding the tree in another surface. */
   selectedClassName?: string;
+  /** Additional row styling for embedding the tree in a denser or roomier surface. */
+  rowClassName?: string;
+  /** Additional spacing for sibling rows at the root level. */
+  listClassName?: string;
+  /** Override the default indentation styling for nested rows. */
+  indentClassName?: string;
   className?: string;
 };
 
@@ -296,6 +302,9 @@ export function TreeView({
   onSelectedChange,
   renderNode,
   selectedClassName,
+  rowClassName,
+  listClassName,
+  indentClassName,
   className,
 }: TreeViewProps) {
   const tree = useTreeView({
@@ -331,6 +340,7 @@ export function TreeView({
             aria-setsize={row.setsize}
             className={cn(
               "group flex min-h-8 cursor-default select-none items-center gap-1.5 rounded-lg px-2 text-left text-xs outline-none transition-[background-color,color,box-shadow] duration-150",
+              rowClassName,
               "focus-visible:bg-primary/8 focus-visible:ring-1 focus-visible:ring-ring",
               isSelected
                 ? (selectedClassName ?? "bg-muted text-foreground")
@@ -411,7 +421,12 @@ export function TreeView({
                       : { height: OPEN_HEIGHT, opacity: OPEN_OPACITY }
                   }
                 >
-                  <div className="ml-[15px] border-l border-border/70 pl-1.5">
+                  <div
+                    className={cn(
+                      "ml-[15px] border-l border-border/70 pl-1.5 [&>li+li]:mt-0.5",
+                      indentClassName,
+                    )}
+                  >
                     {renderNodes(node.children ?? [], level + 1)}
                   </div>
                 </motion.ul>
@@ -429,7 +444,11 @@ export function TreeView({
         className,
       )}
     >
-      <ul aria-label={label} className="space-y-0.5" role="tree">
+      <ul
+        aria-label={label}
+        className={cn("space-y-0.5", listClassName)}
+        role="tree"
+      >
         {renderNodes(nodes, 1)}
       </ul>
       <span className="sr-only" id={hintId}>

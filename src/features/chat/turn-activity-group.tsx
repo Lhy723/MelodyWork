@@ -3,9 +3,14 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task";
-import type { AgentQuestionResponse } from "@/domain/acp";
-import type { TurnActivityItem } from "@/domain/timeline-groups";
+import type { AgentPlanDecision, AgentQuestionResponse } from "@/domain/acp";
+import type {
+  AssistantMessageTimelineEntry,
+  TurnActivityItem,
+} from "@/domain/timeline-groups";
+import { PlanTimelineEntry } from "@/features/chat/plan-timeline-entry";
 import { ToolTaskGroup } from "@/features/chat/tool-task-group";
 import { cn } from "@/lib/utils";
 import {
@@ -13,19 +18,34 @@ import {
   ChevronDownIcon,
   LoaderCircleIcon,
 } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 interface TurnActivityGroupProps {
   cwd: string;
   endedAt?: number;
   items: TurnActivityItem[];
   onPermission: (entryId: string, optionId: string) => void;
+  onPlanDecision: (
+    entryId: string,
+    outcome: AgentPlanDecision,
+    feedback?: string,
+  ) => void | Promise<void>;
   onQuestion: (
     entryId: string,
     response: AgentQuestionResponse,
   ) => void | Promise<void>;
   onOpenFile: (path: string) => void;
+  messageComponents: ComponentProps<typeof MessageResponse>["components"];
   projectRoot: string;
+  renderAssistantMessage: (entry: AssistantMessageTimelineEntry) => ReactNode;
+  reviewPending?: boolean;
   running: boolean;
   startedAt?: number;
 }
@@ -51,13 +71,17 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
   endedAt,
   items,
   onPermission,
+  onPlanDecision,
   onQuestion,
   onOpenFile,
+  messageComponents,
   projectRoot,
+  renderAssistantMessage,
+  reviewPending = false,
   running,
   startedAt,
 }: TurnActivityGroupProps) {
-  const [open, setOpen] = useState(running);
+  const [open, setOpen] = useState(running || reviewPending);
   const [now, setNow] = useState(() => Date.now());
   const [completionPulse, setCompletionPulse] = useState(false);
   const wasRunning = useRef(running);
@@ -72,25 +96,32 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
   }, [running]);
 
   useEffect(() => {
+    if (reviewPending) {
+      setOpen(true);
+    }
     if (running && !wasRunning.current) {
       setCompletionPulse(false);
       setOpen(true);
     }
     if (!running && wasRunning.current) {
       setCompletionPulse(true);
-      const closeTimer = window.setTimeout(() => setOpen(false), 800);
+      const closeTimer = reviewPending
+        ? undefined
+        : window.setTimeout(() => setOpen(false), 800);
       const pulseTimer = window.setTimeout(
         () => setCompletionPulse(false),
         480,
       );
       wasRunning.current = running;
       return () => {
-        window.clearTimeout(closeTimer);
+        if (closeTimer !== undefined) {
+          window.clearTimeout(closeTimer);
+        }
         window.clearTimeout(pulseTimer);
       };
     }
     wasRunning.current = running;
-  }, [running]);
+  }, [reviewPending, running]);
 
   const duration =
     startedAt === undefined
@@ -98,7 +129,9 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
       : Math.max(0, (running ? now : (endedAt ?? now)) - startedAt);
   const durationLabel = formatDuration(duration);
   const title = running
-    ? `正在处理${durationLabel ? ` · 已用时 ${durationLabel}` : ""}`
+    ? `${items.length === 0 ? "正在等待模型响应" : "正在处理"}${
+        durationLabel ? ` · 已用时 ${durationLabel}` : ""
+      }`
     : `已完成${durationLabel ? ` · 总用时 ${durationLabel}` : ""}`;
 
   return (
@@ -129,28 +162,52 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
         </button>
       </TaskTrigger>
       <TaskContent className="harness-activity-content [&>div]:mt-1.5 [&>div]:space-y-2 [&>div]:border-l-0 [&>div]:pl-4">
-        {items.map((item) =>
-          item.kind === "thought" ? (
-            <Reasoning
-              className={cn("mb-0", item.streaming && "py-0.5")}
-              isStreaming={item.streaming}
-              key={item.id}
-            >
-              <ReasoningTrigger
-                className="min-h-6 text-sm"
-                getThinkingMessage={(isStreaming, thoughtDuration) =>
-                  isStreaming
-                    ? "正在思考…"
-                    : thoughtDuration === undefined
-                      ? "思考过程"
-                      : `思考了 ${thoughtDuration} 秒`
+        {items.map((item) => {
+          if (item.kind === "thought") {
+            return (
+              <Reasoning
+                className={cn("mb-0", item.streaming && "py-0.5")}
+                isStreaming={item.streaming}
+                key={item.id}
+              >
+                <ReasoningTrigger
+                  className="min-h-6 text-sm"
+                  getThinkingMessage={(isStreaming, thoughtDuration) =>
+                    isStreaming
+                      ? "正在思考…"
+                      : thoughtDuration === undefined
+                        ? "思考过程"
+                        : `思考了 ${thoughtDuration} 秒`
+                  }
+                />
+                <ReasoningContent className="mt-2">
+                  {item.content}
+                </ReasoningContent>
+              </Reasoning>
+            );
+          }
+          if (item.kind === "message") {
+            return (
+              <div className="motion-list-item" key={item.id}>
+                {renderAssistantMessage(item)}
+              </div>
+            );
+          }
+          if (item.kind === "plan") {
+            return (
+              <PlanTimelineEntry
+                entry={item}
+                key={item.id}
+                onDecision={onPlanDecision}
+                renderedContent={
+                  <MessageResponse components={messageComponents}>
+                    {item.content}
+                  </MessageResponse>
                 }
               />
-              <ReasoningContent className="mt-2">
-                {item.content}
-              </ReasoningContent>
-            </Reasoning>
-          ) : (
+            );
+          }
+          return (
             <ToolTaskGroup
               cwd={cwd}
               key={item.id}
@@ -161,8 +218,8 @@ export const TurnActivityGroup = memo(function TurnActivityGroup({
               turnRunning={running}
               tools={item.tools}
             />
-          ),
-        )}
+          );
+        })}
       </TaskContent>
     </Task>
   );

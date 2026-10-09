@@ -1,7 +1,6 @@
 import type { AgentMonitorNotification } from "@/domain/agent/event-to-session-update";
 import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
 import type { AgentMonitorSnapshot } from "@/lib/melody-bridge-monitors";
-import type { UseAgentSchedulesResult } from "@/hooks/use-agent-schedules";
 import type {
   Dispatch,
   KeyboardEvent,
@@ -173,8 +172,6 @@ export interface AgentWorkspaceViewProps {
   /** Running/finished monitors owned by this workspace, newest state first. */
   monitors: AgentMonitorSnapshot[];
   onCancelMonitor: (taskId: string) => void;
-  /** Host-owned schedules for the active session. */
-  schedules: UseAgentSchedulesResult;
   timeline: TimelineEntry[];
   updateSidebarWidth: (nextWidth: number) => void;
   updateWorkspacePanelWidth: (nextWidth: number) => void;

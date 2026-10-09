@@ -1,5 +1,8 @@
 import type { AgentToolOperation } from "@/domain/acp";
-import type { ToolTimelineEntry } from "@/domain/timeline-groups";
+import {
+  toolIsRunning,
+  type ToolTimelineEntry,
+} from "@/domain/timeline-groups";
 import {
   BookOpenIcon,
   PencilIcon,
@@ -22,10 +25,8 @@ export const displayPath = (path: string, projectRoot: string, cwd: string) => {
 
 export const shortPath = (path: string) => path.split("/").at(-1) ?? path;
 
-export const isRunning = (tool: ToolTimelineEntry) =>
-  tool.permission !== "denied" &&
-  tool.status !== "failed" &&
-  tool.status !== "completed";
+export const isRunning = (tool: ToolTimelineEntry, turnRunning = true) =>
+  toolIsRunning(tool, turnRunning);
 
 export const activityLabel = (
   operation: AgentToolOperation,
@@ -60,14 +61,16 @@ export const operationIcon = (operation: AgentToolOperation): LucideIcon => {
   }
 };
 
-export const groupTitle = (tools: ToolTimelineEntry[]) => {
+export const groupTitle = (tools: ToolTimelineEntry[], turnRunning = true) => {
   const question = tools.find((tool) => tool.question);
   if (question) {
     return question.question?.outcome === "pending"
       ? "等待你的回答"
       : "已收到你的回答";
   }
-  const active = tools.find(isRunning);
+  const active = turnRunning
+    ? tools.find((tool) => isRunning(tool, turnRunning))
+    : undefined;
   if (active) {
     const operation = active.activity?.operation ?? "other";
     return `${activityLabel(operation, true)}${operation === "execute" ? "命令" : "文件"}`;

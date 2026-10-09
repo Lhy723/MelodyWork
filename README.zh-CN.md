@@ -4,7 +4,7 @@
 
 # MelodyWork
 
-> 一个面向 [Melody Build](https://github.com/Lhy723/melody-build) 的本地优先桌面工作台。
+> 一个用于 AI 辅助软件开发的本地优先桌面工作台。
 
 围绕任务与 Agent 对话，查看结果，审查 Diff，并直接在本地项目中交付。MelodyWork 让 Agent 工作闭环始终扎根于仓库：工具活动可见，权限边界明确，开发者始终保有控制权。
 
@@ -115,22 +115,18 @@ flowchart TB
 
 ## Getting Started
 
-MelodyWork 当前需要从源码构建。你需要准备 Node.js 22、pnpm、Rust、[DotSlash](https://dotslash-cli.com)、ripgrep，以及对应平台的 Tauri 2 系统依赖。
-
-Melody Build 通过 `vendor/melody-build` Git submodule 固定。首次克隆后执行：
+MelodyWork 当前需要从源码构建。你需要准备 Node.js 22、pnpm、Rust、Bun 1.3+、Git，以及对应平台的 Tauri 2 系统依赖。Git 插件市场来源和工作区 Git 功能使用系统 Git 可执行文件。
 
 ```bash
-git submodule update --init --recursive
 pnpm install
-cargo install dotslash --locked
 pnpm tauri dev
 ```
 
-验证命令和 sidecar 行为请参阅[开发指南](docs/development.md)。
+环境和验证命令请参阅[开发指南](docs/development.md)。应用会打包 Pi worker；已退役的 Melody Build sidecar 和 Git 子模块已从仓库移除。
 
 ## 文档
 
-- [开发指南](docs/development.md)：环境要求、常用命令和 sidecar 查找顺序
+- [开发指南](docs/development.md)：环境要求和常用命令
 - [发布指南](docs/releasing.md)：标签发布、updater 签名和平台发布说明
 
 ## Contributing
@@ -140,7 +136,7 @@ pnpm tauri dev
 1. 保持改动聚焦，并说明它改变了什么用户行为。
 2. 当改动涉及对应模块时，运行 `pnpm check`、`pnpm test:unit`、`pnpm build` 和 `cargo test --manifest-path src-tauri/Cargo.toml`。
 3. 当行为或公开工作流发生变化时，同步补充测试和文档。
-4. 不要提交生成的 sidecar、构建产物、凭据或 updater 私钥。
+4. 不要提交生成的 worker 二进制、构建产物、凭据或 updater 私钥。
 
 提交问题时，请附上操作系统、复现步骤、预期行为和相关日志。较大的改动建议先创建 issue，以便实现方向与项目规划保持一致。
 

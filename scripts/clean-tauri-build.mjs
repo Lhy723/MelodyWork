@@ -6,7 +6,6 @@ import { dirname, resolve } from "node:path";
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifests = [
   resolve(projectRoot, "src-tauri", "Cargo.toml"),
-  resolve(projectRoot, "vendor", "melody-build", "Cargo.toml"),
 ];
 
 export function cleanTauriBuildTargets() {

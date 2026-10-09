@@ -187,47 +187,6 @@ pub struct SkillDetails {
     pub(crate) content: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct InstalledPluginEntry {
-    pub(crate) status: String,
-    pub(crate) name: String,
-    pub(crate) path: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MelodyInspectDocument {
-    #[serde(default)]
-    pub(crate) skills: Vec<MelodyInspectSkill>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MelodyInspectSkill {
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-    pub(crate) source: MelodyInspectSkillSource,
-    #[serde(default)]
-    pub(crate) user_invocable: Option<bool>,
-    #[serde(default)]
-    pub(crate) vendor: Option<String>,
-    #[serde(default)]
-    pub(crate) disabled: bool,
-    #[serde(default)]
-    pub(crate) compatibility_status: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct MelodyInspectSkillSource {
-    #[serde(rename = "type")]
-    pub(crate) kind: String,
-    #[serde(default)]
-    pub(crate) path: Option<PathBuf>,
-    #[serde(default)]
-    pub(crate) plugin_name: Option<String>,
-}
-
 pub(crate) fn user_home() -> Result<PathBuf, String> {
     let home = env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .ok_or_else(|| "Could not locate the user home directory".to_string())?;

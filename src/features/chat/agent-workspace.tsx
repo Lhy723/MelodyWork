@@ -14,7 +14,6 @@ import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
 import { isIndependentProject } from "@/domain/workspace";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
 import { useAgentMonitors } from "@/hooks/use-agent-monitors";
-import { useAgentSchedules } from "@/hooks/use-agent-schedules";
 import { useAgentNotifications } from "@/hooks/use-agent-notifications";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
@@ -276,12 +275,6 @@ export function AgentWorkspace() {
     (state) => state.monitorNotifications,
   );
   const { monitors, cancelMonitor } = useAgentMonitors(cwd);
-  const scheduleRevision = useAgentStore((state) => state.scheduleRevision);
-  const schedules = useAgentSchedules(
-    activeSession?.id,
-    activeSession?.projectId,
-    scheduleRevision,
-  );
   const sessionIsActive =
     status.phase === "starting" ||
     status.phase === "running" ||
@@ -824,7 +817,6 @@ export function AgentWorkspace() {
       monitorNotifications={monitorNotifications}
       monitors={monitors}
       onCancelMonitor={cancelMonitor}
-      schedules={schedules}
       workspaceLoading={workspaceLoading}
       workspaceMode={workspaceMode}
       workspaceError={workspaceError}

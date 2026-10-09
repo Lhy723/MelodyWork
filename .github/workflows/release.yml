@@ -16,17 +16,17 @@ jobs:
         include:
           - platform: macos-15
             target: aarch64-apple-darwin
-            sidecar_ext: ""
+            worker_ext: ""
             beta_bundle_args: ""
             tauri_args: "--target aarch64-apple-darwin"
           - platform: macos-15-intel
             target: x86_64-apple-darwin
-            sidecar_ext: ""
+            worker_ext: ""
             beta_bundle_args: ""
             tauri_args: "--target x86_64-apple-darwin"
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            sidecar_ext: ".exe"
+            worker_ext: ".exe"
             beta_bundle_args: "--bundles nsis"
             tauri_args: "--target x86_64-pc-windows-msvc"
 
@@ -34,7 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v4.4.0
@@ -86,9 +85,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            src-tauri
-            vendor/melody-build
+          workspaces: src-tauri
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -98,40 +95,13 @@ jobs:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         run: pnpm check:updater-key
 
-      - name: Install Melody build tools
-        run: cargo install dotslash --locked
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
-
-      - name: Install protoc (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $protocZip = "protoc-29.3-win64.zip"
-          $protocUrl = "https://github.com/protocolbuffers/protobuf/releases/download/v29.3/$protocZip"
-          Invoke-WebRequest -Uri $protocUrl -OutFile $protocZip
-          Expand-Archive -Path $protocZip -DestinationPath "$env:RUNNER_TEMP\protoc" -Force
-          $protocDir = "$env:RUNNER_TEMP\protoc".Replace('\', '/')
-          echo "$protocDir/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "PROTOC=$protocDir/bin/protoc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build Melody sidecar
-        shell: bash
-        working-directory: vendor/melody-build
-        run: |
-          cargo build --locked --release --package melody-pager-bin --bin melody-pager
-          mkdir -p ../../src-tauri/binaries
-          cp "target/release/melody-pager${{ matrix.sidecar_ext }}" "../../src-tauri/binaries/melody-pager-${{ matrix.target }}${{ matrix.sidecar_ext }}"
-
       - name: Build and smoke-test Pi worker
         shell: bash
         env:
           TAURI_ENV_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
           pnpm prepare:agent-worker
-          MELODY_PI_WORKER_PATH="src-tauri/binaries/melody-agent-worker-${{ matrix.target }}${{ matrix.sidecar_ext }}" pnpm test:pi-worker-smoke
+          MELODY_PI_WORKER_PATH="src-tauri/binaries/melody-agent-worker-${{ matrix.target }}${{ matrix.worker_ext }}" pnpm test:pi-worker-smoke
 
       - name: Build and publish installers
         uses: tauri-apps/tauri-action@v0

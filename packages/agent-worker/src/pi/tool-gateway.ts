@@ -1416,13 +1416,18 @@ export class PiToolGateway {
       });
     });
 
+    const eventContext = {
+      sessionId: input.rootSessionId ?? input.sessionId,
+      ...(input.rootSessionId && input.rootSessionId !== input.sessionId
+        ? { streamSessionId: input.sessionId }
+        : {}),
+      runId: input.runId,
+    };
+    let requestEmitted = false;
+    let resolutionReceived = false;
     try {
       await this.emit({
-        sessionId: input.rootSessionId ?? input.sessionId,
-        ...(input.rootSessionId && input.rootSessionId !== input.sessionId
-          ? { streamSessionId: input.sessionId }
-          : {}),
-        runId: input.runId,
+        ...eventContext,
         event: {
           type: "tool.requested",
           toolCallId: input.toolCallId,
@@ -1441,7 +1446,54 @@ export class PiToolGateway {
           },
         },
       });
-      return await response;
+      requestEmitted = true;
+      const resolution = await response;
+      resolutionReceived = true;
+      await this.emit({
+        ...eventContext,
+        event: {
+          type: "tool.finished",
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          status: resolution.status,
+          ...(resolution.output !== undefined
+            ? { output: resolution.output }
+            : {}),
+          ...(resolution.error ? { error: resolution.error } : {}),
+        },
+      });
+      return resolution;
+    } catch (error) {
+      if (requestEmitted && !resolutionReceived) {
+        const caught = error as Error & { agentError?: AgentError };
+        const agentError =
+          caught?.agentError ??
+          ({
+            code: "pi.tool_gateway_failed",
+            message:
+              caught instanceof Error
+                ? caught.message
+                : "Pi ToolGateway 请求失败。",
+            retriable: false,
+            scope: "tool",
+          } satisfies AgentError);
+        try {
+          await this.emit({
+            ...eventContext,
+            event: {
+              type: "tool.finished",
+              toolCallId: input.toolCallId,
+              toolName: input.toolName,
+              status: "failed",
+              error: agentError,
+            },
+          });
+        } catch {
+          // Preserve the original gateway failure if the worker event pipe is
+          // already unavailable; run.finished will settle any remaining row.
+        }
+      }
+      throw error;
     } finally {
       const pending = this.pending.get(input.toolCallId);
       if (pending) {

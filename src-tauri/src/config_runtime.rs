@@ -392,55 +392,98 @@ path = "~/dev/plugins"
     }
 
     #[test]
-    fn maps_runtime_skill_catalog_with_sources_and_status() {
+    fn maps_pi_skill_catalog_paths_into_settings_inventory() {
         let root = env::temp_dir().join(format!(
-            "melody-work-runtime-skills-{}",
+            "melody-work-pi-skill-inventory-{}",
             uuid::Uuid::new_v4()
         ));
-        let local = root.join(".melody/skills/review");
-        let plugin = root.join(".claude/plugins/cache/team/skills/check");
-        fs::create_dir_all(&local).unwrap();
-        fs::create_dir_all(&plugin).unwrap();
-        fs::write(local.join("SKILL.md"), "# Review").unwrap();
-        fs::write(plugin.join("SKILL.md"), "# Check").unwrap();
-        let document: MelodyInspectDocument = serde_json::from_value(serde_json::json!({
-            "skills": [
-                {
-                    "name": "review",
-                    "description": "Review changes",
-                    "source": {
-                        "type": "local",
-                        "path": local.join("SKILL.md"),
-                    },
-                    "userInvocable": true
-                },
-                {
-                    "name": "team:check",
-                    "source": {
-                        "type": "plugin",
-                        "plugin_name": "team",
-                        "path": plugin.join("SKILL.md"),
-                    },
-                    "vendor": "claude",
-                    "disabled": true,
-                    "compatibilityStatus": "disabled"
-                }
-            ]
-        }))
+        let active = root.join(".melody/skills/active-skill");
+        let disabled = root.join(".agents/skills/disabled-skill");
+        let plugin_skill = root.join(".melody/plugins/team/skills/plugin-skill");
+        for directory in [&active, &disabled, &plugin_skill] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        fs::write(
+            active.join("SKILL.md"),
+            "---\nname: a-different-display-name\ndescription: Active from Pi\n---\n# Active",
+        )
         .unwrap();
+        fs::write(
+            disabled.join("SKILL.md"),
+            "---\ndescription: Disabled in Pi config\n---\n# Disabled",
+        )
+        .unwrap();
+        fs::write(plugin_skill.join("SKILL.md"), "# Plugin skill").unwrap();
 
-        let skills = melody_skill_extensions(root.to_str().unwrap(), document);
+        let canonical = |path: &Path| path.canonicalize().unwrap();
+        let active_path = canonical(&active);
+        let disabled_path = canonical(&disabled);
+        let plugin_path = canonical(&plugin_skill);
+        let roots = vec![
+            PiSkillScanRoot {
+                path: root.join(".melody/skills"),
+                scope: "project".to_string(),
+                disabled: HashSet::new(),
+                ignore_paths: Vec::new(),
+            },
+            PiSkillScanRoot {
+                path: root.join(".agents/skills"),
+                scope: "project".to_string(),
+                disabled: HashSet::from(["disabled-skill".to_string()]),
+                ignore_paths: Vec::new(),
+            },
+            PiSkillScanRoot {
+                path: plugin_skill.clone(),
+                scope: "project".to_string(),
+                disabled: HashSet::new(),
+                ignore_paths: Vec::new(),
+            },
+        ];
+        let plugins = vec![MelodyPluginCapability {
+            name: "team".to_string(),
+            path: root
+                .join(".melody/plugins/team")
+                .to_string_lossy()
+                .into_owned(),
+            scope: "project".to_string(),
+            enabled: true,
+            static_resources: true,
+            dynamic_components: Vec::new(),
+            skill_roots: vec![plugin_path.to_string_lossy().into_owned()],
+            prompt_roots: Vec::new(),
+            agent_roots: Vec::new(),
+        }];
 
-        assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].name, "review");
-        assert_eq!(skills[0].scope, "project");
-        assert_eq!(skills[0].provider, "melody");
-        assert!(skills[0].enabled);
-        assert!(skills[0].deletable);
-        assert_eq!(skills[1].plugin_name.as_deref(), Some("team"));
-        assert_eq!(skills[1].provider, "claude");
-        assert!(!skills[1].enabled);
-        assert!(!skills[1].deletable);
+        let skills = pi_skill_extensions_from_catalog(
+            root.to_str().unwrap(),
+            &[active_path, plugin_path],
+            std::slice::from_ref(&disabled_path),
+            &roots,
+            &plugins,
+        );
+
+        assert_eq!(skills.len(), 3);
+        let active_entry = skills
+            .iter()
+            .find(|skill| skill.name == "active-skill")
+            .unwrap();
+        assert_eq!(active_entry.description.as_deref(), Some("Active from Pi"));
+        assert_eq!(active_entry.provider, "melody");
+        assert!(active_entry.enabled);
+        assert!(active_entry.deletable);
+        let disabled_entry = skills
+            .iter()
+            .find(|skill| skill.name == "disabled-skill")
+            .unwrap();
+        assert_eq!(disabled_entry.provider, "agents");
+        assert!(!disabled_entry.enabled);
+        let plugin_entry = skills
+            .iter()
+            .find(|skill| skill.name == "plugin-skill")
+            .unwrap();
+        assert_eq!(plugin_entry.plugin_name.as_deref(), Some("team"));
+        assert_eq!(plugin_entry.provider, "plugin");
+        assert!(!plugin_entry.deletable);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -523,6 +566,17 @@ path = "~/dev/plugins"
                 + fs::metadata(nested.join("SKILL.md")).unwrap().len()
         );
         assert!(paths.len() <= MAX_PI_SKILL_PATHS);
+
+        let mut disabled_paths = Vec::new();
+        let mut disabled_bytes = 0;
+        scan_pi_disabled_skill_root(
+            &root,
+            &HashSet::from(["disabled".to_string()]),
+            &[],
+            &mut disabled_paths,
+            &mut disabled_bytes,
+        );
+        assert_eq!(disabled_paths, vec![disabled.canonicalize().unwrap()]);
         fs::remove_dir_all(&root).unwrap();
         #[cfg(unix)]
         fs::remove_dir_all(root.with_file_name(format!(

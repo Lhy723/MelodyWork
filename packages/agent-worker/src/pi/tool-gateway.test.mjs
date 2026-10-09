@@ -320,9 +320,9 @@ test("applies the projected question timeout to the ask-user tool", async () => 
 });
 
 test("ToolGateway emits a request and resumes after a host resolution", async () => {
-  let request;
+  const events = [];
   const gateway = new PiToolGateway(async (event) => {
-    request = event;
+    events.push(event);
   });
 
   const pending = gateway.request({
@@ -335,9 +335,9 @@ test("ToolGateway emits a request and resumes after a host resolution", async ()
   });
 
   await Promise.resolve();
-  assert.equal(request?.event.type, "tool.requested");
-  assert.equal(request?.event.toolCallId, "call-1");
-  assert.deepEqual(request?.event.activity, {
+  assert.equal(events[0]?.event.type, "tool.requested");
+  assert.equal(events[0]?.event.toolCallId, "call-1");
+  assert.deepEqual(events[0]?.event.activity, {
     gateway: "melody",
     arguments: { path: "README.md" },
     cwd: "/tmp/project",
@@ -364,6 +364,63 @@ test("ToolGateway emits a request and resumes after a host resolution", async ()
   assert.deepEqual(await pending, {
     status: "completed",
     output: "contents",
+  });
+  assert.deepEqual(
+    events.map((event) => event.event.type),
+    ["tool.requested", "tool.finished"],
+  );
+  assert.deepEqual(events[1]?.event, {
+    type: "tool.finished",
+    toolCallId: "call-1",
+    toolName: PI_WORKSPACE_READ_FILE,
+    status: "completed",
+    output: "contents",
+  });
+});
+
+test("ToolGateway emits failed results as terminal tool events", async () => {
+  const events = [];
+  const gateway = new PiToolGateway(async (event) => {
+    events.push(event);
+  });
+  const pending = gateway.request({
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "call-failed",
+    toolName: PI_WORKSPACE_READ_FILE,
+    arguments: { path: "missing.txt" },
+  });
+
+  await Promise.resolve();
+  gateway.resolve({
+    type: "tool.resolve",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "call-failed",
+    resolution: {
+      status: "failed",
+      error: {
+        code: "workspace.not_found",
+        message: "File not found.",
+        retriable: false,
+        scope: "tool",
+      },
+    },
+  });
+
+  const resolution = await pending;
+  assert.equal(resolution.status, "failed");
+  assert.deepEqual(events[1]?.event, {
+    type: "tool.finished",
+    toolCallId: "call-failed",
+    toolName: PI_WORKSPACE_READ_FILE,
+    status: "failed",
+    error: {
+      code: "workspace.not_found",
+      message: "File not found.",
+      retriable: false,
+      scope: "tool",
+    },
   });
 });
 

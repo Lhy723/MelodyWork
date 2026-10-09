@@ -415,9 +415,11 @@ const toolProjection = (
     event.type === "tool.requested"
       ? (event.status ?? "pending")
       : event.type === "tool.finished"
-        ? event.error
-          ? "failed"
-          : (event.status ?? "completed")
+        ? event.status === "cancelled"
+          ? "cancelled"
+          : event.error
+            ? "failed"
+            : (event.status ?? "completed")
         : (event.status ?? "running");
   const update: JsonObject = {
     sessionUpdate:

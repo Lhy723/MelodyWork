@@ -124,7 +124,7 @@ export function PluginDetailsView({
     });
     try {
       await runDelete(async () => {
-        await uninstallMelodyPlugin(cwd, plugin.name);
+        await uninstallMelodyPlugin(cwd, plugin.name, false, plugin.path);
         setDeleteOpen(false);
         await onDeleted();
       });

@@ -2,9 +2,29 @@ import type { TimelineEntry } from "@/domain/acp";
 
 export type ToolTimelineEntry = Extract<TimelineEntry, { kind: "tool" }>;
 export type ThoughtTimelineEntry = Extract<TimelineEntry, { kind: "thought" }>;
+export type AssistantMessageTimelineEntry = Extract<
+  TimelineEntry,
+  { kind: "message" }
+> & { role: "assistant" };
+export type PlanTimelineEntry = Extract<TimelineEntry, { kind: "plan" }>;
+type UserMessageTimelineEntry = Extract<TimelineEntry, { kind: "message" }> & {
+  role: "user";
+};
+
+const isAssistantMessage = (
+  entry: TimelineEntry,
+): entry is AssistantMessageTimelineEntry =>
+  entry.kind === "message" && entry.role === "assistant";
+
+const isUserMessage = (
+  entry: TimelineEntry,
+): entry is UserMessageTimelineEntry =>
+  entry.kind === "message" && entry.role === "user";
 
 export type TurnActivityItem =
   | ThoughtTimelineEntry
+  | AssistantMessageTimelineEntry
+  | PlanTimelineEntry
   | {
       id: string;
       kind: "tool-group";
@@ -12,7 +32,7 @@ export type TurnActivityItem =
     };
 
 export type TimelineRenderEntry =
-  | Exclude<TimelineEntry, { kind: "tool" | "thought" }>
+  | Extract<TimelineEntry, { kind: "message" }>
   | {
       id: string;
       kind: "activity-group";
@@ -20,6 +40,7 @@ export type TimelineRenderEntry =
       startedAt?: number;
       endedAt?: number;
       running: boolean;
+      reviewPending?: boolean;
     };
 
 const timestampFromId = (id: string): number | undefined => {
@@ -39,8 +60,13 @@ const entryCompletedAt = (
   entry: Extract<TimelineEntry, { kind: "message" | "thought" | "tool" }>,
 ) => entry.completedAt ?? entryStartedAt(entry);
 
-const toolIsRunning = (tool: ToolTimelineEntry) =>
+const hasAssistantContent = (entry: AssistantMessageTimelineEntry) =>
+  Boolean(entry.content.trim()) || Boolean(entry.attachments?.length);
+
+export const toolIsRunning = (tool: ToolTimelineEntry, turnRunning = true) =>
+  turnRunning &&
   tool.permission !== "denied" &&
+  tool.status !== "cancelled" &&
   tool.status !== "failed" &&
   tool.status !== "completed";
 
@@ -49,76 +75,161 @@ export const groupTurnActivity = (
   turnRunning = false,
 ): TimelineRenderEntry[] => {
   const result: TimelineRenderEntry[] = [];
-  let activity: Array<ThoughtTimelineEntry | ToolTimelineEntry> = [];
-  let turnStartedAt: number | undefined;
+  let turnUserMessage: UserMessageTimelineEntry | undefined;
+  let turnEntries: TimelineEntry[] = [];
 
-  const flushActivity = (nextEntry?: TimelineEntry) => {
-    if (activity.length === 0) {
-      return;
+  const flushTurn = (running: boolean, inferRunning = false) => {
+    let latestWorkIndex = -1;
+    let finalAssistantIndex = -1;
+    turnEntries.forEach((entry, index) => {
+      if (
+        entry.kind === "thought" ||
+        entry.kind === "tool" ||
+        entry.kind === "plan"
+      ) {
+        latestWorkIndex = index;
+      }
+    });
+    turnEntries.forEach((entry, index) => {
+      if (
+        isAssistantMessage(entry) &&
+        hasAssistantContent(entry) &&
+        index > latestWorkIndex
+      ) {
+        finalAssistantIndex = index;
+      }
+    });
+    const finalAssistant =
+      finalAssistantIndex >= 0
+        ? (turnEntries[finalAssistantIndex] as AssistantMessageTimelineEntry)
+        : undefined;
+    const activityRunning =
+      running ||
+      Boolean(finalAssistant?.streaming) ||
+      (inferRunning &&
+        turnEntries.some((entry) =>
+          entry.kind === "thought"
+            ? Boolean(entry.streaming)
+            : entry.kind === "tool"
+              ? toolIsRunning(entry)
+              : entry.kind === "plan"
+                ? entry.status === "streaming"
+                : isAssistantMessage(entry) && Boolean(entry.streaming),
+        ));
+    const hasActivity = turnEntries.some(
+      (entry) =>
+        entry.kind === "thought" ||
+        entry.kind === "tool" ||
+        entry.kind === "plan",
+    );
+    const pendingWithoutActivity = activityRunning && turnEntries.length === 0;
+
+    if (turnUserMessage) {
+      result.push(turnUserMessage);
     }
 
-    const items: TurnActivityItem[] = [];
-    let pendingTools: ToolTimelineEntry[] = [];
-    const flushTools = () => {
-      if (pendingTools.length === 0) {
-        return;
-      }
-      items.push({
-        id: `tool-group-${pendingTools[0].id}`,
-        kind: "tool-group",
-        tools: pendingTools,
-      });
-      pendingTools = [];
-    };
+    if (hasActivity || pendingWithoutActivity) {
+      const items: TurnActivityItem[] = [];
+      let pendingTools: ToolTimelineEntry[] = [];
+      const flushTools = () => {
+        if (pendingTools.length === 0) {
+          return;
+        }
+        items.push({
+          id: `tool-group-${pendingTools[0].id}`,
+          kind: "tool-group",
+          tools: pendingTools,
+        });
+        pendingTools = [];
+      };
 
-    for (const entry of activity) {
-      if (entry.kind === "tool") {
-        pendingTools.push(entry);
-      } else {
+      turnEntries.forEach((entry, index) => {
+        if (isAssistantMessage(entry)) {
+          if (!hasAssistantContent(entry) || index === finalAssistantIndex)
+            return;
+          flushTools();
+          items.push(entry);
+          return;
+        }
+        if (entry.kind === "message") return;
+        if (entry.kind === "tool") {
+          pendingTools.push(entry);
+          return;
+        }
         flushTools();
         items.push(entry);
-      }
+      });
+      flushTools();
+
+      const timedEntries = turnEntries.filter(
+        (
+          entry,
+        ): entry is Extract<
+          TimelineEntry,
+          { kind: "message" | "thought" | "tool" }
+        > =>
+          entry.kind === "message" ||
+          entry.kind === "thought" ||
+          entry.kind === "tool",
+      );
+      const firstTimedEntry = timedEntries[0];
+      const lastTimedEntry = timedEntries.at(-1);
+      const startedAt = turnUserMessage
+        ? (entryStartedAt(turnUserMessage) ??
+          (firstTimedEntry ? entryStartedAt(firstTimedEntry) : undefined))
+        : firstTimedEntry
+          ? entryStartedAt(firstTimedEntry)
+          : undefined;
+      const endedAt = finalAssistant
+        ? entryCompletedAt(finalAssistant)
+        : lastTimedEntry
+          ? entryCompletedAt(lastTimedEntry)
+          : undefined;
+      const reviewPending = items.some(
+        (item) => item.kind === "plan" && item.status === "awaiting-approval",
+      );
+
+      result.push({
+        id:
+          items.length === 0 && turnUserMessage
+            ? `activity-group-pending-${turnUserMessage.id}`
+            : `activity-group-${items[0]?.id ?? turnUserMessage?.id ?? "pending"}`,
+        kind: "activity-group",
+        items,
+        ...(startedAt !== undefined ? { startedAt } : {}),
+        ...(endedAt !== undefined ? { endedAt } : {}),
+        running: activityRunning,
+        ...(reviewPending ? { reviewPending: true } : {}),
+      });
+    } else {
+      turnEntries.forEach((entry, index) => {
+        if (
+          isAssistantMessage(entry) &&
+          hasAssistantContent(entry) &&
+          index !== finalAssistantIndex
+        ) {
+          result.push(entry);
+        }
+      });
     }
-    flushTools();
 
-    const running =
-      nextEntry?.kind === "message" && nextEntry.role === "assistant"
-        ? Boolean(nextEntry.streaming)
-        : nextEntry === undefined &&
-          (turnRunning ||
-            activity.some((entry) =>
-              entry.kind === "thought"
-                ? Boolean(entry.streaming)
-                : toolIsRunning(entry),
-            ));
-    const startedAt = turnStartedAt ?? entryStartedAt(activity[0]);
-    const endedAt =
-      nextEntry?.kind === "message" && nextEntry.role === "assistant"
-        ? entryCompletedAt(nextEntry)
-        : undefined;
+    if (finalAssistant) {
+      result.push(finalAssistant);
+    }
 
-    result.push({
-      id: `activity-group-${activity[0].id}`,
-      kind: "activity-group",
-      items,
-      startedAt,
-      endedAt,
-      running,
-    });
-    activity = [];
+    turnUserMessage = undefined;
+    turnEntries = [];
   };
 
   for (const entry of entries) {
-    if (entry.kind === "tool" || entry.kind === "thought") {
-      activity.push(entry);
+    if (isUserMessage(entry)) {
+      flushTurn(false);
+      turnUserMessage = entry;
       continue;
     }
-    flushActivity(entry);
-    if (entry.kind === "message" && entry.role === "user") {
-      turnStartedAt = entryStartedAt(entry);
-    }
-    result.push(entry);
+    turnEntries.push(entry);
   }
-  flushActivity();
+  flushTurn(turnRunning, true);
+
   return result;
 };

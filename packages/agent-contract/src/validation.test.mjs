@@ -100,6 +100,62 @@ test("validates a Host-owned Pi resource refresh manifest", () => {
   );
 });
 
+test("accepts every Host-projected subagent capability mode on resource refresh", () => {
+  const makeEnvelope = (agents) => ({
+    protocolVersion: 1,
+    requestId: "resources-subagents-1",
+    command: {
+      type: "session.resources.refresh",
+      manifest: {
+        cwd: "/workspace/demo",
+        skillRoots: [],
+        promptRoots: [],
+        subagentPolicies: {
+          enabled: true,
+          roles: [],
+          personas: [],
+          agents,
+          models: {},
+          toggle: {},
+        },
+      },
+    },
+  });
+  const supportedModes = [
+    "read-only",
+    "read-write",
+    "read-write-execute",
+    "execute",
+    "all",
+  ];
+
+  for (const mode of supportedModes) {
+    assert.doesNotThrow(
+      () =>
+        validateAgentCommandEnvelope(
+          makeEnvelope([{ name: "worker", defaultCapabilityMode: mode }]),
+        ),
+      `Host-projected mode ${mode} must be accepted`,
+    );
+  }
+
+  const agents = Array.from({ length: 8 }, (_, index) => ({
+    name: `worker-${index}`,
+    defaultCapabilityMode: index === 7 ? "read-write-execute" : "read-only",
+  }));
+  assert.doesNotThrow(() => validateAgentCommandEnvelope(makeEnvelope(agents)));
+
+  assert.throws(
+    () =>
+      validateAgentCommandEnvelope(
+        makeEnvelope([
+          { name: "worker", defaultCapabilityMode: "unrestricted" },
+        ]),
+      ),
+    /subagentPolicies\.agents\[0\]\.defaultCapabilityMode 不是受支持的值/u,
+  );
+});
+
 test("validates the bounded Host-owned model sync payload", () => {
   const envelope = {
     protocolVersion: 1,

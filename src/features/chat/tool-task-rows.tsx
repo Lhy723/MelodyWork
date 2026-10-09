@@ -187,24 +187,50 @@ export function ToolRow({
   onOpenFile,
   pathOverride,
   projectRoot,
+  toolRunning,
   tool,
 }: {
   cwd: string;
   onOpenFile: (path: string) => void;
   pathOverride?: string;
   projectRoot: string;
+  toolRunning?: boolean;
   tool: ToolTimelineEntry;
 }) {
   const activity = tool.activity;
   const operation = activity?.operation ?? "other";
   const Icon = operationIcon(operation);
-  const running = isRunning(tool);
+  const running = toolRunning ?? isRunning(tool);
   const rawPath = pathOverride ?? activity?.path;
   const path = rawPath ? displayPath(rawPath, projectRoot, cwd) : undefined;
   const detail =
     operation === "search"
       ? (path ?? activity?.glob)
       : (path ?? tool.command.trim().split(/\r?\n/u, 1)[0]);
+
+  if (operation === "search" && (path || activity?.glob || activity?.query)) {
+    const searchTarget = path ?? activity?.glob;
+    return (
+      <div className="harness-tool-row flex min-h-7 min-w-0 items-center gap-2">
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">
+          {running ? "正在搜索" : "已搜索"}
+          {searchTarget ? (
+            <>
+              {" "}
+              <span className="underline decoration-muted-foreground/55 underline-offset-2">
+                {searchTarget}
+              </span>{" "}
+              中
+            </>
+          ) : null}
+        </span>
+        {activity?.query ? (
+          <span className="min-w-0 truncate">“{activity.query}”</span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="harness-tool-row flex min-h-7 min-w-0 items-center gap-2">
@@ -215,20 +241,7 @@ export function ToolRow({
       ) : (
         <Icon className="size-4 shrink-0 text-muted-foreground" />
       )}
-      {operation === "search" && detail ? (
-        <>
-          <span className="min-w-0 truncate">
-            {running ? "正在" : "已在"}{" "}
-            <span className="underline decoration-muted-foreground/55 underline-offset-2">
-              {detail}
-            </span>{" "}
-            中搜索
-          </span>
-          {activity?.query ? (
-            <span className="min-w-0 truncate">“{activity.query}”</span>
-          ) : null}
-        </>
-      ) : detail ? (
+      {detail ? (
         <>
           <span className="shrink-0">{activityLabel(operation, running)}</span>
           {path && operation !== "search" ? (
