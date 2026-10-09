@@ -3,7 +3,7 @@
 更新时间：2026-10-09
 交接分支：`beta`
 基线提交：`ffa542f4`（`v0.3.3-beta.4`）
-当前状态：Pi 已是唯一 Agent runtime；插件市场已迁为 Host 原生实现；正在整理并验收 `0.4.0-beta.1` 发布
+当前状态：Pi 已是唯一 Agent runtime；插件市场已迁为 Host 原生实现；修复 `0.4.0-beta.1` Windows 发布门禁后，正在验收 `0.4.0-beta.2`
 
 这份文档给下一位维护者使用。Pi 已替代 Melody-build 承担 Agent 会话；旧 ACP 会话作为只读归档，不再运行或作为 Pi 的兼容回退。插件市场的扫描、安装、更新和卸载现由 Host 原生实现，旧 `melody-pager` 不再参与启动、构建或发布；`vendor/melody-build` Git 子模块及 `.gitmodules` 已移除。当前工作是补齐 Pi 上的产品交互与安全语义，并完成目标平台验收。**Rhai workflow 引擎已按产品决定删除**（设置项移除、预检不再回退、清单记入 `retiredCapabilities`）；周期任务由 Host schedule 承担。本文区分已实现、静态检查与目标平台实测，不能把 ACP 归档或警告诊断表述为 Pi 功能对等。
 
@@ -12,7 +12,13 @@
 - 本次版本汇总 Pi-only 对话、Host 原生插件市场、直接 API key 配置、Pi 技能目录、活动时间线/耗时分组、侧边栏层级和相关稳定性修复；用户可见变更见[发布说明](../../releases/0.4.0-beta.1.md)。
 - 发布版本号须在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 保持一致；从 `beta` 创建 `v0.4.0-beta.1` 测试版标签，不合并或同步到 `main`。
 - `.mimosa`、`.pnpm-store`、`.github/hooks`、`.impeccable`、`.v2c` 与本地 Pi worker 二进制/映射文件属于机器本地状态或生成物，保留在磁盘并由 `.gitignore` 排除，不进入发布提交。
-- 发布前仍须完成本次本地检查并等待 tag 驱动的 GitHub Actions 三平台构建、worker smoke test 和 updater 签名；此处不把静态检查等同于真实桌面/Provider 验收。
+- 本地 TypeScript/agent/worker 检查、Rust 283 项测试、lint、格式检查、前端构建和 updater 公钥校验均通过。`v0.4.0-beta.1` 的 GitHub Actions Windows job 因路径解析失败未完成发布；修复版提升为 beta.2，结果以对应 Release workflow 为准。
+
+## 0j 修复 Windows beta worker 打包路径（2026-10-09）
+
+- `v0.4.0-beta.1` 的 GitHub Actions Windows job 在 `prepare:agent-worker` 目录初始化时失败：基于 `new URL(import.meta.url).pathname` 的路径解析把 runner 的 `D:` 盘符重复拼接为 `D:\D:\a\...`。
+- 改用 `fileURLToPath(import.meta.url)` 后再走 Node path API，避免 Windows URL pathname 的盘符/斜杠格式歧义；本机 lint 通过，beta.2 的 Windows worker 构建与 smoke test 用于目标平台回归。
+- `v0.4.0-beta.1` 标签保持不变；修复后以 `0.4.0-beta.2` 重新发布。
 
 ## 0h 移除会话信息侧栏中的定时任务面板（2026-10-08）
 
@@ -144,7 +150,7 @@
 - **当前事实（2026-10-09）：Pi 是唯一 Agent runtime，桌面 Agent 会话默认 Pi。** 旧 ACP 会话只能作为只读时间线归档展示；worker 失败或配置/沙箱不支持不会回退 ACP。无等价实现的能力按清单给出 warning 或阻断，ACP 代码只为 marketplace/config CLI 等非 Agent 用途保留。
 - Host 拥有工作区、文件、终端、权限、MCP、Web、Memory、LSP、代码库索引、后台任务和生命周期；Pi worker 只负责 Pi SDK 会话循环与产品协议适配；React 只消费规范事件和 store patch。
 - 代码库导航由 Host-owned tree-sitter 索引提供，支持 Rust、TypeScript/JavaScript、Python、Go 的有限定义/引用/符号；严格跨文件语义图和未支持语言仍不等价，按兼容清单诊断处理，不回退 ACP。
-- 本次发布完成后，以 `v0.4.0-beta.1` 发布标签及 GitHub Actions 结果为准；本地缓存、工具状态目录和 Pi worker 构建物不应纳入提交。平台沙箱、Browser OS 权限、Explorer 恢复和真实 Provider 验收仍需按下方边界逐项确认。
+- 当前修复版以 `v0.4.0-beta.2` 的 GitHub Actions Release workflow 结果为准；`v0.4.0-beta.1` 标签保持不变。本地缓存、工具状态目录和 Pi worker 构建物不应纳入提交。平台沙箱、Browser OS 权限、Explorer 恢复和真实 Provider 验收仍需按下方边界逐项确认。
 
 最近一次完整本地门禁结果（2026-10-05，历史记录）：`pnpm test:unit` 382 passed，`pnpm test:agent-worker` 137 passed，`pnpm test:pi-worker-smoke` 2 passed，Rust `cargo test --locked` 271 passed；`pnpm check`、`pnpm lint`、`pnpm format:check`、架构/字体检查、`cargo check --locked`、`cargo fmt --all -- --check`、`git diff --check` 与 `pnpm build` 均通过（Vite 仍提示若干 bundle chunk 超过 500 KiB）。本次发布门禁的最新结果见 CI 和 release workflow；真实 provider、OAuth、Browser OS 截图权限/profile 与 Explorer 桌面恢复仍未完成现场验收。
 

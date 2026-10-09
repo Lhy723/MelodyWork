@@ -9,8 +9,9 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const projectRoot = resolve(dirname(new URL(import.meta.url).pathname), "..");
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const required = process.argv.includes("--required");
 const development = process.argv.includes("--dev");
 
