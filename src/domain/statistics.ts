@@ -21,7 +21,7 @@ export interface UsageStatistics {
   cachedReadTokens: number;
   reasoningTokens: number;
   modelCalls: number;
-  apiDurationMs: number;
+  apiDurationMs: number | null;
   usageIncompleteTasks: number;
   costUsdTicks?: number;
   longestTaskMs: number;

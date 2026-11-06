@@ -50,3 +50,6 @@ tree-sitter-typescript = "0.23.2"
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 xcap = { version = "0.9.8", default-features = false }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

@@ -6,7 +6,7 @@
 
 Pi 是唯一 Agent runtime，旧 ACP 会话只读归档；外围能力缺口在 Pi 会话中给出诊断，无法安全保留的策略会阻止打开 Pi，不存在运行时 ACP 回退。Pi SDK 锁定为 1.0.1。Browser/Explorer 已有 Host→worker→UI 实现，但本地预览 fixture 不是原生桌面 Pi 验收；真实 OS 截图权限、浏览器 profile、Explorer 重启恢复及故障注入仍需在桌面环境完成。
 
-本轮验收结果与未完成现场项见下方“2026-10-05 本地复验”。本报告随后保留的 2026-09-11 章节是历史记录，里面的 opt-in、默认 ACP 和 fallback 描述已被取代，不能作为当前行为依据。
+本轮验收结果与未完成现场项见下方“2026-10-05 本地复验”。本报告随后保留的 2026-09-11 章节是历史记录，里面的 opt-in、默认 ACP 和 fallback 描述已被取代，不能作为当前行为依据。10 月 5 日快照中关于 embedding/vector/dream“回退 ACP”的表述也已被 10 月 11 日 Pi-only 决定取代；当前 Pi capability report 将其标为不可用，不发生 runtime ACP fallback。
 
 ## 2026-10-05 本地复验
 

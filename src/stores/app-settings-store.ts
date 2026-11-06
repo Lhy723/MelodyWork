@@ -29,6 +29,7 @@ export interface AppSettings {
   uiFontSize: number;
   codeFontSize: number;
   fontSmoothing: boolean;
+  /** Compatibility-only persisted key; Desktop routing is always Pi. */
   agentEngine: AgentEnginePreference;
   defaultPermissionMode: "ask" | "auto" | "always-approve";
   autoCheckForUpdates: boolean;

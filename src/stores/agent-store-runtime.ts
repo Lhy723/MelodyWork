@@ -1,5 +1,5 @@
 import type {
-  AcpSessionPhase,
+  AgentSessionPhase,
   AgentPermissionMode,
   TimelineEntry,
 } from "@/domain/acp";
@@ -13,19 +13,22 @@ import type { AgentStore } from "./agent-store-types";
 
 export const armSetupTimeout = (
   localSessionId: string,
-  expectedPhase: AcpSessionPhase,
+  expectedPhase: AgentSessionPhase,
   message: string,
-  getState: () => Pick<AgentStore, "localSessionId" | "acpPhase" | "status">,
+  getState: () => Pick<
+    AgentStore,
+    "localSessionId" | "runtimePhase" | "status"
+  >,
   setState: (state: Partial<AgentStore>) => void,
 ) => {
   window.setTimeout(() => {
     const state = getState();
     if (
       state.localSessionId === localSessionId &&
-      state.acpPhase === expectedPhase
+      state.runtimePhase === expectedPhase
     ) {
       setState({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         status: { ...state.status, message },
       });
@@ -58,7 +61,7 @@ export const pendingSessionOpens = new Map<
 export const pendingPrompts = new Map<
   number,
   {
-    acpSessionId: string;
+    runtimeSessionId: string;
     localSessionId: string;
     promptId: string;
     createdAt: number;
@@ -106,7 +109,7 @@ export const pruneTransientState = () => {
     if (request.createdAt < cutoff) {
       pendingPrompts.delete(requestId);
       clearPromptTimeout(requestId);
-      pendingUserEchoBlocks.delete(request.acpSessionId);
+      pendingUserEchoBlocks.delete(request.runtimeSessionId);
     }
   }
   if (fullReplayStarted.size > 128) {
@@ -178,7 +181,7 @@ export const previewTimeline: TimelineEntry[] = [
 
 export const pendingPromptForSession = (sessionId: string) =>
   [...pendingPrompts.entries()].find(
-    ([, pending]) => pending.acpSessionId === sessionId,
+    ([, pending]) => pending.runtimeSessionId === sessionId,
   );
 
 export const removePendingPrompt = (requestId: number) => {
@@ -188,7 +191,7 @@ export const removePendingPrompt = (requestId: number) => {
   }
   pendingPrompts.delete(requestId);
   clearPromptTimeout(requestId);
-  pendingUserEchoBlocks.delete(pending.acpSessionId);
+  pendingUserEchoBlocks.delete(pending.runtimeSessionId);
   return pending;
 };
 
@@ -196,7 +199,7 @@ export const armPromptFirstEventTimeout = (
   requestId: number,
   getState: () => Pick<
     AgentStore,
-    "localSessionId" | "acpSessionId" | "chatStatus" | "cancelPrompt"
+    "localSessionId" | "runtimeSessionId" | "chatStatus" | "cancelPrompt"
   >,
 ) => {
   clearPromptTimeout(requestId);
@@ -209,7 +212,7 @@ export const armPromptFirstEventTimeout = (
       if (
         !pending ||
         state.localSessionId !== pending.localSessionId ||
-        state.acpSessionId !== pending.acpSessionId ||
+        state.runtimeSessionId !== pending.runtimeSessionId ||
         !shouldCancelBeforeFirstEvent(
           pending,
           Date.now(),
@@ -241,34 +244,34 @@ export const markPromptActivity = (sessionId?: string) => {
 export const sendSessionOpen = async (
   localSessionId: string,
   cwd: string,
-  acpSessionId?: string,
+  runtimeSessionId?: string,
   modelId?: string,
   permissionMode: AgentPermissionMode = "ask",
-  cursor?: string,
+  eventCursor?: string,
   sessionModeId?: string,
   reasoningEffort?: string,
 ) => {
   const requestId = nextSessionOpenRequestId--;
   pendingSessionOpens.set(requestId, {
     localSessionId,
-    requestedSessionId: acpSessionId,
+    requestedSessionId: runtimeSessionId,
     createdAt: Date.now(),
   });
   try {
     await sendAgentCommand({
       protocolVersion: 1,
       requestId,
-      sessionId: acpSessionId,
+      sessionId: runtimeSessionId,
       command: {
         type: "session.open",
-        ...(acpSessionId ? { sessionId: acpSessionId } : {}),
+        ...(runtimeSessionId ? { sessionId: runtimeSessionId } : {}),
         productSessionId: localSessionId,
         cwd,
         ...(modelId ? { modelId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(sessionModeId ? { sessionModeId } : {}),
         permissionMode,
-        ...(cursor ? { cursor } : {}),
+        ...(eventCursor ? { cursor: eventCursor } : {}),
       },
     });
   } catch (reason) {

@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { withoutControlCharacters } from "@melody/agent-contract";
 import { reconstructTodoState, summarizeTodoState } from "./todo-extension.ts";
-import { reconstructGoalState, summarizeGoalState } from "./goal-extension.ts";
+import { reconstructGoalState, summarizeGoalState } from "./goal-state.ts";
 
 /** Durable, non-context entry used to audit the two-pass memory flush. */
 export const MEMORY_FLUSH_ENTRY = "melody.memory_flush" as const;

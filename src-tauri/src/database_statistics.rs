@@ -33,7 +33,7 @@ pub struct UsageStatistics {
     cached_read_tokens: u64,
     reasoning_tokens: u64,
     model_calls: u64,
-    api_duration_ms: u64,
+    api_duration_ms: Option<u64>,
     usage_incomplete_tasks: u64,
     cost_usd_ticks: Option<u64>,
     longest_task_ms: u64,
@@ -202,6 +202,8 @@ pub fn get_usage_statistics(database: State<'_, AppDatabase>) -> Result<UsageSta
     let mut reasoning_tokens = 0_u64;
     let mut model_calls = 0_u64;
     let mut api_duration_ms = 0_u64;
+    let mut billing_usage_entries = 0_u64;
+    let mut api_duration_complete = true;
     let mut usage_incomplete_tasks = 0_u64;
     let mut cost_usd_ticks = None::<u64>;
     let mut longest_task_ms = 0_u64;
@@ -241,13 +243,16 @@ pub fn get_usage_statistics(database: State<'_, AppDatabase>) -> Result<UsageSta
                 turn_last_activity_at = completed_at.or(turn_last_activity_at);
             }
 
-            if kind == Some("message") && role == Some("assistant") {
+            if kind == Some("message") {
                 if let Some(usage) = entry.get("tokenUsage") {
                     if let Some(used) = number_field(usage, "usedTokens") {
                         peak_tokens = peak_tokens.max(used);
                     }
                 }
+            }
+            if kind == Some("message") && role == Some("assistant") {
                 if let Some(usage) = entry.get("billingUsage") {
+                    billing_usage_entries = billing_usage_entries.saturating_add(1);
                     let turn_input = number_field(usage, "inputTokens").unwrap_or(0);
                     let turn_output = number_field(usage, "outputTokens").unwrap_or(0);
                     let turn_cached = number_field(usage, "cachedReadTokens")
@@ -262,15 +267,19 @@ pub fn get_usage_statistics(database: State<'_, AppDatabase>) -> Result<UsageSta
                     output_tokens = output_tokens.saturating_add(turn_output);
                     cached_read_tokens = cached_read_tokens.saturating_add(turn_cached);
                     reasoning_tokens = reasoning_tokens.saturating_add(turn_reasoning);
-                    model_calls =
-                        model_calls.saturating_add(number_field(usage, "modelCalls").unwrap_or(0));
-                    api_duration_ms = api_duration_ms
-                        .saturating_add(number_field(usage, "apiDurationMs").unwrap_or(0));
-                    if usage
+                    let reported_model_calls = number_field(usage, "modelCalls").unwrap_or(0);
+                    model_calls = model_calls.saturating_add(reported_model_calls.max(1));
+                    let usage_is_incomplete = usage
                         .get("usageIsIncomplete")
                         .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                    {
+                        .unwrap_or(false);
+                    match number_field(usage, "apiDurationMs") {
+                        Some(duration) if duration > 0 || !usage_is_incomplete => {
+                            api_duration_ms = api_duration_ms.saturating_add(duration);
+                        }
+                        _ => api_duration_complete = false,
+                    }
+                    if usage_is_incomplete {
                         usage_incomplete_tasks += 1;
                     }
                     if let Some(turn_cost) = number_field(usage, "costUsdTicks") {
@@ -357,7 +366,8 @@ pub fn get_usage_statistics(database: State<'_, AppDatabase>) -> Result<UsageSta
         cached_read_tokens,
         reasoning_tokens,
         model_calls,
-        api_duration_ms,
+        api_duration_ms: (billing_usage_entries > 0 && api_duration_complete)
+            .then_some(api_duration_ms),
         usage_incomplete_tasks,
         cost_usd_ticks,
         longest_task_ms,

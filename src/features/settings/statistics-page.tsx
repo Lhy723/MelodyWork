@@ -255,7 +255,11 @@ export function StatisticsPage({ cwd }: { cwd: string }) {
               <InsightRow
                 icon={Clock3Icon}
                 label="模型 API 用时"
-                value={formatApiDuration(statistics.apiDurationMs)}
+                value={
+                  statistics.modelCalls > 0
+                    ? formatApiDuration(statistics.apiDurationMs)
+                    : "暂无数据"
+                }
               />
               {statistics.costUsdTicks !== undefined ? (
                 <InsightRow

@@ -297,6 +297,7 @@ export function SettingsWorkspace({
               Object.values(batch),
             );
             setDocument(nextDocument);
+            setError(nextDocument.runtimeRefreshError);
             setConfigPatches((current) => {
               const next = { ...current };
               for (const [key, patch] of entries) {

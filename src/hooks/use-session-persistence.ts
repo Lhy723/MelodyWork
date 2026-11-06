@@ -34,7 +34,7 @@ type PendingSnapshot = {
   id: string;
   title?: string;
   timeline: ReturnType<typeof useAgentStore.getState>["timeline"];
-  acpCursor?: string;
+  eventCursor?: string;
   activelyStreaming: boolean;
   revision: number;
 };
@@ -42,7 +42,7 @@ type PendingSnapshot = {
 export const useSessionPersistence = () => {
   const localSessionId = useAgentStore((state) => state.localSessionId);
   const timeline = useAgentStore((state) => state.timeline);
-  const acpCursor = useAgentStore((state) => state.acpCursor);
+  const eventCursor = useAgentStore((state) => state.eventCursor);
   const chatStatus = useAgentStore((state) => state.chatStatus);
   const activeSession = useWorkspaceStore((state) => state.activeSession);
   const replaceSession = useWorkspaceStore((state) => state.replaceSession);
@@ -73,12 +73,12 @@ export const useSessionPersistence = () => {
 
         // Serialization happens at the write boundary, once per coalesced
         // snapshot, instead of once for every streamed agent chunk. A
-        // compacted projection is not independently restorable. Its ACP
+        // compacted projection is not independently restorable. Its event
         // cursor remains alongside the complete archive, while version 0
         // tells the loader to use that archive before resuming.
         const prepared = prepareTimelineSnapshot(snapshot.timeline);
         const timelineJson = JSON.stringify(prepared.timeline);
-        const acpCursor = snapshot.acpCursor ?? null;
+        const persistedAcpCursor = snapshot.eventCursor ?? null;
         const timelineVersion = prepared.truncated
           ? 0
           : timelineProjectionVersion(
@@ -95,7 +95,7 @@ export const useSessionPersistence = () => {
               : [{ ordinal, entryJson }];
           },
         );
-        const signature = `${snapshot.id}:${snapshot.title ?? ""}:${acpCursor ?? ""}:${timelineVersion}:${timelineJson}`;
+        const signature = `${snapshot.id}:${snapshot.title ?? ""}:${persistedAcpCursor ?? ""}:${timelineVersion}:${timelineJson}`;
         if (
           savedSignatures.current.get(id) === signature &&
           timelineEntries.length === 0
@@ -107,7 +107,7 @@ export const useSessionPersistence = () => {
             id: snapshot.id,
             title: snapshot.title,
             timelineJson,
-            acpCursor,
+            acpCursor: persistedAcpCursor,
             timelineVersion,
             ...(timelineEntries.length > 0 ? { timelineEntries } : {}),
           });
@@ -158,7 +158,7 @@ export const useSessionPersistence = () => {
       id: localSessionId,
       title: deriveTitle(activeSession.title, timeline),
       timeline,
-      acpCursor,
+      eventCursor,
       activelyStreaming:
         chatStatus === "submitted" || chatStatus === "streaming",
       revision: ++nextRevision.current,
@@ -166,7 +166,7 @@ export const useSessionPersistence = () => {
     latest.current.set(localSessionId, snapshot);
     pending.current.set(localSessionId, snapshot);
     schedule();
-  }, [activeSession, acpCursor, chatStatus, localSessionId, timeline]);
+  }, [activeSession, eventCursor, chatStatus, localSessionId, timeline]);
 
   useEffect(() => {
     const flushNow = () => {

@@ -65,7 +65,7 @@ const promptForPiEvent = (event: AgentEventEnvelope) => {
   if (event.runId) {
     const byRunId = [...pendingPrompts.entries()].find(
       ([, pending]) =>
-        event.runId === `${pending.acpSessionId}:${pending.promptId}`,
+        event.runId === `${pending.runtimeSessionId}:${pending.promptId}`,
     );
     if (byRunId) return byRunId;
   }
@@ -86,10 +86,9 @@ const isPiActivityEvent = (event: AgentEventEnvelope): boolean =>
 const snapshotFor = (
   state: AgentStore,
 ): Parameters<AgentEventStoreAdapter["consume"]>[1] => ({
-  // Pi emits the product session ID in its normalized event envelope. Keep
-  // the archived ACP ID only as a data-identity fallback for older stores;
-  // this does not select an execution engine.
-  currentSessionId: state.localSessionId ?? state.acpSessionId,
+  // Pi emits the product session ID in its normalized event envelope. The
+  // runtime ID is a fallback only when no product session is currently set.
+  currentSessionId: state.localSessionId ?? state.runtimeSessionId,
   timeline: state.timeline,
   backgroundTimelines: state.backgroundTimelines,
   backgroundCursors: state.backgroundCursors,
@@ -114,9 +113,8 @@ export const resetPiEventProjection = (sessionId?: string) =>
 
 /**
  * Consume one normalized Pi event and apply its pure projection to the
- * existing store shape. This is an opt-in action: the default ACP bridge does
- * not call it, so migration can be tested against a real Pi worker without
- * changing the user's current engine.
+ * existing store shape. Desktop Agent sessions deliver Pi events here; the
+ * browser-preview ACP fixture uses a separate event adapter.
  */
 export const receiveAgentEvent = (
   store: AgentStoreAccess,
@@ -136,7 +134,7 @@ export const receiveAgentEvent = (
       ...(patch.backgroundTimelines !== undefined
         ? { backgroundTimelines: patch.backgroundTimelines }
         : {}),
-      ...(patch.acpCursor !== undefined ? { acpCursor: patch.acpCursor } : {}),
+      ...(patch.eventCursor !== undefined ? { eventCursor: patch.eventCursor } : {}),
       ...(patch.backgroundCursors !== undefined
         ? { backgroundCursors: patch.backgroundCursors }
         : {}),
@@ -193,7 +191,7 @@ export const receiveAgentEvent = (
       ...(patch.chatStatus !== undefined
         ? { chatStatus: patch.chatStatus }
         : {}),
-      ...(patch.acpPhase !== undefined ? { acpPhase: patch.acpPhase } : {}),
+      ...(patch.runtimePhase !== undefined ? { runtimePhase: patch.runtimePhase } : {}),
       ...(patch.statusMessage !== undefined
         ? { status: { ...state.status, message: patch.statusMessage } }
         : {}),
@@ -225,7 +223,7 @@ export const receiveAgentEvent = (
         ...(state.localSessionId === pendingPrompt.localSessionId
           ? {
               chatStatus: failed ? ("error" as const) : ("ready" as const),
-              acpPhase: failed ? ("error" as const) : ("ready" as const),
+              runtimePhase: failed ? ("error" as const) : ("ready" as const),
             }
           : {}),
       }));

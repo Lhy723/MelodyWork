@@ -5,7 +5,8 @@ import type {
   PermissionOption,
   TimelineEntry,
 } from "./acp.ts";
-import { extractToolActivity } from "./tool-activity.ts";
+import { parseBillingUsage } from "./agent/billing-usage.ts";
+import { extractToolActivity, projectToolText } from "./tool-activity.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,16 +43,6 @@ const wireString = (
 const numberValue = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-const stringifyValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value === undefined || value === null) {
-    return "";
-  }
-  return JSON.stringify(value, null, 2);
-};
-
 const textFromContent = (value: unknown): string | undefined => {
   if (typeof value === "string") {
     return value;
@@ -75,40 +66,6 @@ const textFromContent = (value: unknown): string | undefined => {
     stringValue(content.content) ??
     textFromContent(content.content)
   );
-};
-
-const toolCommand = (tool: JsonObject): string => {
-  const input = objectValue(tool.rawInput);
-  const rawInput =
-    input?.gateway === "melody" ? objectValue(input.arguments) : input;
-  const displayInput =
-    stringValue(rawInput?.command) ??
-    stringValue(rawInput?.cmd) ??
-    stringValue(rawInput?.path) ??
-    stringValue(rawInput?.file_path) ??
-    stringValue(rawInput?.filePath) ??
-    stringValue(rawInput?.target_directory) ??
-    stringValue(rawInput?.targetDirectory);
-  return (
-    displayInput ??
-    (input?.gateway === "melody" ? "" : stringifyValue(tool.rawInput))
-  );
-};
-
-const toolOutput = (tool: JsonObject): string => {
-  const content = Array.isArray(tool.content) ? tool.content : [];
-  const contentText = content
-    .map((item) => {
-      const block = objectValue(item);
-      return (
-        stringValue(block?.text) ??
-        stringifyValue(block?.content) ??
-        stringifyValue(item)
-      );
-    })
-    .filter(Boolean)
-    .join("\n");
-  return contentText || stringifyValue(tool.rawOutput);
 };
 
 const uniqueTimelineId = (timeline: TimelineEntry[], base: string) => {
@@ -410,6 +367,7 @@ const upsertTool = (
     status === "failed" ||
     status === "cancelled" ||
     (existing?.kind === "tool" && existing.permission === "denied");
+  const toolText = projectToolText(tool);
   const next: TimelineEntry = {
     id: existing?.id ?? `tool-${toolCallId}`,
     kind: "tool",
@@ -418,9 +376,9 @@ const upsertTool = (
       stringValue(tool.title) ??
       (existing?.kind === "tool" ? existing.title : "工具调用"),
     command:
-      toolCommand(tool) || (existing?.kind === "tool" ? existing.command : ""),
+      toolText.command || (existing?.kind === "tool" ? existing.command : ""),
     output:
-      toolOutput(tool) || (existing?.kind === "tool" ? existing.output : ""),
+      toolText.output || (existing?.kind === "tool" ? existing.output : ""),
     startedAt: existing?.kind === "tool" ? existing.startedAt : Date.now(),
     completedAt:
       existing?.kind === "tool" && existing.completedAt
@@ -471,7 +429,7 @@ export const projectPermissionRequest = (
     ),
     toolCallId,
     title: stringValue(tool.title) ?? "工具调用",
-    command: toolCommand(tool),
+    command: projectToolText(tool).command,
   };
 };
 
@@ -500,54 +458,6 @@ export const parseSessionContextUsage = (
     maxTokens,
     ...(amount !== undefined && amount >= 0 && normalizedCurrency
       ? { cost: { amount, currency: normalizedCurrency } }
-      : {}),
-  };
-};
-
-const billingUsageValue = (
-  value: JsonObject | undefined,
-): AgentBillingUsage | undefined => {
-  const inputTokens = numberValue(
-    wireValue(value, "inputTokens", "input_tokens"),
-  );
-  const outputTokens = numberValue(
-    wireValue(value, "outputTokens", "output_tokens"),
-  );
-  if (
-    inputTokens === undefined ||
-    outputTokens === undefined ||
-    inputTokens < 0 ||
-    outputTokens < 0
-  ) {
-    return undefined;
-  }
-  const cachedReadTokens =
-    numberValue(wireValue(value, "cachedReadTokens", "cached_read_tokens")) ??
-    0;
-  const reasoningTokens =
-    numberValue(wireValue(value, "reasoningTokens", "reasoning_tokens")) ?? 0;
-  const modelCalls =
-    numberValue(wireValue(value, "modelCalls", "model_calls")) ?? 0;
-  const apiDurationMs =
-    numberValue(wireValue(value, "apiDurationMs", "api_duration_ms")) ?? 0;
-  const costUsdTicks = numberValue(
-    wireValue(value, "costUsdTicks", "cost_usd_ticks"),
-  );
-  const usageIsIncomplete =
-    wireValue(value, "usageIsIncomplete", "usage_is_incomplete") === true;
-  const costIsPartial =
-    wireValue(value, "costIsPartial", "cost_is_partial") === true;
-  return {
-    inputTokens,
-    outputTokens,
-    cachedReadTokens: Math.max(0, cachedReadTokens),
-    reasoningTokens: Math.max(0, reasoningTokens),
-    modelCalls: Math.max(0, modelCalls),
-    apiDurationMs: Math.max(0, apiDurationMs),
-    usageIsIncomplete,
-    costIsPartial,
-    ...(costUsdTicks !== undefined && costUsdTicks >= 0
-      ? { costUsdTicks }
       : {}),
   };
 };
@@ -729,7 +639,7 @@ export const applySessionUpdate = (
   }
 
   if (updateType === "turn_completed") {
-    const billingUsage = billingUsageValue(objectValue(update?.usage));
+    const billingUsage = parseBillingUsage(update?.usage);
     const stopReason = wireString(update, "stopReason", "stop_reason");
     const detail =
       wireString(update, "agentResult", "agent_result") ??

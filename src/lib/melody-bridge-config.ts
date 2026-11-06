@@ -15,6 +15,7 @@ import type {
   AgentDefinitionSnapshot,
   HookDefinitionSnapshot,
   LspServerSnapshot,
+  McpServerSnapshot,
   PluginCapabilitySnapshot,
 } from "@/domain/agent/capability-report";
 import type { PermissionDecision, PermissionRule } from "@/domain/permission";
@@ -123,6 +124,14 @@ export const listMelodyLspServers = async (
 ): Promise<LspServerSnapshot[]> =>
   isTauriRuntime()
     ? invoke<LspServerSnapshot[]>("list_melody_lsp_servers", { cwd })
+    : [];
+
+/** List Host-validated MCP transport support for Pi capability preflight. */
+export const listMelodyMcpServers = async (
+  cwd: string,
+): Promise<McpServerSnapshot[]> =>
+  isTauriRuntime()
+    ? invoke<McpServerSnapshot[]>("list_melody_mcp_servers", { cwd })
     : [];
 
 /** List Host-validated declarative command hooks for Pi preflight. */

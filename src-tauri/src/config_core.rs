@@ -1,14 +1,10 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use crate::config_io::TextFileStore;
-use crate::pi_worker_runtime::PiWorkerRuntime;
 use crate::workspace_access::WorkspaceRegistry;
 
 pub(crate) const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
@@ -41,6 +37,8 @@ pub struct MelodyConfigDocument {
     pub(crate) values: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parse_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime_refresh_error: Option<String>,
 }
 
 /// Non-secret process settings that can change the agent trust boundary.
@@ -238,6 +236,7 @@ fn config_document(
         content,
         values,
         parse_error,
+        runtime_refresh_error: None,
     }
 }
 
@@ -344,36 +343,6 @@ pub(crate) fn apply_patch(
         table.insert(leaf, json_to_item(&patch.value)?);
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn update_melody_config(
-    registry: State<'_, WorkspaceRegistry>,
-    runtime: State<'_, PiWorkerRuntime>,
-    scope: String,
-    cwd: String,
-    patches: Vec<MelodyConfigPatch>,
-) -> Result<MelodyConfigDocument, String> {
-    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
-    let model_config_changed = patches.iter().any(|patch| {
-        patch.path.first().is_some_and(|key| {
-            matches!(key.as_str(), "model" | "models" | "endpoints" | "features")
-        })
-    });
-    let document = update_melody_config_inner(scope, cwd.clone(), patches)?;
-    if model_config_changed {
-        // Re-project the catalog and transient credentials immediately when
-        // Pi is already running. A failed refresh does not roll back the
-        // config write; the next worker generation will retry the projection.
-        let _ = runtime.refresh_models_if_workspace(Path::new(&cwd)).await;
-    }
-    // The running Pi worker receives a fresh disabled-name snapshot through
-    // its Host pipe. If Pi is not selected or not running, the next start
-    // will project the persisted config as usual.
-    let _ = runtime
-        .refresh_resources_if_workspace(Path::new(&cwd))
-        .await;
-    Ok(document)
 }
 
 pub(crate) fn update_melody_config_inner(

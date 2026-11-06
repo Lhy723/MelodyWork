@@ -36,7 +36,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     relatedPiForks = [],
     activeSession,
     activeWorkspaceTabId,
-    acpPhase,
+    runtimePhase,
     appUpdate,
     appUpdateProgress,
     availableModels,
@@ -141,7 +141,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                   data-active={sessionIsActive ? "true" : undefined}
                   data-tauri-drag-region
                 />
-                {sessionStatusLabel(status.phase, acpPhase)}
+                {sessionStatusLabel(status.phase, runtimePhase)}
               </div>
             </div>
             <div className="harness-session-actions">

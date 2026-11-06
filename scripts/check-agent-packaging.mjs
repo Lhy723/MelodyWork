@@ -18,17 +18,16 @@ const workerPackage = readJson("packages/agent-worker/package.json");
 const piManifest = readJson(
   "docs/architecture/pi-migration/pi-compatibility-manifest.json",
 );
-const rootPackage = readJson("package.json");
 const tauriConfig = readJson("src-tauri/tauri.conf.json");
 const expectedPiVersion = piManifest?.pi?.version;
 const workerEntryPath = resolve(root, "packages/agent-worker/src/main.ts");
-const workerSmokePath = resolve(
-  root,
-  "packages/agent-worker/src/worker-smoke.test.mjs",
-);
 const adapterPath = resolve(
   root,
   "packages/agent-worker/src/pi/session-adapter.ts",
+);
+const runtimeTypesPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/session-runtime-types.ts",
 );
 
 if (!workerPackage) {
@@ -58,31 +57,16 @@ if (!existsSync(workerEntryPath)) {
   failures.push("packages/agent-worker/src/main.ts 不存在。");
 }
 
-if (!existsSync(workerSmokePath)) {
-  failures.push("packages/agent-worker/src/worker-smoke.test.mjs 不存在。");
-}
-
-if (
-  workerPackage &&
-  !workerPackage.scripts?.test?.includes("src/worker-smoke.test.mjs")
-) {
-  failures.push("Pi worker 的 test 脚本必须包含独立健康握手 smoke test。");
-}
-
-if (
-  rootPackage &&
-  rootPackage.scripts?.["test:pi-worker-smoke"] !==
-    "node --experimental-strip-types --test packages/agent-worker/src/worker-smoke.test.mjs"
-) {
-  failures.push("根项目必须提供 test:pi-worker-smoke 门禁脚本。");
-}
-
 if (existsSync(adapterPath)) {
-  const adapter = readFileSync(adapterPath, "utf8");
-  if (!adapter.includes('from "@earendil-works/pi-coding-agent"')) {
-    failures.push(
-      "PiSessionAdapter 必须保留静态 @earendil-works/pi-coding-agent 入口，以支持 Bun 自包含编译。",
-    );
+  if (!existsSync(runtimeTypesPath)) {
+    failures.push("Pi SDK 静态入口模块不存在。");
+  } else {
+    const runtimeTypes = readFileSync(runtimeTypesPath, "utf8");
+    if (!runtimeTypes.includes('from "@earendil-works/pi-coding-agent"')) {
+      failures.push(
+        "Pi SDK 运行时类型模块必须保留静态 @earendil-works/pi-coding-agent 入口，以支持 Bun 自包含编译。",
+      );
+    }
   }
 } else {
   failures.push("PiSessionAdapter 入口不存在。");

@@ -4,7 +4,7 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use crate::config_io::TextFileStore;
 
-use super::super::config_core::*;
+use crate::config_core::*;
 
 pub(crate) fn read_user_config_document() -> Result<(PathBuf, DocumentMut), String> {
     let path = melody_home()?.join("config.toml");

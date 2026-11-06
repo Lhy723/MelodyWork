@@ -1,6 +1,6 @@
 import type {
   AcpEnvelope,
-  AcpSessionPhase,
+  AgentSessionPhase,
   AgentContextUsage,
   AgentModelOption,
   AgentPermissionMode,
@@ -25,9 +25,11 @@ export interface AgentStore {
   localSessionId?: string;
   cwd: string;
   status: AgentStatus;
-  acpPhase: AcpSessionPhase;
-  acpSessionId?: string;
-  acpCursor?: string;
+  runtimePhase: AgentSessionPhase;
+  /** Session key accepted by the active runtime, distinct from persisted legacy ACP identity. */
+  runtimeSessionId?: string;
+  /** Last event identity projected by the active runtime; persisted under the legacy ACP cursor column. */
+  eventCursor?: string;
   timeline: TimelineEntry[];
   backgroundTimelines: Record<string, TimelineEntry[]>;
   backgroundCursors: Record<string, string>;
@@ -77,9 +79,9 @@ export interface AgentStore {
   beginSession: (
     cwd: string,
     localSessionId: string,
-    acpSessionId?: string,
+    sourceAcpSessionId?: string,
     timelineJson?: string,
-    acpCursor?: string,
+    sourceAcpCursor?: string,
     timelineVersion?: number,
     archivedTimelineJson?: string,
     forceInitialize?: boolean,
@@ -96,7 +98,7 @@ export interface AgentStore {
     timelineVersion?: number,
   ) => Promise<void>;
   receiveAcp: (message: AcpEnvelope) => Promise<void>;
-  /** Opt-in normalized Pi event sink; ACP remains the default bridge. */
+  /** Normalized Pi event sink used by Desktop Agent sessions. */
   receiveAgentEvent: (event: AgentEventEnvelope) => void;
   submitPrompt: (
     content: string,

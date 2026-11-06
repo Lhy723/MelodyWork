@@ -63,12 +63,12 @@ export const handlePromptResponse = async (
   if (promptResponse === "duplicate") {
     return true;
   }
-  const promptSessionId = pendingPrompt.acpSessionId;
-  const currentAcpSessionId = get().acpSessionId;
+  const promptSessionId = pendingPrompt.runtimeSessionId;
+  const currentRuntimeSessionId = get().runtimeSessionId;
   const isBackgroundPrompt =
     Boolean(promptSessionId) &&
-    Boolean(currentAcpSessionId) &&
-    promptSessionId !== currentAcpSessionId;
+    Boolean(currentRuntimeSessionId) &&
+    promptSessionId !== currentRuntimeSessionId;
   const promptUsage = contextUsageFromResult(
     message.result,
     isBackgroundPrompt && promptSessionId
@@ -142,7 +142,7 @@ export const handlePromptResponse = async (
           [pendingPrompt.localSessionId]: false,
         }
       : state.runningSessions,
-    acpPhase: "error",
+    runtimePhase: "error",
     chatStatus: "error",
     status: promptError
       ? { ...state.status, message: promptError }
@@ -169,7 +169,7 @@ export const handlePermissionRequest = async (
 
   const { get, set } = store;
   const params = message.params ?? {};
-  markPromptActivity(stringValue(params.sessionId) ?? get().acpSessionId);
+  markPromptActivity(stringValue(params.sessionId) ?? get().runtimeSessionId);
   const tool = objectValue(params.toolCall) ?? {};
   const options = parsePermissionOptions(params.options);
 
@@ -206,7 +206,7 @@ export const handlePermissionRequest = async (
             : entry,
         ),
       }));
-      const sessionId = stringValue(params.sessionId) ?? get().acpSessionId;
+      const sessionId = stringValue(params.sessionId) ?? get().runtimeSessionId;
       if (!sessionId) {
         return true;
       }

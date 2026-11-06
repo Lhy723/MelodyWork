@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Renderer test and verification conventions when restoring .mjs suites"}
+{"file": ".trellis/spec/agent-worker/index.md", "reason": "Worker package scripts, Pi SDK boundary, and test-runner reality"}
+{"file": ".trellis/spec/agent-contract/index.md", "reason": "Contract package test layout and validation boundaries"}
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Rust test module conventions and cargo test gate"}

@@ -15,8 +15,25 @@ const objectValue = (value: unknown): JsonObject | undefined =>
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
+const toolInput = (tool: JsonObject): JsonObject | undefined => {
+  const input = objectValue(tool.rawInput);
+  return input?.gateway === "melody"
+    ? objectValue(input.arguments)
+    : input;
+};
+
 const numberValue = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const stringifyValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return JSON.stringify(value, null, 2);
+};
 
 const lineCount = (text: string | undefined) =>
   text ? text.split(/\r?\n/u).length - (text.endsWith("\n") ? 1 : 0) : 0;
@@ -157,13 +174,45 @@ const locationPaths = (value: unknown) => {
   ];
 };
 
+export const projectToolText = (
+  tool: JsonObject,
+): { command: string; output: string } => {
+  const input = objectValue(tool.rawInput);
+  const rawInput = toolInput(tool);
+  const displayInput =
+    stringValue(rawInput?.command) ??
+    stringValue(rawInput?.cmd) ??
+    stringValue(rawInput?.path) ??
+    stringValue(rawInput?.file_path) ??
+    stringValue(rawInput?.filePath) ??
+    stringValue(rawInput?.target_directory) ??
+    stringValue(rawInput?.targetDirectory);
+  const content = Array.isArray(tool.content) ? tool.content : [];
+  const contentText = content
+    .map((item) => {
+      const block = objectValue(item);
+      return (
+        stringValue(block?.text) ??
+        stringifyValue(block?.content) ??
+        stringifyValue(item)
+      );
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    command:
+      displayInput ??
+      (input?.gateway === "melody" ? "" : stringifyValue(tool.rawInput)),
+    output: contentText || stringifyValue(tool.rawOutput),
+  };
+};
+
 export const extractToolActivity = (
   tool: JsonObject,
   previous?: AgentToolActivity,
 ): AgentToolActivity => {
-  const input = objectValue(tool.rawInput);
-  const rawInput =
-    input?.gateway === "melody" ? objectValue(input.arguments) : input;
+  const rawInput = toolInput(tool);
   const title = stringValue(tool.title) ?? "";
   const files = diffFromContent(tool.content);
   const paths = locationPaths(tool.locations);

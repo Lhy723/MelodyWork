@@ -1,4 +1,5 @@
 import { toUserMessage as reasonMessage } from "@/domain/app-error";
+import { RequestGate } from "@/domain/request-gate";
 import { buildPiSessionImportPlan } from "@/domain/agent/pi-session-import";
 import type { JsonObject } from "@/domain/agent/contract";
 import {
@@ -8,11 +9,7 @@ import {
   TIMELINE_PROJECTION_VERSION,
   usableTimelineProjection,
 } from "@/domain/session-projection";
-import {
-  agentEngineForSession,
-  sendAgentCommand,
-  setAgentSessionEngine,
-} from "@/lib/agent-client";
+import { sendAgentCommand } from "@/lib/agent-client";
 import {
   beginPiMigration,
   failPiMigration,
@@ -36,6 +33,20 @@ import {
 } from "@/domain/agent/session-archive";
 import type { AgentStore, AgentStoreAccess } from "./agent-store-types";
 
+const sessionActivationGates = new WeakMap<
+  AgentStoreAccess["get"],
+  RequestGate
+>();
+
+const sessionActivationGateFor = (get: AgentStoreAccess["get"]) => {
+  let gate = sessionActivationGates.get(get);
+  if (!gate) {
+    gate = new RequestGate();
+    sessionActivationGates.set(get, gate);
+  }
+  return gate;
+};
+
 /**
  * Shared timeline-seeding used by both open paths: restore the visible
  * history from the persisted archive (preferred) or the bounded snapshot.
@@ -46,7 +57,7 @@ import type { AgentStore, AgentStoreAccess } from "./agent-store-types";
 const restoreSessionHistory = (input: {
   timelineJson?: string;
   archivedTimelineJson?: string;
-  acpCursor?: string;
+  sourceAcpCursor?: string;
   timelineVersion?: number;
 }) => {
   const projectionTimelineJson =
@@ -54,7 +65,7 @@ const restoreSessionHistory = (input: {
   const projectionVersion = input.timelineVersion;
   const projectionCursor =
     projectionVersion === TIMELINE_PROJECTION_VERSION
-      ? input.acpCursor
+      ? input.sourceAcpCursor
       : undefined;
   const fallbackTimeline = parseTimelineProjection(projectionTimelineJson);
   const archivedProjection = input.archivedTimelineJson
@@ -91,32 +102,49 @@ export const beginAgentSession = async (
   const [
     cwd,
     localSessionId,
-    acpSessionId,
+    sourceAcpSessionId,
     timelineJson,
-    acpCursor,
+    sourceAcpCursor,
     timelineVersion,
     archivedTimelineJson,
     forceInitialize = false,
   ] = args;
   const { get, set } = store;
+  const activationGate = sessionActivationGateFor(get);
+  const beginActivation = () => {
+    const generation = activationGate.begin();
+    const isCurrent = () => {
+      const current = get();
+      return (
+        activationGate.isCurrent(generation) &&
+        current.localSessionId === localSessionId &&
+        current.activeSessionId === localSessionId &&
+        !current.archivedReadOnly
+      );
+    };
+    const setIfCurrent: AgentStoreAccess["set"] = (update) => {
+      if (isCurrent()) {
+        set(update);
+      }
+    };
+    return { isCurrent, setIfCurrent };
+  };
   const currentState = get();
-  const piSelected =
-    isTauriRuntime() && agentEngineForSession(localSessionId) === "pi";
-  const expectedEngineSessionId = piSelected ? localSessionId : acpSessionId;
-  const currentEngineMatches =
-    currentState.acpSessionId === expectedEngineSessionId;
-  // Keep the routing decision visible to every command issued after the
-  // session opens (turns, configuration, permissions and interactions).
-  setAgentSessionEngine(localSessionId, piSelected ? "pi" : "legacy-acp");
-  if (acpSessionId) {
-    setAgentSessionEngine(acpSessionId, piSelected ? "pi" : "legacy-acp");
-  }
-  const previousEngineSessionId = acpSessionId;
+  const piSelected = isTauriRuntime();
+  const expectedRuntimeSessionId = piSelected
+    ? localSessionId
+    : sourceAcpSessionId;
+  const currentRuntimeMatches =
+    currentState.runtimeSessionId === expectedRuntimeSessionId;
+  const previousSourceAcpSessionId = sourceAcpSessionId;
   // Pi uses the product session ID as the renderer-facing execution key. ACP
   // native IDs are intentionally not sent to Pi: they are not valid Pi tree
   // cursors and would make a resumed session open the wrong history.
-  const engineSessionId = piSelected ? localSessionId : acpSessionId;
-  if (currentState.localSessionId !== localSessionId || !currentEngineMatches) {
+  const runtimeSessionId = piSelected ? localSessionId : sourceAcpSessionId;
+  if (
+    currentState.localSessionId !== localSessionId ||
+    !currentRuntimeMatches
+  ) {
     resetPiEventProjection(localSessionId);
   }
 
@@ -129,12 +157,13 @@ export const beginAgentSession = async (
   } = restoreSessionHistory({
     timelineJson,
     archivedTimelineJson,
-    acpCursor,
+    sourceAcpCursor,
     timelineVersion,
   });
   const persistedContextUsage = contextUsageFromTimeline(restoredTimeline);
   const state = get();
   if (!isTauriRuntime()) {
+    const { isCurrent, setIfCurrent } = beginActivation();
     const displayTimeline =
       localSessionId === "implement-acp-bridge" && restoredTimeline.length === 0
         ? previewTimeline
@@ -143,14 +172,14 @@ export const beginAgentSession = async (
       activeSessionId: localSessionId,
       localSessionId,
       cwd,
-      acpSessionId,
-      acpCursor: restoredCursor,
+      runtimeSessionId: sourceAcpSessionId,
+      eventCursor: restoredCursor,
       timeline: displayTimeline,
       contextUsage:
         contextUsageFromTimeline(displayTimeline) ??
         contextUsageForModel(state.availableModels, state.selectedModelId),
       configRevision: 0,
-      acpPhase: "initializing",
+      runtimePhase: "initializing",
       chatStatus: "submitted",
       archivedReadOnly: false,
     });
@@ -166,16 +195,18 @@ export const beginAgentSession = async (
           clientCapabilities: { fs: {}, terminal: false },
         },
       });
-      armSetupTimeout(
-        localSessionId,
-        "initializing",
-        "浏览器预览 ACP 初始化超时。",
-        get,
-        set,
-      );
+      if (isCurrent()) {
+        armSetupTimeout(
+          localSessionId,
+          "initializing",
+          "浏览器预览 ACP 初始化超时。",
+          get,
+          setIfCurrent,
+        );
+      }
     } catch (reason) {
-      set({
-        acpPhase: "error",
+      setIfCurrent({
+        runtimePhase: "error",
         chatStatus: "error",
         status: { ...get().status, message: reasonMessage(reason) },
       });
@@ -185,49 +216,55 @@ export const beginAgentSession = async (
 
   if (
     state.localSessionId === localSessionId &&
-    currentEngineMatches &&
-    (state.acpPhase === "initializing" ||
-      state.acpPhase === "authenticating" ||
-      state.acpPhase === "creating" ||
-      state.acpPhase === "ready" ||
-      state.acpPhase === "prompting")
+    currentRuntimeMatches &&
+    (state.runtimePhase === "initializing" ||
+      state.runtimePhase === "authenticating" ||
+      state.runtimePhase === "creating" ||
+      state.runtimePhase === "ready" ||
+      state.runtimePhase === "prompting")
   ) {
     return;
   }
 
-  // 切换会话时，把当前 timeline 存入后台缓冲（以 acpSessionId 索引），
-  // 这样旧会话后续的 ACP 消息可以继续追加到缓冲而非丢失。
-  const oldAcpSessionId = state.acpSessionId;
+  // An already-active same-session open remains an idempotent no-op; it must
+  // not invalidate the generation that owns the in-flight activation.
+  const { isCurrent, setIfCurrent } = beginActivation();
+
+  // 切换会话时，按来源 ACP session key 保存当前 timeline，
+  // 这样旧预览会话后续的消息可以继续追加到缓冲而非丢失。
+  const oldRuntimeSessionId = state.runtimeSessionId;
   const backgroundTimelines = { ...state.backgroundTimelines };
   const backgroundCursors = { ...state.backgroundCursors };
   const backgroundContextUsage = { ...state.backgroundContextUsage };
   if (
-    oldAcpSessionId &&
+    oldRuntimeSessionId &&
     state.localSessionId &&
     state.localSessionId !== localSessionId
   ) {
-    backgroundTimelines[oldAcpSessionId] = state.timeline;
-    if (state.acpCursor) {
-      backgroundCursors[oldAcpSessionId] = state.acpCursor;
+    backgroundTimelines[oldRuntimeSessionId] = state.timeline;
+    if (state.eventCursor) {
+      backgroundCursors[oldRuntimeSessionId] = state.eventCursor;
     }
     if (state.contextUsage) {
-      backgroundContextUsage[oldAcpSessionId] = state.contextUsage;
+      backgroundContextUsage[oldRuntimeSessionId] = state.contextUsage;
     }
   }
 
   // 恢复新会话：优先使用后台缓冲（含切换后产生的新回复），
   // 否则从数据库持久化的 timelineJson 恢复。
-  const restoredFromBuffer = acpSessionId
-    ? backgroundTimelines[acpSessionId]
+  const restoredFromBuffer = sourceAcpSessionId
+    ? backgroundTimelines[sourceAcpSessionId]
     : undefined;
   const finalTimeline = restoredFromBuffer ?? restoredTimeline;
   const finalCursor =
-    restoredFromBuffer && acpSessionId
-      ? backgroundCursors[acpSessionId]
+    restoredFromBuffer && sourceAcpSessionId
+      ? backgroundCursors[sourceAcpSessionId]
       : restoredCursor;
   const restoredContextUsage =
     contextUsageFromTimeline(finalTimeline) ??
-    (acpSessionId ? backgroundContextUsage[acpSessionId] : undefined) ??
+    (sourceAcpSessionId
+      ? backgroundContextUsage[sourceAcpSessionId]
+      : undefined) ??
     persistedContextUsage;
   // Older sessions persisted the conversation and cursor before tokenUsage
   // was added to timeline entries. Replaying from the beginning once lets
@@ -235,28 +272,28 @@ export const beginAgentSession = async (
   // Keep the cached timeline visible while the replay is in flight, but do
   // not advertise the stale cursor as restorable if the app is interrupted.
   const shouldRebuildContextUsage = Boolean(
-    acpSessionId && finalCursor && !restoredContextUsage,
+    sourceAcpSessionId && finalCursor && !restoredContextUsage,
   );
   const sessionLoadCursor = shouldRebuildContextUsage ? undefined : finalCursor;
-  if (acpSessionId && restoredFromBuffer) {
-    delete backgroundTimelines[acpSessionId];
-    delete backgroundCursors[acpSessionId];
+  if (sourceAcpSessionId && restoredFromBuffer) {
+    delete backgroundTimelines[sourceAcpSessionId];
+    delete backgroundCursors[sourceAcpSessionId];
   }
-  if (acpSessionId && restoredContextUsage) {
-    delete backgroundContextUsage[acpSessionId];
+  if (sourceAcpSessionId && restoredContextUsage) {
+    delete backgroundContextUsage[sourceAcpSessionId];
   }
-  if (acpSessionId) {
+  if (sourceAcpSessionId) {
     loadFallbackTimelines.set(localSessionId, fallbackTimeline);
-    fullReplayStarted.delete(acpSessionId);
-    sessionEventDeduplicator.reset(acpSessionId);
+    fullReplayStarted.delete(sourceAcpSessionId);
+    sessionEventDeduplicator.reset(sourceAcpSessionId);
   }
 
   set({
     activeSessionId: localSessionId,
     localSessionId,
     cwd,
-    acpSessionId: engineSessionId,
-    acpCursor: piSelected ? undefined : sessionLoadCursor,
+    runtimeSessionId,
+    eventCursor: piSelected ? undefined : sessionLoadCursor,
     timeline: finalTimeline,
     backgroundTimelines,
     backgroundCursors,
@@ -269,11 +306,11 @@ export const beginAgentSession = async (
     selectedSessionModeId: piSelected ? "default" : undefined,
     pendingSessionModeId: undefined,
     archivedReadOnly: false,
-    acpPhase:
+    runtimePhase:
       forceInitialize ||
-      state.acpPhase === "idle" ||
-      state.acpPhase === "error" ||
-      state.acpPhase === "initializing"
+      state.runtimePhase === "idle" ||
+      state.runtimePhase === "error" ||
+      state.runtimePhase === "initializing"
         ? "initializing"
         : "creating",
     chatStatus: "submitted",
@@ -285,9 +322,9 @@ export const beginAgentSession = async (
       // request the same catalog the picker uses before opening a session.
       const protocolReady =
         !forceInitialize &&
-        state.acpPhase !== "idle" &&
-        state.acpPhase !== "error" &&
-        state.acpPhase !== "initializing";
+        state.runtimePhase !== "idle" &&
+        state.runtimePhase !== "error" &&
+        state.runtimePhase !== "initializing";
       if (!protocolReady) {
         await sendAgentCommand({
           protocolVersion: 1,
@@ -336,7 +373,9 @@ export const beginAgentSession = async (
       // the renderer's known-good selection so reopening cannot be bricked by
       // a deleted provider/model entry.
       const bindingModelId =
-        typeof binding?.modelId === "string" && binding.modelId.trim()
+        typeof binding?.modelId === "string" &&
+        binding.modelId.trim() &&
+        binding.modelId !== "unknown/unknown"
           ? binding.modelId
           : undefined;
       const bindingModelIsKnown =
@@ -371,7 +410,7 @@ export const beginAgentSession = async (
       // The binding is the durable source of truth after a worker restart.
       // Apply it before opening/importing so the composer and the first turn
       // do not briefly advertise the renderer's stale defaults.
-      set({
+      setIfCurrent({
         selectedModelId: persistedModelId,
         selectedReasoningEffort: persistedSelectedReasoningEffort,
         selectedSessionModeId: persistedSessionModeId,
@@ -379,7 +418,7 @@ export const beginAgentSession = async (
       });
       const needsImport = shouldImportPiSession({
         piBindingEngine: binding?.engine,
-        acpSessionId: previousEngineSessionId,
+        acpSessionId: previousSourceAcpSessionId,
       });
       if (needsImport) {
         const archiveIsComplete =
@@ -392,8 +431,8 @@ export const beginAgentSession = async (
           projectionRead.status === "valid";
         const importPlan = buildPiSessionImportPlan({
           sessionId: localSessionId,
-          ...(previousEngineSessionId
-            ? { acpSessionId: previousEngineSessionId }
+          ...(previousSourceAcpSessionId
+            ? { acpSessionId: previousSourceAcpSessionId }
             : {}),
           ...(finalCursor ? { acpCursor: finalCursor } : {}),
           timelineComplete: archiveIsComplete || snapshotIsComplete,
@@ -456,36 +495,40 @@ export const beginAgentSession = async (
           persistedSelectedReasoningEffort,
         );
       }
-      armSetupTimeout(
-        localSessionId,
-        "creating",
-        "打开 Pi 会话超时。",
-        get,
-        set,
-      );
+      if (isCurrent()) {
+        armSetupTimeout(
+          localSessionId,
+          "creating",
+          "打开 Pi 会话超时。",
+          get,
+          setIfCurrent,
+        );
+      }
       return;
     }
     const protocolReady =
       !forceInitialize &&
-      state.acpPhase !== "idle" &&
-      state.acpPhase !== "error" &&
-      state.acpPhase !== "initializing";
+      state.runtimePhase !== "idle" &&
+      state.runtimePhase !== "error" &&
+      state.runtimePhase !== "initializing";
     if (protocolReady) {
       await sendSessionOpen(
         localSessionId,
         cwd,
-        acpSessionId,
+        sourceAcpSessionId,
         state.selectedModelId,
         state.permissionMode,
         sessionLoadCursor,
       );
-      armSetupTimeout(
-        localSessionId,
-        "creating",
-        "打开 Melody 会话超时。",
-        get,
-        set,
-      );
+      if (isCurrent()) {
+        armSetupTimeout(
+          localSessionId,
+          "creating",
+          "打开 Melody 会话超时。",
+          get,
+          setIfCurrent,
+        );
+      }
       return;
     }
     await sendAgentCommand({
@@ -508,16 +551,18 @@ export const beginAgentSession = async (
         },
       },
     });
-    armSetupTimeout(
-      localSessionId,
-      "initializing",
-      "初始化 Melody Build 超时。",
-      get,
-      set,
-    );
+    if (isCurrent()) {
+      armSetupTimeout(
+        localSessionId,
+        "initializing",
+        "初始化 Melody Build 超时。",
+        get,
+        setIfCurrent,
+      );
+    }
   } catch (reason) {
-    set({
-      acpPhase: "error",
+    setIfCurrent({
+      runtimePhase: "error",
       chatStatus: "error",
       status: {
         ...get().status,
@@ -546,21 +591,21 @@ export const beginArchivedSession = async (
   // Switching away from a live session must keep its in-memory timeline
   // addressable, exactly like the normal open path (its later ACP messages,
   // if any, keep appending to the buffer instead of being lost).
-  const oldAcpSessionId = state.acpSessionId;
+  const oldRuntimeSessionId = state.runtimeSessionId;
   const backgroundTimelines = { ...state.backgroundTimelines };
   const backgroundCursors = { ...state.backgroundCursors };
   const backgroundContextUsage = { ...state.backgroundContextUsage };
   if (
-    oldAcpSessionId &&
+    oldRuntimeSessionId &&
     state.localSessionId &&
     state.localSessionId !== localSessionId
   ) {
-    backgroundTimelines[oldAcpSessionId] = state.timeline;
-    if (state.acpCursor) {
-      backgroundCursors[oldAcpSessionId] = state.acpCursor;
+    backgroundTimelines[oldRuntimeSessionId] = state.timeline;
+    if (state.eventCursor) {
+      backgroundCursors[oldRuntimeSessionId] = state.eventCursor;
     }
     if (state.contextUsage) {
-      backgroundContextUsage[oldAcpSessionId] = state.contextUsage;
+      backgroundContextUsage[oldRuntimeSessionId] = state.contextUsage;
     }
   }
   const { restoredTimeline } = restoreSessionHistory({
@@ -568,7 +613,7 @@ export const beginArchivedSession = async (
     archivedTimelineJson,
     // The archive is display-only: no cursor is advertised because nothing
     // will ever replay against it.
-    acpCursor: undefined,
+    sourceAcpCursor: undefined,
     timelineVersion,
   });
   set({
@@ -577,8 +622,8 @@ export const beginArchivedSession = async (
     cwd,
     // Deliberately unbound: every store action that would emit engine
     // traffic bails out without an engine session id.
-    acpSessionId: undefined,
-    acpCursor: undefined,
+    runtimeSessionId: undefined,
+    eventCursor: undefined,
     timeline: restoredTimeline,
     backgroundTimelines,
     backgroundCursors,
@@ -594,7 +639,7 @@ export const beginArchivedSession = async (
     // No engine is attached, so the least-surprising phases are the neutral
     // ones rather than an in-flight or failure state.
     status: { phase: "stopped", message: ARCHIVE_STATUS_NOTICE },
-    acpPhase: "idle",
+    runtimePhase: "idle",
     chatStatus: "ready",
   });
 };

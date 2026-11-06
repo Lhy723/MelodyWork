@@ -20,6 +20,7 @@ export interface MelodyConfigDocument {
   content: string;
   values: Record<string, MelodyConfigValue>;
   parseError?: string;
+  runtimeRefreshError?: string;
 }
 
 export interface MelodyExtension {

@@ -1,5 +1,4 @@
 import type {
-  AgentAssistantMetadata,
   AgentEvent,
   AgentEventEnvelope,
   AgentUsage,
@@ -7,6 +6,7 @@ import type {
 } from "./contract.ts";
 import type {
   AgentBillingUsage,
+  AgentContextUsage,
   AgentSubagent,
   TimelineEntry,
 } from "../acp.ts";
@@ -14,6 +14,7 @@ import {
   appendSessionError,
   applySessionUpdate,
   settleSessionProjection,
+  stampLatestTurnContextUsage,
   type SessionUpdateResult,
 } from "../session-projection-updates.ts";
 import { projectInteractionEvent } from "./interaction-projection.ts";
@@ -25,6 +26,8 @@ import {
   projectSubagentEvent,
   type SubagentProjectionResult,
 } from "./subagent-projection.ts";
+import { mergeUsage, toBillingUsage, usageUpdate } from "./billing-usage.ts";
+import { projectMessageEvent } from "./message-projection.ts";
 
 /**
  * State kept while a normalized run is projected into the legacy timeline
@@ -51,6 +54,7 @@ export interface AgentEventProjectionState {
   timeline: TimelineEntry[];
   subagents: ReadonlyMap<string, AgentSubagent>;
   latestUsage?: AgentUsage;
+  latestContextUsage?: AgentContextUsage;
   messageTimelineIds: ReadonlyMap<string, string>;
   deltaOffsets: ReadonlyMap<string, number>;
   notifications: AgentMonitorNotification[];
@@ -197,81 +201,6 @@ const finiteNonNegative = (value: unknown): number | undefined =>
     ? value
     : undefined;
 
-const usageFields = [
-  "inputTokens",
-  "outputTokens",
-  "cachedReadTokens",
-  "reasoningTokens",
-  "modelCalls",
-  "apiDurationMs",
-] as const;
-
-const mergeUsage = (
-  previous: AgentUsage | undefined,
-  next: AgentUsage,
-): AgentUsage => ({
-  ...(previous ?? {}),
-  ...next,
-  confidence: next.confidence,
-  ...(next.cost !== undefined
-    ? { cost: next.cost }
-    : previous?.cost !== undefined
-      ? { cost: previous.cost }
-      : {}),
-});
-
-/** Pi reports USD in dollars while the product stores cost in 1e-10 USD ticks. */
-const USD_TICKS_PER_DOLLAR = 10_000_000_000;
-
-const toBillingUsage = (usage: AgentUsage): AgentBillingUsage => {
-  const values = Object.fromEntries(
-    usageFields.map((field) => [field, finiteNonNegative(usage[field])]),
-  ) as Record<(typeof usageFields)[number], number | undefined>;
-  const usageIsIncomplete =
-    usage.confidence !== "measured" ||
-    usageFields.some((field) => values[field] === undefined);
-  const amount = finiteNonNegative(usage.cost?.amount);
-  const currency =
-    typeof usage.cost?.currency === "string"
-      ? usage.cost.currency.toUpperCase()
-      : undefined;
-  const hasUsdCost =
-    amount !== undefined &&
-    currency === "USD" &&
-    Number.isSafeInteger(amount * USD_TICKS_PER_DOLLAR);
-  const costUsdTicks = hasUsdCost
-    ? Math.round(amount * USD_TICKS_PER_DOLLAR)
-    : undefined;
-
-  return {
-    inputTokens: values.inputTokens ?? 0,
-    outputTokens: values.outputTokens ?? 0,
-    cachedReadTokens: values.cachedReadTokens ?? 0,
-    reasoningTokens: values.reasoningTokens ?? 0,
-    modelCalls: values.modelCalls ?? 0,
-    apiDurationMs: values.apiDurationMs ?? 0,
-    usageIsIncomplete,
-    // Absence of a convertible USD total is not evidence that the request was
-    // free. Keep the cost field partial so statistics do not manufacture zero.
-    costIsPartial: !hasUsdCost,
-    ...(costUsdTicks !== undefined ? { costUsdTicks } : {}),
-  };
-};
-
-const usageUpdate = (usage: AgentBillingUsage): JsonObject => ({
-  inputTokens: usage.inputTokens,
-  outputTokens: usage.outputTokens,
-  cachedReadTokens: usage.cachedReadTokens,
-  reasoningTokens: usage.reasoningTokens,
-  modelCalls: usage.modelCalls,
-  apiDurationMs: usage.apiDurationMs,
-  usageIsIncomplete: usage.usageIsIncomplete,
-  costIsPartial: usage.costIsPartial,
-  ...(usage.costUsdTicks !== undefined
-    ? { costUsdTicks: usage.costUsdTicks }
-    : {}),
-});
-
 const unchanged = (
   state: AgentEventProjectionState,
   event: AgentEventEnvelope,
@@ -305,100 +234,6 @@ const withProjection = (
   projection,
   ...extras,
 });
-
-const latestAssistantAfterLatestUser = (timeline: TimelineEntry[]) => {
-  let latestUserIndex = -1;
-  for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    const entry = timeline[index];
-    if (entry?.kind === "message" && entry.role === "user") {
-      latestUserIndex = index;
-      break;
-    }
-  }
-  for (let index = timeline.length - 1; index > latestUserIndex; index -= 1) {
-    const entry = timeline[index];
-    if (entry?.kind === "message" && entry.role === "assistant") {
-      return index;
-    }
-  }
-  return -1;
-};
-
-/** Replace a streamed assistant row with Pi's final complete message. */
-const completeAssistantMessage = (
-  timeline: TimelineEntry[],
-  messageTimelineId: string | undefined,
-  content: string | undefined,
-  assistantMetadata: AgentAssistantMetadata | undefined,
-  nativeEntryId: string | undefined,
-): TimelineEntry[] => {
-  const mappedIndex = messageTimelineId
-    ? timeline.findIndex(
-        (entry) =>
-          entry.id === messageTimelineId &&
-          entry.kind === "message" &&
-          entry.role === "assistant",
-      )
-    : -1;
-  const index =
-    mappedIndex >= 0 ? mappedIndex : latestAssistantAfterLatestUser(timeline);
-  if (index < 0) {
-    return settleSessionProjection(timeline);
-  }
-  const now = Date.now();
-  return timeline.map((entry, entryIndex) =>
-    entryIndex === index && entry.kind === "message"
-      ? {
-          ...entry,
-          ...(content !== undefined ? { content } : {}),
-          ...(nativeEntryId ? { nativeEntryId } : {}),
-          ...(assistantMetadata
-            ? {
-                assistantMetadata: {
-                  ...(entry.assistantMetadata ?? {}),
-                  ...assistantMetadata,
-                },
-              }
-            : {}),
-          streaming: false,
-          completedAt: entry.completedAt ?? now,
-        }
-      : entry,
-  );
-};
-
-const messageMapAfterDelta = (
-  map: ReadonlyMap<string, string>,
-  messageId: string,
-  timeline: TimelineEntry[],
-): Map<string, string> => {
-  const next = new Map(map);
-  for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    const entry = timeline[index];
-    if (
-      entry?.kind === "message" &&
-      entry.role === "assistant" &&
-      entry.streaming
-    ) {
-      next.set(messageId, entry.id);
-      break;
-    }
-  }
-  return next;
-};
-
-const removeMessageState = (
-  state: AgentEventProjectionState,
-  messageId: string,
-): Pick<AgentEventProjectionState, "messageTimelineIds" | "deltaOffsets"> => {
-  const messageTimelineIds = new Map(state.messageTimelineIds);
-  messageTimelineIds.delete(messageId);
-  const prefix = `${messageId}\u0000`;
-  const deltaOffsets = new Map(
-    [...state.deltaOffsets].filter(([key]) => !key.startsWith(prefix)),
-  );
-  return { messageTimelineIds, deltaOffsets };
-};
 
 const toolProjection = (
   timeline: TimelineEntry[],
@@ -449,6 +284,7 @@ const resetRunState = (
   projection: SessionUpdateResult,
 ): Partial<AgentEventProjectionState> => ({
   latestUsage: undefined,
+  latestContextUsage: undefined,
   messageTimelineIds: new Map(),
   deltaOffsets: new Map(),
   timeline: projection.timeline,
@@ -503,6 +339,26 @@ export const projectAgentEvent = (
     return unchanged(state, event, { ignored: true });
   }
 
+  const messageProjection = projectMessageEvent({
+    timeline: state.timeline,
+    messageTimelineIds: state.messageTimelineIds,
+    deltaOffsets: state.deltaOffsets,
+    event: normalizedEvent,
+    eventId: event.eventId,
+  });
+  if (messageProjection?.kind === "unchanged") {
+    return unchanged(state, event, messageProjection.extras);
+  }
+  if (messageProjection) {
+    return withProjection(
+      state,
+      event,
+      messageProjection.projection,
+      messageProjection.patch,
+      messageProjection.extras,
+    );
+  }
+
   if (eventType === "run.accepted") {
     const projection = { timeline: state.timeline };
     return withProjection(state, event, projection, resetRunState(projection), {
@@ -537,7 +393,10 @@ export const projectAgentEvent = (
       normalizedEvent.status === "interrupted"
     ) {
       const projection: SessionUpdateResult = {
-        timeline: settleSessionProjection(state.timeline),
+        timeline: stampLatestTurnContextUsage(
+          settleSessionProjection(state.timeline),
+          state.latestContextUsage,
+        ),
         completed: true,
       };
       return withProjection(
@@ -566,121 +425,14 @@ export const projectAgentEvent = (
       update,
       event.eventId,
     );
+    projection.timeline = stampLatestTurnContextUsage(
+      projection.timeline,
+      state.latestContextUsage,
+    );
     return withProjection(state, event, projection, resetRunState(projection), {
       billingUsage,
       lifecycle: "run-finished",
     });
-  }
-
-  if (eventType === "message.delta") {
-    const key = `${normalizedEvent.messageId}\u0000${normalizedEvent.partId}`;
-    const expectedOffset = state.deltaOffsets.get(key) ?? 0;
-    if (normalizedEvent.offset < expectedOffset) {
-      return unchanged(state, event, {
-        diagnostic: {
-          kind: "duplicate-message-delta",
-          eventType,
-          messageId: normalizedEvent.messageId,
-          partId: normalizedEvent.partId,
-          receivedOffset: normalizedEvent.offset,
-          expectedOffset,
-        },
-      });
-    }
-    const projection = applySessionUpdate(
-      state.timeline,
-      {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: normalizedEvent.text },
-      },
-      event.eventId,
-    );
-    const deltaOffsets = new Map(state.deltaOffsets);
-    deltaOffsets.set(key, normalizedEvent.offset + normalizedEvent.text.length);
-    return withProjection(
-      state,
-      event,
-      projection,
-      {
-        messageTimelineIds: messageMapAfterDelta(
-          state.messageTimelineIds,
-          normalizedEvent.messageId,
-          projection.timeline,
-        ),
-        deltaOffsets,
-      },
-      {
-        diagnostic:
-          normalizedEvent.offset > expectedOffset
-            ? {
-                kind: "message-offset-gap",
-                eventType,
-                messageId: normalizedEvent.messageId,
-                partId: normalizedEvent.partId,
-                receivedOffset: normalizedEvent.offset,
-                expectedOffset,
-              }
-            : undefined,
-      },
-    );
-  }
-
-  if (eventType === "thought.delta") {
-    const projection = applySessionUpdate(
-      state.timeline,
-      {
-        sessionUpdate: "agent_thought_chunk",
-        content: { type: "text", text: normalizedEvent.text },
-      },
-      event.eventId,
-    );
-    return withProjection(state, event, projection);
-  }
-
-  if (eventType === "message.started") {
-    if (normalizedEvent.role !== "user" || !normalizedEvent.content) {
-      return unchanged(state, event);
-    }
-    const projection = applySessionUpdate(
-      state.timeline,
-      {
-        sessionUpdate: "user_message_chunk",
-        content: { type: "text", text: normalizedEvent.content },
-      },
-      event.eventId,
-    );
-    return withProjection(state, event, projection);
-  }
-
-  if (eventType === "message.completed") {
-    if (normalizedEvent.role === "user") {
-      const withUser = normalizedEvent.content
-        ? applySessionUpdate(
-            state.timeline,
-            {
-              sessionUpdate: "user_message_chunk",
-              content: { type: "text", text: normalizedEvent.content },
-            },
-            event.eventId,
-          ).timeline
-        : state.timeline;
-      const projection: SessionUpdateResult = {
-        timeline: settleSessionProjection(withUser),
-      };
-      const messageState = removeMessageState(state, normalizedEvent.messageId);
-      return withProjection(state, event, projection, messageState);
-    }
-    const projection: SessionUpdateResult = {
-      timeline: completeAssistantMessage(
-        state.timeline,
-        state.messageTimelineIds.get(normalizedEvent.messageId),
-        normalizedEvent.content,
-        normalizedEvent.assistantMetadata,
-        normalizedEvent.nativeEntryId,
-      ),
-    };
-    const messageState = removeMessageState(state, normalizedEvent.messageId);
-    return withProjection(state, event, projection, messageState);
   }
 
   if (
@@ -728,11 +480,15 @@ export const projectAgentEvent = (
       },
       event.eventId,
     );
+    projection.timeline = stampLatestTurnContextUsage(
+      projection.timeline,
+      projection.contextUsage,
+    );
     return withProjection(
       state,
       event,
       projection,
-      {},
+      { latestContextUsage: projection.contextUsage },
       { contextConfidence: normalizedEvent.confidence },
     );
   }

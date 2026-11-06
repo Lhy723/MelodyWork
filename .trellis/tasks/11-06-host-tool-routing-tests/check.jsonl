@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Verify command registration, Result<T,String> error style, and test-gate claims"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check the joined authorization→hook→permission→dispatch ordering against cross-layer rules"}

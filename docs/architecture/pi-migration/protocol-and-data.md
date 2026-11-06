@@ -267,6 +267,8 @@ Host 同时生成独立的 `pi/melody-model-policies.json`，只承载经过校�
 
 首次启动、配置保存、凭据更新、远端目录刷新均发catalog revision事件。远端刷新设置deadline，不能因不可达阻塞所有本地模型。模型切换与会话恢复使用稳定provider+model标识，displayName不作为主键。
 
+规范事件的消息流细节由 `src/domain/agent/message-projection.ts` 持有：它负责 message/thought 增量、按消息与分片校验 offset、用完整 assistant 消息修复流式 timeline row，以及清理完成消息的局部状态。`projectAgentEvent` 仍负责 envelope/session 校验、过滤内部工具、调度其他事件，并将 owner 结果合并到 live/replay 共享的 projection state。
+
 ### 6.1 模型配置热同步
 
 设置页保存模型配置时，Host 会原子写入目录/策略快照，然后向当前 worker 发送 `runtime.models.sync`；worker 串行替换生成的 `MELODY_PI_MODEL_*` 环境变量、清理对应 provider 的运行时认证覆盖、替换旧的重试/空闲超时覆盖（不会因 Pi `SettingsManager` 的深度合并而残留）并强制刷新 Pi `ModelRuntime`。同步失败不回滚已经持久化的配置，但会保留可诊断的 worker 错误；没有活动 Pi 会话时不发送命令，下一次启动使用同一快照。正在进行的 provider 回合继续使用原模型，下一次新回合读取新目录、凭据和策略。

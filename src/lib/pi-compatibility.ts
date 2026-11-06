@@ -8,6 +8,7 @@ import {
   listMelodyAgentDefinitions,
   listMelodyHooks,
   listMelodyLspServers,
+  listMelodyMcpServers,
   listMelodyPluginCapabilities,
   listMelodySkills,
   readMelodyRuntimeEnvironment,
@@ -25,6 +26,7 @@ export const getPiCapabilityReport = async (
 ): Promise<PiCapabilityReport> => {
   const [
     configs,
+    mcpServers,
     extensions,
     skills,
     environment,
@@ -38,6 +40,18 @@ export const getPiCapabilityReport = async (
       (["user", "project"] as const).map((scope) =>
         readMelodyConfig(scope, cwd),
       ),
+    ),
+    listMelodyMcpServers(cwd).catch(
+      (
+        error,
+      ): import("@/domain/agent/capability-report").McpServerSnapshot[] => [
+        {
+          name: "<unreadable>",
+          transport: "unknown",
+          supported: false,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      ],
     ),
     listMelodyExtensions(cwd),
     listMelodySkills(cwd),
@@ -105,6 +119,7 @@ export const getPiCapabilityReport = async (
       parseError: config.parseError,
     })),
     extensions: extensions.map(mapExtension),
+    mcpServers,
     skills: skills.map(mapExtension),
     environment,
     agentDefinitions,

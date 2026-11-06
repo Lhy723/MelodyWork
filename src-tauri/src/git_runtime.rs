@@ -9,8 +9,6 @@ use crate::workspace_access::WorkspaceRegistry;
 #[path = "git_runtime_worktrees.rs"]
 mod git_runtime_worktrees;
 
-#[cfg(test)]
-pub(crate) use git_runtime_worktrees::parse_worktrees;
 pub use git_runtime_worktrees::*;
 
 #[derive(Clone, Debug, Serialize)]
@@ -437,6 +435,5 @@ async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<(), String> {
     .map(|_| ())
 }
 
-#[cfg(test)]
 #[path = "git_runtime_tests.rs"]
 mod tests;

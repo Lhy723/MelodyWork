@@ -208,7 +208,7 @@ export interface AcpEnvelope {
   raw?: string;
 }
 
-export type AcpSessionPhase =
+export type AgentSessionPhase =
   | "idle"
   | "initializing"
   | "authenticating"

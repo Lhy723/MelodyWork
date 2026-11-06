@@ -15,93 +15,41 @@
 //! Pi tool contract.
 
 use std::{
-    collections::BTreeMap,
     env, fs,
-    io::{self, BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
+    io::{BufRead, BufReader, Read, Write},
+    path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     thread,
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::{
-    agent_runtime::melody_home,
-    pi_tool_gateway::{self, success_for_request, tool_request_arguments},
+#[path = "pi_lsp_config.rs"]
+mod lsp_config;
+#[path = "pi_lsp_projection.rs"]
+mod projection;
+
+use self::lsp_config::{
+    LoadedServer, LspServerConfig, canonical_workspace, file_uri, language_id, load_servers,
+    normalize_file_path, workspace_root_for_server,
 };
+use self::projection::{bounded_text, format_locations, format_symbols, hover_text};
+
+use crate::pi_tool_gateway::{self, success_for_request, tool_request_arguments};
 
 pub(crate) const LSP_TOOL: &str = "lsp";
 
-const CONFIG_MAX_BYTES: u64 = 1024 * 1024;
-const COMMAND_MAX_BYTES: usize = 1024;
-const MAX_ARGS: usize = 64;
-const ARG_MAX_BYTES: usize = 4096;
-const MAX_ENV_ENTRIES: usize = 128;
-const ENV_NAME_MAX_BYTES: usize = 128;
-const ENV_VALUE_MAX_BYTES: usize = 16 * 1024;
-const MAX_EXTENSION_ENTRIES: usize = 256;
-const MAX_NAME_BYTES: usize = 128;
 const MAX_DOCUMENT_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_QUERY_BYTES: usize = 2048;
 const MAX_POSITION: u64 = 100_000;
-const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
-
-fn default_enabled() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct LspServerConfig {
-    #[serde(default = "default_enabled")]
-    enabled: bool,
-    #[serde(default)]
-    command: String,
-    #[serde(default)]
-    args: Vec<String>,
-    #[serde(default)]
-    transport: Option<String>,
-    #[serde(default)]
-    env: BTreeMap<String, String>,
-    #[serde(
-        default,
-        alias = "extensionToLanguage",
-        alias = "extensionToLanguageId"
-    )]
-    extensions: BTreeMap<String, String>,
-    #[serde(default, alias = "initializationOptions")]
-    initialization_options: Option<Value>,
-    #[serde(default)]
-    settings: Option<Value>,
-    #[serde(default, alias = "workspaceFolder")]
-    workspace_folder: Option<String>,
-    #[serde(default, alias = "startupTimeout")]
-    startup_timeout: Option<u64>,
-    #[serde(default, alias = "shutdownTimeout")]
-    shutdown_timeout: Option<u64>,
-    /// Project-scoped config must opt in explicitly because it can start an
-    /// executable from a repository. User-scoped config is already an
-    /// explicit user setting and does not need this marker.
-    #[serde(default)]
-    trusted: bool,
-}
-
-#[derive(Debug, Clone)]
-struct LoadedServer {
-    name: String,
-    scope: &'static str,
-    source_path: PathBuf,
-    config: LspServerConfig,
-    unsupported_fields: Vec<String>,
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,173 +143,6 @@ impl Drop for ChildGuard {
     }
 }
 
-fn bounded_text(value: impl Into<String>) -> String {
-    let value = value.into();
-    if value.len() <= MAX_OUTPUT_BYTES {
-        return value;
-    }
-    let suffix = "\n[output truncated]";
-    let mut end = MAX_OUTPUT_BYTES.saturating_sub(suffix.len());
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut result = value[..end].to_string();
-    result.push_str(suffix);
-    result
-}
-
-fn valid_name(value: &str, max_bytes: usize) -> bool {
-    !value.trim().is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
-}
-
-fn valid_env_name(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn canonical_workspace(root: &Path) -> Result<PathBuf, String> {
-    let canonical = root
-        .canonicalize()
-        .map_err(|error| format!("无法解析工作区路径：{error}"))?;
-    if !canonical.is_dir() {
-        return Err("工作区路径不是目录。".to_string());
-    }
-    Ok(canonical)
-}
-
-fn config_path(scope: &str, root: &Path) -> Result<PathBuf, String> {
-    match scope {
-        "user" => melody_home()
-            .map(|home| home.join("lsp.json"))
-            .ok_or_else(|| "无法定位 Melody 用户目录。".to_string()),
-        "project" => Ok(root.join(".melody").join("lsp.json")),
-        _ => Err("LSP 配置作用域无效。".to_string()),
-    }
-}
-
-fn read_config_file(path: &Path) -> Result<BTreeMap<String, LspServerConfig>, String> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(format!("无法读取 LSP 配置 {}：{error}", path.display())),
-    };
-    if bytes.len() as u64 > CONFIG_MAX_BYTES {
-        return Err(format!("LSP 配置 {} 超过 1 MB 限制。", path.display()));
-    }
-    let value: Value = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("LSP 配置 {} 不是有效 JSON：{error}", path.display()))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| format!("LSP 配置 {} 必须是对象。", path.display()))?;
-    if object.len() > MAX_EXTENSION_ENTRIES {
-        return Err("LSP server 数量超过安全上限。".to_string());
-    }
-    let mut result = BTreeMap::new();
-    for (name, value) in object {
-        if !valid_name(name, MAX_NAME_BYTES) {
-            return Err(format!("LSP server 名称无效：{name}"));
-        }
-        let config: LspServerConfig = serde_json::from_value(value.clone())
-            .map_err(|error| format!("LSP server {name} 配置无效：{error}"))?;
-        result.insert(name.clone(), config);
-    }
-    Ok(result)
-}
-
-fn validate_server(
-    name: &str,
-    scope: &'static str,
-    root: &Path,
-    config: &LspServerConfig,
-) -> Vec<String> {
-    let mut unsupported = Vec::new();
-    if !valid_name(&config.command, COMMAND_MAX_BYTES) {
-        unsupported.push("command".to_string());
-    }
-    if config.args.len() > MAX_ARGS
-        || config
-            .args
-            .iter()
-            .any(|arg| !valid_name(arg, ARG_MAX_BYTES))
-    {
-        unsupported.push("args".to_string());
-    }
-    let transport = config
-        .transport
-        .as_deref()
-        .unwrap_or("stdio")
-        .trim()
-        .to_ascii_lowercase();
-    if !["stdio", "local"].contains(&transport.as_str()) {
-        unsupported.push("transport".to_string());
-    }
-    if config.env.len() > MAX_ENV_ENTRIES
-        || config.env.iter().any(|(name, value)| {
-            name.len() > ENV_NAME_MAX_BYTES
-                || !valid_env_name(name)
-                || value.len() > ENV_VALUE_MAX_BYTES
-                || value.chars().any(char::is_control)
-        })
-    {
-        unsupported.push("env".to_string());
-    }
-    if config.extensions.len() > MAX_EXTENSION_ENTRIES
-        || config
-            .extensions
-            .iter()
-            .any(|(extension, language)| !valid_name(extension, 256) || !valid_name(language, 128))
-    {
-        unsupported.push("extensions".to_string());
-    }
-    if let Some(folder) = &config.workspace_folder {
-        if resolve_workspace_folder(root, folder).is_err() {
-            unsupported.push("workspaceFolder".to_string());
-        }
-    }
-    if scope == "project" && !config.trusted {
-        unsupported.push("projectTrustRequired".to_string());
-    }
-    if config.initialization_options.as_ref().is_some_and(|value| {
-        serde_json::to_vec(value).map_or(true, |bytes| bytes.len() > 256 * 1024)
-    }) {
-        unsupported.push("initializationOptions".to_string());
-    }
-    if config.settings.as_ref().is_some_and(|value| {
-        serde_json::to_vec(value).map_or(true, |bytes| bytes.len() > 256 * 1024)
-    }) {
-        unsupported.push("settings".to_string());
-    }
-    unsupported.sort();
-    unsupported.dedup();
-    let _ = name;
-    unsupported
-}
-
-fn load_servers(root: &Path) -> Result<Vec<LoadedServer>, String> {
-    let root = canonical_workspace(root)?;
-    let mut merged: BTreeMap<String, LoadedServer> = BTreeMap::new();
-    for scope in ["user", "project"] {
-        let path = config_path(scope, &root)?;
-        let configs = read_config_file(&path)?;
-        for (name, config) in configs {
-            let scope_static: &'static str = if scope == "user" { "user" } else { "project" };
-            let unsupported = validate_server(&name, scope_static, &root, &config);
-            merged.insert(
-                name.clone(),
-                LoadedServer {
-                    name,
-                    scope: scope_static,
-                    source_path: path.clone(),
-                    config,
-                    unsupported_fields: unsupported,
-                },
-            );
-        }
-    }
-    Ok(merged.into_values().collect())
-}
-
 /// Return the effective LSP inventory for the Settings/capability preflight.
 /// Project entries are included as unsupported until the config explicitly
 /// opts into `trusted = true`; malformed files fail closed to ACP.
@@ -378,49 +159,6 @@ pub(crate) fn list_melody_lsp_servers(cwd: &str) -> Result<Vec<MelodyLspServer>,
             unsupported_fields: server.unsupported_fields,
         })
         .collect())
-}
-
-fn normalize_file_path(root: &Path, value: &str) -> Result<PathBuf, String> {
-    if !valid_name(value, 4096) {
-        return Err("file_path 必须是有效路径。".to_string());
-    }
-    let candidate = {
-        let path = PathBuf::from(value);
-        if path.is_absolute() {
-            path
-        } else {
-            root.join(path)
-        }
-    };
-    let canonical = candidate
-        .canonicalize()
-        .map_err(|error| format!("无法读取 LSP 文件 {}：{error}", candidate.display()))?;
-    if !canonical.starts_with(root) || !canonical.is_file() {
-        return Err("LSP 文件必须位于当前工作区内。".to_string());
-    }
-    Ok(canonical)
-}
-
-fn resolve_workspace_folder(root: &Path, value: &str) -> Result<PathBuf, String> {
-    if !valid_name(value, 4096) {
-        return Err("workspaceFolder 必须是有效路径。".to_string());
-    }
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|error| format!("无法解析工作区路径：{error}"))?;
-    let path = PathBuf::from(value);
-    let candidate = if path.is_absolute() {
-        path
-    } else {
-        canonical_root.join(path)
-    };
-    let canonical = candidate
-        .canonicalize()
-        .map_err(|error| format!("无法解析 LSP workspaceFolder：{error}"))?;
-    if !canonical.starts_with(&canonical_root) || !canonical.is_dir() {
-        return Err("workspaceFolder 必须位于当前工作区内。".to_string());
-    }
-    Ok(canonical)
 }
 
 fn choose_server<'a>(
@@ -469,201 +207,6 @@ fn choose_server<'a>(
     let extension = extension.unwrap_or_else(|| "<无扩展名>".to_string());
     let _ = operation;
     Err(format!("没有 LSP server 声明处理文件扩展名 {extension}。"))
-}
-
-fn language_id(server: &LoadedServer, path: &Path) -> String {
-    let extension = path.extension().and_then(|value| value.to_str());
-    extension
-        .and_then(|extension| {
-            let dot = format!(".{extension}");
-            server
-                .config
-                .extensions
-                .iter()
-                .find_map(|(candidate, language)| {
-                    candidate
-                        .trim_start_matches('.')
-                        .eq_ignore_ascii_case(dot.trim_start_matches('.'))
-                        .then(|| language.clone())
-                })
-        })
-        .unwrap_or_else(|| "plaintext".to_string())
-}
-
-fn file_uri(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    let mut encoded = String::with_capacity(raw.len() + 8);
-    for byte in raw.as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
-            encoded.push(*byte as char);
-        } else {
-            encoded.push('%');
-            encoded.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
-            encoded.push(char::from(b"0123456789ABCDEF"[(byte & 0x0F) as usize]));
-        }
-    }
-    format!("file://{encoded}")
-}
-
-fn percent_decode(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let hi = (bytes[index + 1] as char).to_digit(16);
-            let lo = (bytes[index + 2] as char).to_digit(16);
-            if let (Some(hi), Some(lo)) = (hi, lo) {
-                output.push((hi * 16 + lo) as u8);
-                index += 3;
-                continue;
-            }
-        }
-        output.push(bytes[index]);
-        index += 1;
-    }
-    String::from_utf8_lossy(&output).into_owned()
-}
-
-fn location_path(value: &Value) -> Option<(String, u64, u64)> {
-    let object = value.as_object()?;
-    let uri = object
-        .get("uri")
-        .or_else(|| object.get("targetUri"))
-        .and_then(Value::as_str)?;
-    let range = object
-        .get("range")
-        .or_else(|| object.get("targetSelectionRange"))
-        .and_then(Value::as_object)?;
-    let start = range.get("start").and_then(Value::as_object)?;
-    let line = start.get("line").and_then(Value::as_u64).unwrap_or(0);
-    let character = start.get("character").and_then(Value::as_u64).unwrap_or(0);
-    let path = uri
-        .strip_prefix("file://")
-        .map(percent_decode)
-        .unwrap_or_else(|| uri.to_string());
-    Some((path, line + 1, character + 1))
-}
-
-fn result_items(value: &Value) -> Vec<&Value> {
-    match value {
-        Value::Array(items) => items.iter().collect(),
-        Value::Null => Vec::new(),
-        other => vec![other],
-    }
-}
-
-fn format_locations(label: &str, value: &Value) -> String {
-    let mut locations = result_items(value)
-        .into_iter()
-        .filter_map(location_path)
-        .map(|(path, line, character)| format!("  {path}:{line}:{character}"))
-        .collect::<Vec<_>>();
-    locations.sort();
-    locations.dedup();
-    if locations.is_empty() {
-        return "No results found.".to_string();
-    }
-    format!(
-        "{label} ({} location{}):\n{}",
-        locations.len(),
-        if locations.len() == 1 { "" } else { "s" },
-        locations.join("\n")
-    )
-}
-
-fn symbol_kind(value: &Value) -> &'static str {
-    match value.as_u64().unwrap_or(0) {
-        1 => "File",
-        2 => "Module",
-        3 => "Namespace",
-        4 => "Package",
-        5 => "Class",
-        6 => "Method",
-        7 => "Property",
-        8 => "Field",
-        9 => "Constructor",
-        10 => "Enum",
-        11 => "Interface",
-        12 => "Function",
-        13 => "Variable",
-        14 => "Constant",
-        15 => "String",
-        16 => "Number",
-        17 => "Boolean",
-        18 => "Array",
-        19 => "Object",
-        20 => "Key",
-        21 => "Null",
-        22 => "EnumMember",
-        23 => "Struct",
-        24 => "Event",
-        25 => "Operator",
-        26 => "TypeParameter",
-        _ => "Symbol",
-    }
-}
-
-fn append_symbols(value: &Value, output: &mut Vec<String>) {
-    let Some(object) = value.as_object() else {
-        return;
-    };
-    let Some(name) = object.get("name").and_then(Value::as_str) else {
-        return;
-    };
-    let location = object
-        .get("location")
-        .and_then(location_path)
-        .or_else(|| location_path(value));
-    let Some((path, line, _character)) = location else {
-        return;
-    };
-    let kind = symbol_kind(object.get("kind").unwrap_or(&Value::Null));
-    output.push(format!("{kind} {name} ({path}:{line})"));
-    if let Some(children) = object.get("children").and_then(Value::as_array) {
-        for child in children {
-            append_symbols(child, output);
-        }
-    }
-}
-
-fn format_symbols(value: &Value) -> String {
-    let mut symbols = Vec::new();
-    for item in result_items(value) {
-        append_symbols(item, &mut symbols);
-    }
-    symbols.sort();
-    symbols.dedup();
-    if symbols.is_empty() {
-        "No symbols found.".to_string()
-    } else {
-        bounded_text(symbols.join("\n"))
-    }
-}
-
-fn hover_text(value: &Value) -> String {
-    let Some(contents) = value.get("contents") else {
-        return "No hover information available.".to_string();
-    };
-    fn one(value: &Value) -> Option<String> {
-        match value {
-            Value::String(text) => Some(text.clone()),
-            Value::Object(object) => object
-                .get("value")
-                .and_then(Value::as_str)
-                .map(ToString::to_string),
-            _ => None,
-        }
-    }
-    let text = match contents {
-        Value::Array(items) => items.iter().filter_map(one).collect::<Vec<_>>().join("\n"),
-        other => one(other).unwrap_or_default(),
-    };
-    if text.trim().is_empty() {
-        "No hover information available.".to_string()
-    } else {
-        bounded_text(text)
-    }
 }
 
 fn write_frame(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
@@ -787,14 +330,6 @@ fn startup_timeout(config: &LspServerConfig) -> Duration {
         .map(Duration::from_millis)
         .unwrap_or(DEFAULT_STARTUP_TIMEOUT)
         .clamp(Duration::from_millis(1), MAX_STARTUP_TIMEOUT)
-}
-
-fn workspace_root_for_server(root: &Path, config: &LspServerConfig) -> PathBuf {
-    config
-        .workspace_folder
-        .as_ref()
-        .and_then(|path| resolve_workspace_folder(root, path).ok())
-        .unwrap_or_else(|| root.to_path_buf())
 }
 
 fn send_client_response(stdin: &mut ChildStdin, id: &Value) -> Result<(), String> {
@@ -1147,95 +682,4 @@ pub(crate) fn resolve_request(root: &Path, value: &Value) -> Value {
         outputs.remove(0)
     };
     success_for_request(value, bounded_text(output))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn parses_operations_and_aliases() {
-        assert_eq!(
-            LspOperation::parse("goToDefinition"),
-            Some(LspOperation::Definition)
-        );
-        assert_eq!(
-            LspOperation::parse("workspaceSymbol"),
-            Some(LspOperation::WorkspaceSymbol)
-        );
-        assert_eq!(LspOperation::parse("unknown"), None);
-    }
-
-    #[test]
-    fn rejects_untrusted_project_server_and_invalid_transport() {
-        let root = env::temp_dir().join(format!("melody-lsp-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let config = LspServerConfig {
-            command: "rust-analyzer".into(),
-            transport: Some("socket".into()),
-            ..Default::default()
-        };
-        let fields = validate_server("rust", "project", &root, &config);
-        assert!(fields.contains(&"transport".to_string()));
-        assert!(fields.contains(&"projectTrustRequired".to_string()));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn disabled_server_is_kept_in_inventory_but_not_selected() {
-        let root = env::temp_dir().join(format!("melody-lsp-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let server = LoadedServer {
-            name: "disabled".to_string(),
-            scope: "user",
-            source_path: root.join("lsp.json"),
-            config: LspServerConfig {
-                enabled: false,
-                command: "rust-analyzer".to_string(),
-                ..Default::default()
-            },
-            unsupported_fields: Vec::new(),
-        };
-        let error = choose_server(&[server], LspOperation::WorkspaceSymbol, None).unwrap_err();
-        assert!(error.contains("没有可安全启动"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn resolves_relative_workspace_folder_under_workspace_root() {
-        let root = env::temp_dir().join(format!("melody-lsp-test-{}", uuid::Uuid::new_v4()));
-        let nested = root.join("packages");
-        fs::create_dir_all(&nested).unwrap();
-        let resolved = resolve_workspace_folder(&root, "packages").unwrap();
-        assert_eq!(resolved, nested.canonicalize().unwrap());
-        assert!(resolve_workspace_folder(&root, "../").is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_unbounded_positions() {
-        let mut arguments = Map::new();
-        arguments.insert("line".to_string(), json!(MAX_POSITION + 1));
-        let error = parse_u64(&arguments, "line").unwrap_err();
-        assert!(error.contains("位置上限"));
-    }
-
-    #[test]
-    fn formats_locations_and_decodes_file_uris() {
-        let value = json!([
-            { "uri": "file:///tmp/a%20b.ts", "range": { "start": { "line": 1, "character": 2 } } }
-        ]);
-        assert_eq!(
-            format_locations("Definition", &value),
-            "Definition (1 location):\n  /tmp/a b.ts:2:3"
-        );
-    }
-
-    #[test]
-    fn bounds_large_output_without_splitting_utf8() {
-        let output = bounded_text("字".repeat(MAX_OUTPUT_BYTES));
-        assert!(output.len() <= MAX_OUTPUT_BYTES);
-        assert!(output.ends_with("[output truncated]"));
-    }
 }

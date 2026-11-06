@@ -502,19 +502,4 @@ impl AppDatabase {
             connection: Mutex::new(connection),
         })
     }
-
-    #[cfg(test)]
-    pub(crate) fn in_memory() -> Self {
-        let connection = Connection::open_in_memory().expect("in-memory database");
-        connection
-            .busy_timeout(Duration::from_secs(5))
-            .expect("busy timeout");
-        connection
-            .execute_batch("PRAGMA foreign_keys = ON;")
-            .expect("foreign keys");
-        initialize_schema(&connection).expect("schema");
-        Self {
-            connection: Mutex::new(connection),
-        }
-    }
 }

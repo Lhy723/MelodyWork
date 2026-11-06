@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Host command, module, and test-gate conventions for src-tauri"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Ordering invariants across renderer, host bridge, and worker boundary"}

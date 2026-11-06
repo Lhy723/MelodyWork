@@ -24,13 +24,13 @@ ACP cursor，否则先展示归档并让 ACP 重放校验运行态，快照只�
 
 ## 已完成的优先序列
 
-| 顺序 | 领域               | 原问题                                                                          | 当前边界                                                                                                         | 验证重点                                           |
-| ---- | ------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 1    | Session Projection | store 与 reducer 各维护一套事件投影，测试依赖大量回调                           | `session-projection.ts` 直接拥有消息、思考、工具、用量、失败与权限请求的投影规则                                 | 真实 timeline 结果、版本恢复、事件去重             |
-| 2    | Research Project   | 搜索结果、历史、追踪主题和论文集合由 UI 分步更新，容易产生半完成状态            | research store 提供原子 `recordSearchResult` 与 `refreshTrackingTopic` 工作流                                    | 项目隔离、论文身份保留、追踪刷新一致性             |
-| 3    | Task Launch        | 新任务和 Research prompt 分别维护 pending ref/effect，存在重复投递风险          | `TaskLauncher` 统一创建、排队、ready 对齐与一次性投递                                                            | session 对齐、at-most-once、使用真实创建结果       |
-| 4    | ACP Policy         | 进程桥接、JSON-RPC 校验、pending request、权限选项和宿主确认混在一个 command 中 | `acp_policy.rs` 拥有协议与 pending 生命周期；Tauri 层只负责 workspace、SQLite 和 stdio，确认由应用内权限卡片处理 | 方法白名单、MCP 注入、TTL/容量、响应匹配、权限选项 |
-| 5    | Melody Capability  | 设置页自行组合发现/安装结果和刷新规则，Rust 配置同时维护互斥状态集合            | 前端 lifecycle 统一发现、合并与刷新；Rust lifecycle 统一 enabled/disabled 不变量                                 | 插件身份优先、技能刷新时序、配置集合一致性         |
+| 顺序 | 领域               | 原问题                                                                          | 当前边界                                                                                                                                                                                                     | 验证重点                                           |
+| ---- | ------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| 1    | Session Projection | store 与 reducer 各维护一套事件投影，测试依赖大量回调                           | `event-to-session-update.ts` 统一规范事件校验与 dispatch；`message-projection.ts` 拥有 message/thought stream continuity、完成回填与状态清理；共享 timeline update 仍由 `session-projection-updates.ts` 处理 | 真实 timeline 结果、版本恢复、事件去重             |
+| 2    | Research Project   | 搜索结果、历史、追踪主题和论文集合由 UI 分步更新，容易产生半完成状态            | research store 提供原子 `recordSearchResult` 与 `refreshTrackingTopic` 工作流                                                                                                                                | 项目隔离、论文身份保留、追踪刷新一致性             |
+| 3    | Task Launch        | 新任务和 Research prompt 分别维护 pending ref/effect，存在重复投递风险          | `TaskLauncher` 统一创建、排队、ready 对齐与一次性投递                                                                                                                                                        | session 对齐、at-most-once、使用真实创建结果       |
+| 4    | ACP Policy         | 进程桥接、JSON-RPC 校验、pending request、权限选项和宿主确认混在一个 command 中 | `acp_policy.rs` 拥有协议与 pending 生命周期；Tauri 层只负责 workspace、SQLite 和 stdio，确认由应用内权限卡片处理                                                                                             | 方法白名单、MCP 注入、TTL/容量、响应匹配、权限选项 |
+| 5    | Melody Capability  | 设置页自行组合发现/安装结果和刷新规则，Rust 配置同时维护互斥状态集合            | 前端 lifecycle 统一发现、合并与刷新；Rust lifecycle 统一 enabled/disabled 不变量                                                                                                                             | 插件身份优先、技能刷新时序、配置集合一致性         |
 
 ## 当前结构
 
@@ -135,3 +135,42 @@ git diff --check
 - Vite 将 Radix 与 Motion 稳定依赖拆为可缓存 vendor chunk，功能入口变化不会重复下载 UI 框架代码。
 
 构建仍会报告 Monaco editor 本体、部分 Shiki 语言包和 wasm chunk 超过 500 KB；这些是对应功能的按需 chunk，不会进入初始入口。统计页的 ECharts 已按核心、组件、图表和 renderer 拆分，单个 chunk 已降到 500 KB 以下。剩余体积属于编辑器语言包和 wasm 运行时，继续缩小需要改变功能粒度，暂不通过提高 warning 阈值掩盖体积。
+
+## 2026-10-10：Pi-only runtime 结构治理补充
+
+上文“当前没有需要立即推进的架构阻塞项”只对应当时列出的五项产品架构改进，不代表 Pi-only runtime 的后续治理已经结束。Pi 迁移后仍需按变化原因持续治理 Host 与 worker 的核心模块；当前实现状态以 `docs/architecture/pi-migration/README.md`、`handoff.md` 和兼容清单为准。
+
+本轮重构继续遵循相同的深模块原则，并明确以下所有权：
+
+- agent-contract 的命令 envelope 校验保留稳定入口；Host resource manifest 的 bounds 与 subagent/goal/root schema 收敛到 validation/resource-manifest.ts，共享校验 primitive 位于 validation/shared.ts。测试仍穿过现有 validateAgentCommandEnvelope 接口，package exports 不变。
+- `PiSessionAdapter` 与 `PiWorkerRuntime` 保留 session/process generation 生命周期和跨模块时序；资源发现、模型策略、原生会话持久化策略、子代理记录与会话边界、工具请求阶段等稳定规则由内部 owner 承担。Host 对 Pi session commands 的 workspace、engine binding、import journal 与 fork intent preflight 归 `pi_worker_runtime/session_commands.rs`；Host 的 per-model request policy projection 归 `pi_model_config/model_policy.rs`，user/project model merge、remote overlay、schema normalization 与 credential-reference projection 归 `pi_model_config/model_projection.rs`，config read/remote acquisition/file persistence 仍由 parent 组合；这些变化不改变 worker 的 Pi-only runtime 选择。
+- `PiToolGateway` 保留 Host 侧最终权限裁决与 dispatch；workspace 操作、请求策略、路径验证、输出归档、指令文件范围及 Host 管理的 worktree 等规则由内部 owner 实现。任何 worker 投影、能力清单或兼容检查都不能替代 Host 的最终授权。
+- Host 配置、Marketplace、浏览器、MCP、memory 与数据库代码只有在存在独立变化原因和有意义的窄接口时才继续拆分；进程、文件系统与数据库等 adapter 留在实际拥有生命周期和故障策略的一侧。
+- `check-pi-compatibility.mjs` 负责 source snapshots 与总体诊断；可独立验证的跨端合同由纯 owner 和 fixture tests 覆盖。所有者测试验证可观察的合同，不以私有文件布局作为长期接口。
+- Pi compaction 的 manifest entry point、两阶段压缩 markers、任务状态重建 owners 与失败兜底由 `scripts/pi-compaction-compatibility.mjs` fixture 测试；聚合 checker 只读取 worker source snapshot 并汇总诊断。
+
+后续治理的验收仍以行为不变、责任集中和可测试接口为准，而非目录/文件数或行数下降。特别是事件持久化与 renderer delivery 的顺序、子代理路径 containment、Host permission checks、sandbox fail-closed 决策等规则，必须在其真实 owner 处保持；如果缺少能表达这些行为的既有测试 seam，应先确认 seam 与可观察不变量，再迁移实现。全仓结构治理仍为进行中，不因局部 owner 拆分或静态门禁通过而视作完成。
+
+## 2026-10-11：Pi config manifest composition root
+
+`config_runtime.rs` 作为现有 Host config facade 承担完整 `pi_resource_manifest` 组合，避免较低层 resource owners 与 `config_subagents.rs` 形成 sibling dependency cycle。`config_pi_resources.rs` 负责 Skill discovery/projection 与 gitignore snapshot，`config_prompt_resources.rs` 独立负责 command prompt 扫描、bounded path projection 和运行时 root/disabled snapshot；两者保持 sibling resource owners。Subagent owner 仍从插件资源目录生成自己的 policy submanifest；facade 保留既有 composition/evaluation 顺序。测试继续区分资源发现、子代理 policy 的纯行为与 facade wiring，不以静态 source marker 代替运行时安全行为测试。后续切片应继续以当前调用图和明确 failure/behavior contract 为依据，不按行数机械拆分。
+
+## 2026-10-11：Pi-only renderer routing owner
+
+Renderer client selection、session identity 和 subscription 原由 `AgentClientEngine`、per-session override Map、persisted `agentEngine` 与多处调用方共同表示。现由 runtime context 单独决定 Desktop Pi / browser-preview ACP fixture；`agentClientForRuntime()` 与 `beginAgentSession()` 的实际入口 tests 固定 client route 和 product-vs-preview session ID。旧设置字段只为兼容归一化，归档只读与 ACP→Pi import 仍保留独立路径。此 slice 不改变 Host 安全授权或 worker runtime，并不代表全仓结构债务治理完成。
+
+## 2026-10-11：Renderer AgentStore runtime vocabulary boundary
+
+Pi-only routing 后，Zustand `AgentStore` 仍用 `acpSessionId/acpPhase/acpCursor` 表达任意活动 runtime 的身份、生命周期和规范事件检查点，容易与数据库 `SessionRecord` 中保留的 legacy ACP archive/import 字段混为一谈。内存态改用 `runtimeSessionId/runtimePhase/eventCursor`；source/import inputs 则显式命名为 `sourceAcpSessionId/sourceAcpCursor`。持久化字段与 archive/import/wire 形状不变，由 persistence adapter 在写入处把 `eventCursor` 映射为 legacy `acpCursor`。Desktop 的 session-open envelope 经既有 `beginAgentSession()` seam 验证仍使用 product session ID；Browser preview fixture 保持 source ACP ID。该切片只澄清状态所有权命名，不改变 Host 权限、协议或 runtime 行为。
+
+## 2026-10-11：Pi provider error projection owner
+
+Pi session event handling 将 untrusted provider error 转成受限产品错误时，原先把文本边界、secret redaction、rate-limit classification 与 run lifecycle 都放在 `session-adapter.ts`。纯映射现在由 `session-errors.ts` 拥有；session adapter 继续控制当前 run error、恢复清除与 `run.finished` 排序。真实 worker protocol 集成测试观察到 assistant error message 后同一 run 成功恢复，并验证持续 rate-limit failure 的产品投影与 secret redaction。没有调整 SDK retry、Host authorization 或 worker 协议。
+
+## 2026-10-11：MCP inventory cross-layer compatibility owner
+
+MCP inventory 的 Pi manifest、Host command authority、Tauri registration/permission、renderer preflight 与 capability-report 消费链，现由 fixture-tested `scripts/pi-mcp-inventory-compatibility.mjs` owner 检查。Aggregate checker 继续负责 source snapshot 读取与诊断汇总；owner 限定于纯静态合同验证，不改变 MCP runtime，也不取代 Host 的实际授权与配置校验。六项 fixture 覆盖缺失/错误 inventory、command-scope workspace authorization、注册/权限、renderer bridge/preflight 与 Host status 复用，并专门防止无关函数中的 authorization marker 造成假阳性。
+
+## 2026-10-13：PiSessionAdapter open/refresh workflow owners
+
+`PiSessionAdapter` 保留每会话 lifecycle queue、运行态协作和公开 command/event 入口。Root session 的模型/资源准备、受限 Pi 创建、handle/subscription 注册与 lifecycle acknowledgements 由 `session-open-runtime.ts` 组合；fork 与 import 仍复用同一打开流程。Root/child Host resource snapshot normalization、active-run defer、刷新失败汇总与 completion warning 由 `session-resource-refresh-runtime.ts` 拥有。两条 workflow 使用现有 adapter command/event 行为测试验证，不增加测试专用 production port。Host workspace authorization 与 ToolGateway 最终裁决仍位于 Rust Host；Pi-only runtime、session identity、事件顺序和 wire contract 未改变。

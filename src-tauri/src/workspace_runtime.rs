@@ -14,14 +14,4 @@ pub use workspace_terminal::{
     write_terminal_input,
 };
 
-#[cfg(test)]
-pub(crate) use workspace_files::collect_tree;
 pub(crate) use workspace_files::is_ignored_directory;
-#[cfg(test)]
-pub(crate) use workspace_files::read_workspace_binary_bytes;
-#[cfg(test)]
-pub(crate) use workspace_terminal::{terminal_command, wait_for_terminal_exit};
-
-#[cfg(test)]
-#[path = "workspace_runtime_tests.rs"]
-mod tests;

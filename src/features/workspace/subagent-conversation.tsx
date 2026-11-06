@@ -14,7 +14,6 @@ import type { AgentSubagent, TimelineEntry } from "@/domain/acp";
 import type { ProjectReference } from "@/domain/message-citations";
 import { AgentTimeline } from "@/features/chat/agent-timeline";
 import { SubagentAvatar } from "@/features/chat/subagent-avatar";
-import { agentEngineForSession } from "@/lib/agent-client";
 import {
   isTauriRuntime,
   sendPiAgentCommand,
@@ -73,8 +72,7 @@ export function SubagentConversation({
     active &&
     subagent.status === "completed" &&
     !subagent.parentTaskId &&
-    isTauriRuntime() &&
-    agentEngineForSession(subagent.parentSessionId) === "pi";
+    isTauriRuntime();
   const continueChild = async () => {
     const content = draft.trim();
     if (!canContinue || !content || continuing) return;

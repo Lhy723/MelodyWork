@@ -60,7 +60,7 @@ export const submitAgentPrompt = async (
       const latestState = get();
       if (
         latestState.localSessionId !== localSessionId ||
-        latestState.acpSessionId !== stateBeforeSubmit.acpSessionId ||
+        latestState.runtimeSessionId !== stateBeforeSubmit.runtimeSessionId ||
         latestState.chatStatus !== stateBeforeSubmit.chatStatus
       ) {
         throw new Error(
@@ -120,13 +120,13 @@ export const submitAgentPrompt = async (
   };
 
   if (stateBeforeSubmit.chatStatus !== "ready") {
-    const sessionId = stateBeforeSubmit.acpSessionId;
+    const sessionId = stateBeforeSubmit.runtimeSessionId;
     if (!sessionId || !localSessionId) {
       return;
     }
     set((state) => ({
       chatStatus: "submitted",
-      acpPhase: "prompting",
+      runtimePhase: "prompting",
       runningSessions: {
         ...state.runningSessions,
         [localSessionId]: true,
@@ -149,7 +149,7 @@ export const submitAgentPrompt = async (
     const id = allocatePromptRequestId();
     const promptId = `melody-work-${localSessionId}-${id}`;
     pendingPrompts.set(id, {
-      acpSessionId: sessionId,
+      runtimeSessionId: sessionId,
       localSessionId,
       promptId,
       createdAt: Date.now(),
@@ -173,7 +173,7 @@ export const submitAgentPrompt = async (
     } catch (reason) {
       removePendingPrompt(id);
       set((state) => ({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         runningSessions: {
           ...state.runningSessions,
@@ -211,10 +211,10 @@ export const submitAgentPrompt = async (
   }));
 
   if (!isTauriRuntime()) {
-    const sessionId = get().acpSessionId;
+    const sessionId = get().runtimeSessionId;
     if (!sessionId || !localSessionId) {
       set((state) => ({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         status: {
           ...state.status,
@@ -226,12 +226,12 @@ export const submitAgentPrompt = async (
     const id = allocatePromptRequestId();
     const promptId = `melody-work-${localSessionId}-${id}`;
     pendingPrompts.set(id, {
-      acpSessionId: sessionId,
+      runtimeSessionId: sessionId,
       localSessionId,
       promptId,
       createdAt: Date.now(),
     });
-    set({ acpPhase: "prompting" });
+    set({ runtimePhase: "prompting" });
     try {
       await sendTurn(id, sessionId, promptId);
       if (pendingPrompts.has(id)) {
@@ -240,7 +240,7 @@ export const submitAgentPrompt = async (
     } catch (reason) {
       removePendingPrompt(id);
       set((state) => ({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         runningSessions: {
           ...state.runningSessions,
@@ -252,11 +252,11 @@ export const submitAgentPrompt = async (
     return;
   }
 
-  const sessionId = get().acpSessionId;
+  const sessionId = get().runtimeSessionId;
   if (!sessionId) {
     set((state) => ({
       chatStatus: "error",
-      acpPhase: "error",
+      runtimePhase: "error",
       runningSessions: localSessionId
         ? {
             ...state.runningSessions,
@@ -276,13 +276,13 @@ export const submitAgentPrompt = async (
   const id = allocatePromptRequestId();
   const promptId = `melody-work-${localSessionId}-${id}`;
   pendingPrompts.set(id, {
-    acpSessionId: sessionId,
+    runtimeSessionId: sessionId,
     localSessionId,
     promptId,
     createdAt: Date.now(),
   });
   pendingUserEchoBlocks.set(sessionId, prompt.length);
-  set({ acpPhase: "prompting" });
+  set({ runtimePhase: "prompting" });
   try {
     await sendTurn(id, sessionId, promptId);
     if (pendingPrompts.has(id)) {
@@ -291,7 +291,7 @@ export const submitAgentPrompt = async (
   } catch (reason) {
     removePendingPrompt(id);
     set((state) => ({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       runningSessions: {
         ...state.runningSessions,

@@ -6,516 +6,35 @@ import type {
   AgentSubagentPolicyManifest,
   AgentSubagentRolePolicy,
 } from "@melody/agent-contract";
-import { containsControlCharacters } from "@melody/agent-contract";
+import {
+  createPiSubagentPolicyError as policyError,
+  isPiSubagentType,
+  normalizePiSubagentCapabilityMode,
+  normalizePiSubagentIsolation,
+  normalizePiSubagentPolicyManifest,
+  normalizePiSubagentType,
+} from "./subagent-policy-normalization.ts";
+import type {
+  PiSubagentIsolation,
+  PiSubagentType,
+} from "./subagent-policy-normalization.ts";
+import {
+  intersectPiSubagentCapabilityModes,
+  type PiSubagentCapabilityMode,
+} from "./tool-access-policy.ts";
 
-const MAX_POLICY_COUNT = 128;
-const MAX_NAME_LENGTH = 128;
-const MAX_DESCRIPTION_LENGTH = 2_000;
-const MAX_INSTRUCTIONS_LENGTH = 32 * 1024;
-const MAX_MODEL_ID_LENGTH = 256;
-const MAX_REASONING_LENGTH = 32;
-const MAX_TOGGLE_COUNT = 256;
-
-const CAPABILITY_MODES = new Set<AgentSubagentCapabilityMode>([
-  "read-only",
-  "read-write",
-  "read-write-execute",
-  "execute",
-  "all",
-]);
-const ISOLATIONS = new Set<AgentSubagentIsolation>(["none", "worktree"]);
-
-type PolicyError = Error & {
-  agentError: {
-    code: string;
-    message: string;
-    retriable: false;
-    scope: "run";
-  };
-};
-
-const policyError = (code: string, message: string): PolicyError => {
-  const error = new Error(message) as PolicyError;
-  error.agentError = {
-    code,
-    message,
-    retriable: false,
-    scope: "run",
-  };
-  return error;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
-const text = (
-  value: unknown,
-  field: string,
-  maxLength: number,
-  required = false,
-): string | undefined => {
-  if (value === undefined || value === null) {
-    if (required) {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        `${field} 必须是非空字符串。`,
-      );
-    }
-    return undefined;
-  }
-  if (
-    typeof value !== "string" ||
-    value.trim().length === 0 ||
-    value.length > maxLength ||
-    containsControlCharacters(value)
-  ) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 必须是长度不超过 ${maxLength} 且不含控制字符的非空字符串。`,
-    );
-  }
-  return value.trim();
-};
-
-const policyName = (value: unknown, field: string): string => {
-  const name = text(value, field, MAX_NAME_LENGTH, true);
-  // The required branch above always returns a string; keep this guard for
-  // TypeScript and for callers that use a transpiler without narrowing.
-  if (!name) {
-    throw policyError("pi.subagent_policy_invalid", `${field} 不能为空。`);
-  }
-  return name;
-};
-
-const optionalCapability = (
-  value: unknown,
-  field: string,
-): AgentSubagentCapabilityMode | undefined => {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string") {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不是受支持的 capabilityMode。`,
-    );
-  }
-  const normalized = value.trim().toLowerCase().replaceAll("_", "-");
-  const aliases: Record<string, AgentSubagentCapabilityMode> = {
-    readonly: "read-only",
-    "read-only": "read-only",
-    readwrite: "read-write",
-    "read-write": "read-write",
-    readwriteexecute: "read-write-execute",
-    "read-write-execute": "read-write-execute",
-    execute: "execute",
-    all: "all",
-  };
-  const mode = aliases[normalized];
-  if (!mode || !CAPABILITY_MODES.has(mode)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不是受支持的 capabilityMode。`,
-    );
-  }
-  return mode;
-};
-
-const MAX_MCP_TOOLS = 64;
-const MAX_MCP_NAME_LENGTH = 128;
-const MCP_TOOL_PATTERN = /^mcp__[A-Za-z0-9_.-]{1,64}__[A-Za-z0-9_.-]{1,96}$/u;
-
-/**
- * Exact MCP tool grants. A malformed entry fails closed: silently dropping it
- * would either remove a granted tool or, if the list were ignored entirely,
- * hand the child the whole server surface.
- */
-const optionalMcpTools = (
-  value: unknown,
-  field: string,
-): string[] | undefined => {
-  if (value === undefined || value === null) return undefined;
-  if (!Array.isArray(value) || value.length > MAX_MCP_TOOLS) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不是受支持的 MCP 授权列表。`,
-    );
-  }
-  const tools = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== "string") {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        `${field} 只能包含 mcp__<server>__<tool> 形式的字符串。`,
-      );
-    }
-    const name = entry.trim();
-    if (!MCP_TOOL_PATTERN.test(name) || name.length > MAX_MCP_NAME_LENGTH) {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        `${field} 包含无法校验的 MCP 工具名。`,
-      );
-    }
-    tools.add(name);
-  }
-  return [...tools].sort();
-};
-
-const optionalIsolation = (
-  value: unknown,
-  field: string,
-): AgentSubagentIsolation | undefined => {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string") {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不是受支持的 isolation。`,
-    );
-  }
-  const normalized = value.trim().toLowerCase().replaceAll("_", "-");
-  const isolation = normalized === "work-tree" ? "worktree" : normalized;
-  if (!ISOLATIONS.has(isolation as AgentSubagentIsolation)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不是受支持的 isolation。`,
-    );
-  }
-  return isolation as AgentSubagentIsolation;
-};
-
-const normalizeRole = (
-  value: unknown,
-  index: number,
-): AgentSubagentRolePolicy => {
-  if (!isRecord(value)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies.roles[${index}] 必须是对象。`,
-    );
-  }
-  const name = policyName(value.name, `subagentPolicies.roles[${index}].name`);
-  const description = text(
-    value.description,
-    `subagentPolicies.roles[${index}].description`,
-    MAX_DESCRIPTION_LENGTH,
-  );
-  const instructions = text(
-    value.instructions ?? value.prompt,
-    `subagentPolicies.roles[${index}].instructions`,
-    MAX_INSTRUCTIONS_LENGTH,
-  );
-  const modelId = text(
-    value.modelId ?? value.model,
-    `subagentPolicies.roles[${index}].modelId`,
-    MAX_MODEL_ID_LENGTH,
-  );
-  const reasoningEffort = text(
-    value.reasoningEffort ?? value.reasoning_effort,
-    `subagentPolicies.roles[${index}].reasoningEffort`,
-    MAX_REASONING_LENGTH,
-  );
-  const isolation = optionalIsolation(
-    value.isolation ?? value.defaultIsolation ?? value.default_isolation,
-    `subagentPolicies.roles[${index}].isolation`,
-  );
-  const defaultCapabilityMode = optionalCapability(
-    value.defaultCapabilityMode ?? value.default_capability_mode,
-    `subagentPolicies.roles[${index}].defaultCapabilityMode`,
-  );
-  return {
-    name,
-    ...(description ? { description } : {}),
-    ...(instructions ? { instructions } : {}),
-    ...(defaultCapabilityMode ? { defaultCapabilityMode } : {}),
-    ...(modelId ? { modelId } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-    ...(isolation ? { isolation } : {}),
-  };
-};
-
-const normalizePersona = (
-  value: unknown,
-  index: number,
-): AgentSubagentPersonaPolicy => {
-  if (!isRecord(value)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies.personas[${index}] 必须是对象。`,
-    );
-  }
-  const name = policyName(
-    value.name,
-    `subagentPolicies.personas[${index}].name`,
-  );
-  const description = text(
-    value.description,
-    `subagentPolicies.personas[${index}].description`,
-    MAX_DESCRIPTION_LENGTH,
-  );
-  const instructions = text(
-    value.instructions ?? value.prompt,
-    `subagentPolicies.personas[${index}].instructions`,
-    MAX_INSTRUCTIONS_LENGTH,
-    true,
-  );
-  if (!instructions) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies.personas[${index}].instructions 不能为空。`,
-    );
-  }
-  const modelId = text(
-    value.modelId ?? value.model,
-    `subagentPolicies.personas[${index}].modelId`,
-    MAX_MODEL_ID_LENGTH,
-  );
-  const reasoningEffort = text(
-    value.reasoningEffort ?? value.reasoning_effort,
-    `subagentPolicies.personas[${index}].reasoningEffort`,
-    MAX_REASONING_LENGTH,
-  );
-  const isolation = optionalIsolation(
-    value.isolation ?? value.defaultIsolation ?? value.default_isolation,
-    `subagentPolicies.personas[${index}].isolation`,
-  );
-  return {
-    name,
-    description,
-    instructions,
-    ...(modelId ? { modelId } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-    ...(isolation ? { isolation } : {}),
-  };
-};
-
-const normalizeAgent = (
-  value: unknown,
-  index: number,
-): AgentSubagentAgentPolicy => {
-  if (!isRecord(value)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies.agents[${index}] 必须是对象。`,
-    );
-  }
-  const name = policyName(value.name, `subagentPolicies.agents[${index}].name`);
-  const description = text(
-    value.description,
-    `subagentPolicies.agents[${index}].description`,
-    MAX_DESCRIPTION_LENGTH,
-  );
-  const instructions = text(
-    value.instructions ?? value.prompt,
-    `subagentPolicies.agents[${index}].instructions`,
-    MAX_INSTRUCTIONS_LENGTH,
-  );
-  const defaultCapabilityMode = optionalCapability(
-    value.defaultCapabilityMode ?? value.default_capability_mode,
-    `subagentPolicies.agents[${index}].defaultCapabilityMode`,
-  );
-  const permissionMode = value.permissionMode ?? value.permission_mode;
-  if (
-    permissionMode !== undefined &&
-    permissionMode !== "ask" &&
-    permissionMode !== "auto" &&
-    permissionMode !== "always-approve"
-  ) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies.agents[${index}].permissionMode 不是受支持的值。`,
-    );
-  }
-  const modelId = text(
-    value.modelId ?? value.model,
-    `subagentPolicies.agents[${index}].modelId`,
-    MAX_MODEL_ID_LENGTH,
-  );
-  const reasoningEffort = text(
-    value.reasoningEffort ?? value.reasoning_effort ?? value.effort,
-    `subagentPolicies.agents[${index}].reasoningEffort`,
-    MAX_REASONING_LENGTH,
-  );
-  const isolation = optionalIsolation(
-    value.isolation ?? value.defaultIsolation ?? value.default_isolation,
-    `subagentPolicies.agents[${index}].isolation`,
-  );
-  const mcpTools = optionalMcpTools(
-    value.mcpTools ?? value.mcp_tools,
-    `subagentPolicies.agents[${index}].mcpTools`,
-  );
-  return {
-    name,
-    ...(description ? { description } : {}),
-    ...(instructions ? { instructions } : {}),
-    ...(defaultCapabilityMode ? { defaultCapabilityMode } : {}),
-    ...(permissionMode ? { permissionMode } : {}),
-    ...(modelId ? { modelId } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-    ...(isolation ? { isolation } : {}),
-    ...(mcpTools ? { mcpTools } : {}),
-  };
-};
-
-const normalizeMap = <T>(
-  value: unknown,
-  field: string,
-  mapper: (entry: unknown, name: string) => T,
-): Record<string, T> => {
-  if (value === undefined || value === null) return {};
-  if (!isRecord(value)) {
-    throw policyError("pi.subagent_policy_invalid", `${field} 必须是对象。`);
-  }
-  const entries = Object.entries(value);
-  if (entries.length > MAX_TOGGLE_COUNT) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `${field} 不能超过 ${MAX_TOGGLE_COUNT} 项。`,
-    );
-  }
-  const result: Record<string, T> = {};
-  for (const [rawName, entry] of entries) {
-    const name = policyName(rawName, `${field} 名称`);
-    result[name] = mapper(entry, name);
-  }
-  return result;
-};
-
-export const emptyPiSubagentPolicyManifest =
-  (): AgentSubagentPolicyManifest => ({
-    enabled: true,
-    models: {},
-    toggle: {},
-    roles: [],
-    personas: [],
-    agents: [],
-  });
-
-/**
- * Normalize the Host-projected policy snapshot at the worker boundary. The
- * Host is the source of truth, but keeping this validation in the worker
- * prevents a malformed refresh or stale sidecar from widening child access.
- */
-export const normalizePiSubagentPolicyManifest = (
-  value: unknown,
-): AgentSubagentPolicyManifest => {
-  if (value === undefined || value === null) {
-    return emptyPiSubagentPolicyManifest();
-  }
-  if (!isRecord(value)) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      "subagentPolicies 必须是对象。",
-    );
-  }
-  const enabled = value.enabled === undefined ? true : value.enabled;
-  if (typeof enabled !== "boolean") {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      "subagentPolicies.enabled 必须是布尔值。",
-    );
-  }
-  const rawRoles = value.roles === undefined ? [] : value.roles;
-  const rawPersonas = value.personas === undefined ? [] : value.personas;
-  const rawAgents = value.agents === undefined ? [] : value.agents;
-  if (
-    !Array.isArray(rawRoles) ||
-    !Array.isArray(rawPersonas) ||
-    !Array.isArray(rawAgents)
-  ) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      "subagentPolicies.roles/personas/agents 必须是数组。",
-    );
-  }
-  if (
-    rawRoles.length > MAX_POLICY_COUNT ||
-    rawPersonas.length > MAX_POLICY_COUNT ||
-    rawAgents.length > MAX_POLICY_COUNT
-  ) {
-    throw policyError(
-      "pi.subagent_policy_invalid",
-      `subagentPolicies 每类不能超过 ${MAX_POLICY_COUNT} 项。`,
-    );
-  }
-  const roles = rawRoles.map(normalizeRole);
-  const personas = rawPersonas.map(normalizePersona);
-  const agents = rawAgents.map(normalizeAgent);
-  for (const entries of [roles, personas, agents]) {
-    const names = new Set<string>();
-    for (const entry of entries) {
-      if (names.has(entry.name)) {
-        throw policyError(
-          "pi.subagent_policy_invalid",
-          `subagentPolicies 中不能包含重复的 ${entry.name}。`,
-        );
-      }
-      names.add(entry.name);
-    }
-  }
-  const models = normalizeMap(
-    value.models,
-    "subagentPolicies.models",
-    (entry, name) => {
-      const modelId = text(
-        entry,
-        `subagentPolicies.models.${name}`,
-        MAX_MODEL_ID_LENGTH,
-        true,
-      );
-      if (!modelId) {
-        throw policyError(
-          "pi.subagent_policy_invalid",
-          `subagentPolicies.models.${name} 不能为空。`,
-        );
-      }
-      return modelId;
-    },
-  );
-  const toggle = normalizeMap(
-    value.toggle,
-    "subagentPolicies.toggle",
-    (entry, name) => {
-      if (typeof entry !== "boolean") {
-        throw policyError(
-          "pi.subagent_policy_invalid",
-          `subagentPolicies.toggle.${name} 必须是布尔值。`,
-        );
-      }
-      return entry;
-    },
-  );
-  let unsupportedAgents: string[] | undefined;
-  if (value.unsupportedAgents !== undefined) {
-    if (!Array.isArray(value.unsupportedAgents)) {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        "subagentPolicies.unsupportedAgents 必须是数组。",
-      );
-    }
-    if (value.unsupportedAgents.length > MAX_POLICY_COUNT) {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        `subagentPolicies.unsupportedAgents 不能超过 ${MAX_POLICY_COUNT} 项。`,
-      );
-    }
-    unsupportedAgents = value.unsupportedAgents.map((entry, index) =>
-      policyName(entry, `subagentPolicies.unsupportedAgents[${index}]`),
-    );
-    if (new Set(unsupportedAgents).size !== unsupportedAgents.length) {
-      throw policyError(
-        "pi.subagent_policy_invalid",
-        "subagentPolicies.unsupportedAgents 不能包含重复名称。",
-      );
-    }
-  }
-  return {
-    enabled,
-    models,
-    toggle,
-    roles,
-    personas,
-    agents,
-    ...(unsupportedAgents?.length ? { unsupportedAgents } : {}),
-  };
-};
+export {
+  emptyPiSubagentPolicyManifest,
+  isPiSubagentType,
+  normalizePiSubagentCapabilityMode,
+  normalizePiSubagentIsolation,
+  normalizePiSubagentPolicyManifest,
+  normalizePiSubagentType,
+} from "./subagent-policy-normalization.ts";
+export type {
+  PiSubagentIsolation,
+  PiSubagentType,
+} from "./subagent-policy-normalization.ts";
 
 export interface PiSubagentPolicyInput {
   subagentType?: string;
@@ -540,6 +59,33 @@ export interface PiSubagentPolicyResolution {
   mcpTools?: string[];
   permissionMode?: "ask" | "auto" | "always-approve";
 }
+
+/** Default capability ceiling for the built-in worker subagent types. */
+export const defaultPiSubagentCapabilityMode = (
+  subagentType: string,
+): AgentSubagentCapabilityMode =>
+  subagentType === "general-purpose" ? "all" : "read-only";
+
+type PiPermissionMode = NonNullable<
+  PiSubagentPolicyResolution["permissionMode"]
+>;
+
+const permissionModeRank: Record<PiPermissionMode, number> = {
+  ask: 0,
+  auto: 1,
+  "always-approve": 2,
+};
+
+/** A child cannot request a less restrictive approval mode than its parent. */
+export const intersectPiPermissionModes = (
+  parent: PiPermissionMode,
+  requested?: PiPermissionMode,
+): PiPermissionMode => {
+  if (!requested) return parent;
+  return permissionModeRank[requested] <= permissionModeRank[parent]
+    ? requested
+    : parent;
+};
 
 const findNamed = <T extends { name: string }>(
   entries: readonly T[],
@@ -608,7 +154,7 @@ export const resolvePiSubagentPolicy = (
     input.capabilityMode ??
     agent?.defaultCapabilityMode ??
     role?.defaultCapabilityMode ??
-    (type === "general-purpose" ? "all" : "read-only");
+    defaultPiSubagentCapabilityMode(type);
   const isolation =
     input.isolation ??
     agent?.isolation ??
@@ -641,6 +187,180 @@ export const resolvePiSubagentPolicy = (
     isolation,
     capabilityMode,
     ...(permissionMode ? { permissionMode } : {}),
+  };
+};
+
+export interface PiSubagentLaunchPolicyRequest {
+  subagentType?: unknown;
+  role?: string;
+  persona?: string;
+  agent?: string;
+  capabilityMode?: unknown;
+  isolation?: unknown;
+  modelId?: string;
+  reasoningEffort?: string;
+}
+
+export interface PiSubagentResumePolicy {
+  subagentType?: PiSubagentType;
+  role?: string;
+  persona?: string;
+  agent?: string;
+  capabilityMode?: unknown;
+  isolation?: unknown;
+  mcpTools?: Iterable<string>;
+  permissionMode?: PiPermissionMode;
+  modelId?: string;
+  reasoningEffort?: string;
+}
+
+export interface PiSubagentLaunchPolicyInput {
+  manifest: AgentSubagentPolicyManifest;
+  request: PiSubagentLaunchPolicyRequest;
+  parent: {
+    capabilityMode: PiSubagentCapabilityMode;
+    permissionMode: PiPermissionMode;
+    mcpTools?: ReadonlySet<string>;
+    modelId?: string;
+    reasoningEffort?: string;
+  };
+  resume?: PiSubagentResumePolicy;
+}
+
+export interface PiSubagentLaunchPolicy {
+  subagentType: PiSubagentType;
+  role?: string;
+  persona?: string;
+  agent?: string;
+  capabilityMode: PiSubagentCapabilityMode;
+  permissionMode: PiPermissionMode;
+  isolation: PiSubagentIsolation;
+  /** Undefined only when the child has the unrestricted `all` capability. */
+  mcpTools?: ReadonlySet<string>;
+  requestedModelId?: string;
+  requestedReasoningEffort?: string;
+  /** Fresh launches compose policy instructions; resumed transcripts do not. */
+  policyResolution?: PiSubagentPolicyResolution;
+}
+
+/**
+ * Resolve the pure policy projection for a child launch. The caller supplies
+ * snapshots of the request, parent, and optional durable child state; session
+ * creation, Host worktree calls, and task/event lifecycle remain outside.
+ */
+export const resolvePiSubagentLaunchPolicy = (
+  input: PiSubagentLaunchPolicyInput,
+): PiSubagentLaunchPolicy => {
+  const policies = normalizePiSubagentPolicyManifest(input.manifest);
+  const requestedType = input.request.subagentType;
+  const requestedName =
+    typeof requestedType === "string" ? requestedType.trim() : "";
+  const requestedTypeIsBuiltIn =
+    typeof requestedType === "string" && isPiSubagentType(requestedType);
+  let subagentType: PiSubagentType;
+  let requestedRole = input.request.role;
+  let requestedAgent = input.request.agent;
+
+  if (input.resume) {
+    subagentType = input.resume.subagentType ?? "general-purpose";
+  } else if (
+    requestedName &&
+    !requestedTypeIsBuiltIn &&
+    (policies.agents.some((candidate) => candidate.name === requestedName) ||
+      policies.roles.some((candidate) => candidate.name === requestedName))
+  ) {
+    // Older Melody callers sometimes put a named definition in
+    // `subagent_type`; preserve that compatibility without accepting an
+    // arbitrary type or changing the selected role/agent.
+    subagentType = "general-purpose";
+    if (policies.agents.some((candidate) => candidate.name === requestedName)) {
+      requestedAgent ??= requestedName;
+    } else {
+      requestedRole ??= requestedName;
+    }
+  } else {
+    subagentType = normalizePiSubagentType(requestedType);
+  }
+
+  const policyResolution = input.resume
+    ? undefined
+    : resolvePiSubagentPolicy(policies, {
+        subagentType,
+        role: requestedRole,
+        persona: input.request.persona,
+        agent: requestedAgent,
+        modelId: input.request.modelId,
+        reasoningEffort: input.request.reasoningEffort,
+        isolation: normalizePiSubagentIsolation(input.request.isolation),
+        capabilityMode: normalizePiSubagentCapabilityMode(
+          input.request.capabilityMode,
+        ),
+      });
+  // Keep validating an explicit request even when durable resume state owns
+  // the effective isolation. The prior launch path rejected malformed values
+  // before choosing the persisted boundary.
+  if (input.resume) {
+    normalizePiSubagentIsolation(input.request.isolation);
+  }
+  const requestedCapabilityMode = input.resume
+    ? normalizePiSubagentCapabilityMode(
+        input.request.capabilityMode ?? input.resume.capabilityMode,
+      )
+    : policyResolution?.capabilityMode;
+  const capabilityMode =
+    intersectPiSubagentCapabilityModes(
+      requestedCapabilityMode,
+      intersectPiSubagentCapabilityModes(
+        defaultPiSubagentCapabilityMode(subagentType),
+        input.parent.capabilityMode,
+      ),
+    ) ?? "read-only";
+  const isolation = input.resume
+    ? (normalizePiSubagentIsolation(input.resume.isolation) ?? "none")
+    : (policyResolution?.isolation ?? "none");
+  const requestedMcpTools = input.resume
+    ? Array.from(input.resume.mcpTools ?? [])
+    : (policyResolution?.mcpTools ?? []);
+  const mcpTools =
+    capabilityMode === "all"
+      ? undefined
+      : new Set(
+          requestedMcpTools.filter((tool) =>
+            input.parent.capabilityMode === "all"
+              ? true
+              : (input.parent.mcpTools?.has(tool) ?? false),
+          ),
+        );
+  const permissionMode = intersectPiPermissionModes(
+    input.parent.permissionMode,
+    input.resume?.permissionMode ?? policyResolution?.permissionMode,
+  );
+  const requestedModelId =
+    input.resume?.modelId ??
+    policyResolution?.modelId ??
+    input.request.modelId ??
+    input.parent.modelId;
+  const requestedReasoningEffort =
+    input.resume?.reasoningEffort ??
+    policyResolution?.reasoningEffort ??
+    input.request.reasoningEffort ??
+    input.parent.reasoningEffort;
+  const role = input.resume?.role ?? policyResolution?.role?.name;
+  const persona = input.resume?.persona ?? policyResolution?.persona?.name;
+  const agent = input.resume?.agent ?? policyResolution?.agent?.name;
+
+  return {
+    subagentType,
+    ...(role ? { role } : {}),
+    ...(persona ? { persona } : {}),
+    ...(agent ? { agent } : {}),
+    capabilityMode,
+    permissionMode,
+    isolation,
+    ...(mcpTools ? { mcpTools } : {}),
+    ...(requestedModelId ? { requestedModelId } : {}),
+    ...(requestedReasoningEffort ? { requestedReasoningEffort } : {}),
+    ...(policyResolution ? { policyResolution } : {}),
   };
 };
 

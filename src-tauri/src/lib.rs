@@ -1,5 +1,7 @@
 mod agent_runtime;
+mod agent_session_lifecycle;
 mod capability_lifecycle;
+mod config_core;
 mod config_io;
 mod config_runtime;
 mod cron_schedule;
@@ -17,6 +19,7 @@ mod pi_model_config;
 mod pi_monitor_runtime;
 mod pi_storage;
 mod pi_tool_gateway;
+mod pi_tool_output_archive;
 mod pi_web_runtime;
 mod pi_worker_runtime;
 mod power_runtime;
@@ -122,12 +125,12 @@ pub fn run() {
             database::upsert_project,
             database::archive_project,
             database::restore_project,
-            database::delete_project,
+            agent_session_lifecycle::delete_project,
             database::list_sessions,
             database::create_session,
             database::update_session,
             database::read_session_timeline,
-            database::delete_session,
+            agent_session_lifecycle::delete_session,
             database::get_agent_session_binding,
             database::get_pi_session_fork,
             database::list_pi_session_forks,
@@ -167,6 +170,7 @@ pub fn run() {
             config_runtime::read_melody_runtime_environment,
             config_runtime::list_melody_agent_definitions,
             config_runtime::list_melody_lsp_servers,
+            config_runtime::list_melody_mcp_servers,
             config_runtime::list_melody_hooks,
             config_runtime::list_melody_plugin_capabilities,
             config_runtime::rebuild_melody_memory_index,

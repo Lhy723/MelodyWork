@@ -73,18 +73,3 @@ pub async fn fetch_research_resource(
         .map_err(|_| "科研数据源返回了非 UTF-8 内容。".to_string())?;
     Ok(ResearchHttpResponse { body, content_type })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::validate_research_url;
-
-    #[test]
-    fn allows_only_known_https_research_hosts() {
-        assert!(validate_research_url("https://api.crossref.org/works?query=test").is_ok());
-        assert!(
-            validate_research_url("https://api.semanticscholar.org/graph/v1/paper/search").is_ok()
-        );
-        assert!(validate_research_url("http://export.arxiv.org/api/query").is_err());
-        assert!(validate_research_url("https://example.com/").is_err());
-    }
-}

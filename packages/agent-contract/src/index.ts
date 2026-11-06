@@ -6,7 +6,9 @@
  * values before they reach the product stores.
  */
 
-export const AGENT_PROTOCOL_VERSION = 1 as const;
+import { AGENT_PROTOCOL_VERSION } from "./protocol-version.ts";
+
+export { AGENT_PROTOCOL_VERSION };
 
 export {
   AGENT_SESSION_MODE_IDS,
@@ -130,8 +132,9 @@ export interface AgentPromptResourceRoot {
  *
  * These are intentionally bounded, deterministic controls.  They cover the
  * token and wall-clock safety rails that do not require a hidden planner or
- * classifier; those higher-level orchestration policies remain negotiated
- * separately and can still fall back to ACP.
+ * classifier. Higher-level orchestration policies are outside this bounded
+ * contract; unsupported policies are diagnosed or block the Pi session rather
+ * than triggering a different Agent runtime.
  */
 export interface AgentGoalPolicy {
   tokenBudget?: number;

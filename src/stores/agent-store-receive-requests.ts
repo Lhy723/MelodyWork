@@ -35,7 +35,7 @@ const handleInitializeResponse = async (
   const { get, set } = store;
   if (message.error) {
     set({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: {
         ...get().status,
@@ -61,7 +61,7 @@ const handleInitializeResponse = async (
 
   const preferredMethod = preferredAuthMethod(message);
   if (preferredMethod) {
-    set({ acpPhase: "authenticating" });
+    set({ runtimePhase: "authenticating" });
     try {
       const localSessionId = get().localSessionId;
       await sendAgentCommand({
@@ -84,7 +84,7 @@ const handleInitializeResponse = async (
       }
     } catch (reason) {
       set({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         status: { ...get().status, message: reasonMessage(reason) },
       });
@@ -92,7 +92,7 @@ const handleInitializeResponse = async (
     return true;
   }
 
-  set({ acpPhase: "creating" });
+  set({ runtimePhase: "creating" });
   try {
     const localSessionId = get().localSessionId;
     if (!localSessionId) {
@@ -101,10 +101,10 @@ const handleInitializeResponse = async (
     await sendSessionOpen(
       localSessionId,
       get().cwd,
-      get().acpSessionId,
+      get().runtimeSessionId,
       get().selectedModelId,
       get().permissionMode,
-      get().acpCursor,
+      get().eventCursor,
     );
     armSetupTimeout(
       localSessionId,
@@ -115,7 +115,7 @@ const handleInitializeResponse = async (
     );
   } catch (reason) {
     set({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: { ...get().status, message: reasonMessage(reason) },
     });
@@ -130,7 +130,7 @@ const handleAuthenticateResponse = async (
   const { get, set } = store;
   if (message.error) {
     set({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: {
         ...get().status,
@@ -143,7 +143,7 @@ const handleAuthenticateResponse = async (
     return true;
   }
 
-  set({ acpPhase: "creating" });
+  set({ runtimePhase: "creating" });
   try {
     const localSessionId = get().localSessionId;
     if (!localSessionId) {
@@ -152,10 +152,10 @@ const handleAuthenticateResponse = async (
     await sendSessionOpen(
       localSessionId,
       get().cwd,
-      get().acpSessionId,
+      get().runtimeSessionId,
       get().selectedModelId,
       get().permissionMode,
-      get().acpCursor,
+      get().eventCursor,
     );
     armSetupTimeout(
       localSessionId,
@@ -166,7 +166,7 @@ const handleAuthenticateResponse = async (
     );
   } catch (reason) {
     set({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: { ...get().status, message: reasonMessage(reason) },
     });
@@ -184,7 +184,7 @@ const handleModelResponse = (
     const detail = errorMessage(message, "切换 Melody 模型失败");
     set({
       pendingModelId: undefined,
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: { ...get().status, message: detail },
     });
@@ -198,7 +198,7 @@ const handleModelResponse = (
     selectedReasoningEffort: selectedModel?.reasoningEffort,
     contextUsage: contextUsageForModel(get().availableModels, pendingModelId),
     pendingModelId: undefined,
-    acpPhase: "ready",
+    runtimePhase: "ready",
     chatStatus: "ready",
     status: {
       ...get().status,
@@ -218,7 +218,7 @@ const handleReasoningEffortResponse = (
     const detail = errorMessage(message, "更改推理强度失败");
     set({
       pendingReasoningEffort: undefined,
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       status: { ...get().status, message: detail },
     });
@@ -227,7 +227,7 @@ const handleReasoningEffortResponse = (
   set({
     selectedReasoningEffort: pendingReasoningEffort,
     pendingReasoningEffort: undefined,
-    acpPhase: "ready",
+    runtimePhase: "ready",
     chatStatus: "ready",
     status: {
       ...get().status,
@@ -288,7 +288,7 @@ const handleSessionOpenResponse = async (
     const fallback = loadFallbackTimelines.get(pendingOpen.localSessionId);
     const detail = errorMessage(message, "无法加载 Melody 会话");
     set((state) => ({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       timeline:
         state.timeline.length > 0
@@ -304,7 +304,7 @@ const handleSessionOpenResponse = async (
   if (message.error || !sessionId) {
     if (isCurrent) {
       set({
-        acpPhase: "error",
+        runtimePhase: "error",
         chatStatus: "error",
         status: {
           ...get().status,
@@ -323,8 +323,8 @@ const handleSessionOpenResponse = async (
   const modes = sessionModeState(message.result);
   if (isCurrent) {
     set({
-      acpPhase: "ready",
-      acpSessionId: sessionId,
+      runtimePhase: "ready",
+      runtimeSessionId: sessionId,
       chatStatus: "ready",
       ...(sessionUsage
         ? {

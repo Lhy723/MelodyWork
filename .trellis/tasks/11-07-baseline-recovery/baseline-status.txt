@@ -1,0 +1,266 @@
+ M .github/workflows/check.yml
+ M .github/workflows/release.yml
+ M AGENTS.md
+ M docs/architecture-improvement-plan.md
+ M docs/architecture/pi-migration/README.md
+ M docs/architecture/pi-migration/acceptance-report.md
+ M docs/architecture/pi-migration/handoff.md
+ M docs/architecture/pi-migration/implementation-plan.md
+ M docs/architecture/pi-migration/pi-compatibility-manifest.json
+ M docs/architecture/pi-migration/protocol-and-data.md
+ M package.json
+ D packages/agent-contract/src/capabilities.test.mjs
+ M packages/agent-contract/src/index.ts
+ D packages/agent-contract/src/validation.test.mjs
+ M packages/agent-contract/src/validation.ts
+ M packages/agent-worker/package.json
+ D packages/agent-worker/src/idempotency.test.mjs
+ D packages/agent-worker/src/main.test.mjs
+ D packages/agent-worker/src/pi/compaction-extension.test.mjs
+ M packages/agent-worker/src/pi/compaction-extension.ts
+ D packages/agent-worker/src/pi/event-mapper.test.mjs
+ D packages/agent-worker/src/pi/goal-extension.test.mjs
+ M packages/agent-worker/src/pi/goal-extension.ts
+ D packages/agent-worker/src/pi/instruction-scope-extension.test.mjs
+ D packages/agent-worker/src/pi/model-catalog.test.mjs
+ D packages/agent-worker/src/pi/session-adapter.test.mjs
+ M packages/agent-worker/src/pi/session-adapter.ts
+ D packages/agent-worker/src/pi/session-import.test.mjs
+ D packages/agent-worker/src/pi/subagent-policy.test.mjs
+ M packages/agent-worker/src/pi/subagent-policy.ts
+ D packages/agent-worker/src/pi/todo-extension.test.mjs
+ D packages/agent-worker/src/pi/tool-gateway.test.mjs
+ M packages/agent-worker/src/pi/tool-gateway.ts
+ D packages/agent-worker/src/transport.test.mjs
+ D packages/agent-worker/src/worker-smoke.test.mjs
+ M scripts/check-agent-packaging.mjs
+ M scripts/check-architecture.mjs
+ M scripts/check-pi-compatibility.mjs
+ M src-tauri/Cargo.toml
+ M src-tauri/permissions/default.toml
+ D src-tauri/src/acp_policy_tests.rs
+ M src-tauri/src/capability_lifecycle.rs
+ M src-tauri/src/config_core.rs
+ M src-tauri/src/config_extensions.rs
+ M src-tauri/src/config_io.rs
+ M src-tauri/src/config_marketplace_native.rs
+ M src-tauri/src/config_marketplace_sources.rs
+ M src-tauri/src/config_plugin_details.rs
+ M src-tauri/src/config_runtime.rs
+ M src-tauri/src/config_subagents.rs
+ M src-tauri/src/cron_schedule.rs
+ M src-tauri/src/database.rs
+ M src-tauri/src/database_agent_bindings.rs
+ M src-tauri/src/database_agent_events.rs
+ M src-tauri/src/database_agent_forks.rs
+ M src-tauri/src/database_agent_migrations.rs
+ M src-tauri/src/database_agent_recovery.rs
+ M src-tauri/src/database_agent_schedules.rs
+ M src-tauri/src/database_core.rs
+ M src-tauri/src/database_projects.rs
+ M src-tauri/src/database_sessions.rs
+ M src-tauri/src/database_statistics.rs
+ M src-tauri/src/environment_runtime.rs
+ M src-tauri/src/git_runtime.rs
+ D src-tauri/src/git_runtime_tests.rs
+ M src-tauri/src/lib.rs
+ M src-tauri/src/pi_browser_runtime.rs
+ M src-tauri/src/pi_codebase_runtime.rs
+ M src-tauri/src/pi_hook_runtime.rs
+ M src-tauri/src/pi_lsp_runtime.rs
+ M src-tauri/src/pi_mcp_runtime.rs
+ M src-tauri/src/pi_memory_runtime.rs
+ M src-tauri/src/pi_model_config.rs
+ M src-tauri/src/pi_monitor_runtime.rs
+ M src-tauri/src/pi_storage.rs
+ M src-tauri/src/pi_tool_gateway.rs
+ M src-tauri/src/pi_web_runtime.rs
+ M src-tauri/src/pi_worker_runtime.rs
+ M src-tauri/src/research_runtime.rs
+ M src-tauri/src/schedule_dispatch.rs
+ M src-tauri/src/update_runtime.rs
+ M src-tauri/src/workspace_access.rs
+ M src-tauri/src/workspace_runtime.rs
+ D src-tauri/src/workspace_runtime_tests.rs
+ M src-tauri/src/workspace_sandbox.rs
+ M src/domain/acp.ts
+ D src/domain/agent/capability-report.test.mjs
+ M src/domain/agent/capability-report.ts
+ D src/domain/agent/command-validation.test.mjs
+ D src/domain/agent/event-checkpoint.test.mjs
+ D src/domain/agent/event-log.test.mjs
+ D src/domain/agent/event-projector.test.mjs
+ D src/domain/agent/event-store-adapter.test.mjs
+ D src/domain/agent/event-stream.test.mjs
+ D src/domain/agent/event-to-session-update.test.mjs
+ M src/domain/agent/event-to-session-update.ts
+ D src/domain/agent/explorer-branch.test.mjs
+ M src/domain/agent/explorer-branch.ts
+ D src/domain/agent/legacy-acp-adapter.test.mjs
+ D src/domain/agent/legacy-command-adapter.test.mjs
+ D src/domain/agent/model-catalog.test.mjs
+ D src/domain/agent/pi-model-options.test.mjs
+ D src/domain/agent/pi-session-import.test.mjs
+ D src/domain/agent/projection-store-patch.test.mjs
+ M src/domain/agent/projection-store-patch.ts
+ D src/domain/agent/recovery-coordinator.test.mjs
+ D src/domain/agent/recovery.test.mjs
+ D src/domain/agent/session-archive.test.mjs
+ D src/domain/agent/session-migration.test.mjs
+ D src/domain/agent/subagent-projection.test.mjs
+ M src/domain/config.ts
+ D src/domain/melody-capability-lifecycle.test.mjs
+ D src/domain/message-citations.test.mjs
+ D src/domain/model-provider.test.mjs
+ D src/domain/plan-approval.test.mjs
+ D src/domain/prompt-timeout.test.mjs
+ D src/domain/request-gate.test.mjs
+ D src/domain/research-source-adapter.test.mjs
+ D src/domain/session-mode.test.mjs
+ M src/domain/session-projection-updates.ts
+ D src/domain/session-projection.test.mjs
+ M src/domain/statistics.ts
+ D src/domain/task-launch.test.mjs
+ D src/domain/timeline-groups.test.mjs
+ D src/domain/tool-activity.test.mjs
+ M src/domain/tool-activity.ts
+ D src/domain/user-question.test.mjs
+ M src/features/chat/agent-workspace-utils.ts
+ M src/features/chat/agent-workspace-view-types.ts
+ M src/features/chat/agent-workspace.tsx
+ M src/features/chat/session-workspace-content.tsx
+ D src/features/files/file-preview-utils.test.mjs
+ D src/features/research/research-capability.test.mjs
+ D src/features/research/research-project-workflow.test.mjs
+ D src/features/research/research-query.test.mjs
+ M src/features/settings/settings-workspace.tsx
+ M src/features/settings/statistics-page.tsx
+ M src/features/settings/statistics-utils.ts
+ M src/features/workspace/subagent-conversation.tsx
+ M src/hooks/use-agent-bridge.ts
+ M src/hooks/use-session-persistence.ts
+ M src/lib/agent-client.ts
+ M src/lib/melody-bridge-config.ts
+ M src/lib/melody-bridge-runtime.ts
+ M src/lib/melody-bridge-workspace.ts
+ M src/lib/pi-compatibility.ts
+ M src/stores/agent-store-pi.ts
+ M src/stores/agent-store-receive-prompts.ts
+ M src/stores/agent-store-receive-requests.ts
+ M src/stores/agent-store-receive.ts
+ M src/stores/agent-store-runtime.ts
+ M src/stores/agent-store-session.ts
+ M src/stores/agent-store-submit.ts
+ M src/stores/agent-store-types.ts
+ M src/stores/agent-store.ts
+ M src/stores/app-settings-store.ts
+ M src/stores/workspace-store.ts
+?? .agents/
+?? .codex/
+?? .gitattributes
+?? .omp/
+?? .trellis/
+?? .zcode/
+?? docs/qa-fixes-2026-10-20.md
+?? findings.md
+?? packages/agent-contract/src/protocol-version.ts
+?? packages/agent-contract/src/validation/
+?? packages/agent-worker/src/pi/attachment-policy.ts
+?? packages/agent-worker/src/pi/goal-guards.ts
+?? packages/agent-worker/src/pi/goal-state.ts
+?? packages/agent-worker/src/pi/host-task-control.ts
+?? packages/agent-worker/src/pi/model-catalog-runtime.ts
+?? packages/agent-worker/src/pi/model-policy.ts
+?? packages/agent-worker/src/pi/prompt-discovery.ts
+?? packages/agent-worker/src/pi/resource-discovery.ts
+?? packages/agent-worker/src/pi/resource-policy-snapshot.ts
+?? packages/agent-worker/src/pi/session-close-runtime.ts
+?? packages/agent-worker/src/pi/session-configuration-runtime.ts
+?? packages/agent-worker/src/pi/session-errors.ts
+?? packages/agent-worker/src/pi/session-event-runtime.ts
+?? packages/agent-worker/src/pi/session-fork-runtime.ts
+?? packages/agent-worker/src/pi/session-import-runtime.ts
+?? packages/agent-worker/src/pi/session-open-runtime.ts
+?? packages/agent-worker/src/pi/session-persistence-policy.ts
+?? packages/agent-worker/src/pi/session-resource-loader.ts
+?? packages/agent-worker/src/pi/session-resource-refresh-runtime.ts
+?? packages/agent-worker/src/pi/session-runtime-types.ts
+?? packages/agent-worker/src/pi/session-turn-runtime.ts
+?? packages/agent-worker/src/pi/skill-discovery.ts
+?? packages/agent-worker/src/pi/subagent-policy-normalization.ts
+?? packages/agent-worker/src/pi/subagent-records.ts
+?? packages/agent-worker/src/pi/subagent-runtime.ts
+?? packages/agent-worker/src/pi/subagent-session-boundaries.ts
+?? packages/agent-worker/src/pi/subagent-task-lifecycle.ts
+?? packages/agent-worker/src/pi/task-results.ts
+?? packages/agent-worker/src/pi/task-tools.ts
+?? packages/agent-worker/src/pi/tool-access-policy.ts
+?? packages/agent-worker/src/pi/tool-errors.ts
+?? packages/agent-worker/src/pi/tool-names.ts
+?? packages/agent-worker/src/pi/tool-permission.ts
+?? packages/agent-worker/src/pi/tool-request-lifecycle.ts
+?? packages/agent-worker/src/pi/tool-results.ts
+?? packages/agent-worker/src/pi/tool-schemas.ts
+?? packages/agent-worker/src/pi/turn-policy.ts
+?? progress.md
+?? scripts/pi-agent-schedule-compatibility.mjs
+?? scripts/pi-codebase-index-compatibility.mjs
+?? scripts/pi-compaction-compatibility.mjs
+?? scripts/pi-hooks-compatibility.mjs
+?? scripts/pi-lsp-compatibility.mjs
+?? scripts/pi-mcp-inventory-compatibility.mjs
+?? scripts/pi-mcp-transports-compatibility.mjs
+?? scripts/pi-memory-tools-compatibility.mjs
+?? scripts/pi-model-policy-compatibility.mjs
+?? scripts/pi-question-timeout-compatibility.mjs
+?? scripts/pi-resource-compatibility.mjs
+?? scripts/pi-subagent-policy-compatibility.mjs
+?? scripts/pi-terminal-compatibility.mjs
+?? scripts/pi-web-tools-compatibility.mjs
+?? scripts/source-numeric-constant.mjs
+?? scripts/tauri-command-permission-check.mjs
+?? src-tauri/src/agent_session_lifecycle.rs
+?? src-tauri/src/config_marketplace_catalog.rs
+?? src-tauri/src/config_marketplace_filesystem.rs
+?? src-tauri/src/config_marketplace_install_transaction.rs
+?? src-tauri/src/config_marketplace_plugin_source.rs
+?? src-tauri/src/config_marketplace_registry.rs
+?? src-tauri/src/config_marketplace_transport.rs
+?? src-tauri/src/config_pi_policy.rs
+?? src-tauri/src/config_pi_resources.rs
+?? src-tauri/src/config_plugin_catalog.rs
+?? src-tauri/src/config_prompt_resources.rs
+?? src-tauri/src/config_skill_details.rs
+?? src-tauri/src/config_subagent_catalog.rs
+?? src-tauri/src/config_subagent_markdown.rs
+?? src-tauri/src/config_subagent_prompt_file.rs
+?? src-tauri/src/database_agent_bindings/
+?? src-tauri/src/database_agent_cleanup.rs
+?? src-tauri/src/database_agent_events/
+?? src-tauri/src/database_agent_schedules/
+?? src-tauri/src/pi_browser_runtime/
+?? src-tauri/src/pi_codebase_runtime/
+?? src-tauri/src/pi_hook_runtime/
+?? src-tauri/src/pi_lsp_config.rs
+?? src-tauri/src/pi_lsp_projection.rs
+?? src-tauri/src/pi_mcp_runtime/
+?? src-tauri/src/pi_memory_runtime/
+?? src-tauri/src/pi_model_config/
+?? src-tauri/src/pi_monitor_runtime/
+?? src-tauri/src/pi_remote_model_catalog.rs
+?? src-tauri/src/pi_tool_gateway/
+?? src-tauri/src/pi_tool_output_archive.rs
+?? src-tauri/src/pi_web_runtime/
+?? src-tauri/src/pi_worker_runtime/
+?? src-tauri/src/workspace_sandbox/
+?? src/domain/agent/billing-usage.ts
+?? src/domain/agent/config-capability-policy.ts
+?? src/domain/agent/message-projection.ts
+?? src/features/chat/pi-session-explorer.ts
+?? src/features/chat/use-pi-session-explorer.ts
+?? src/lib/melody-bridge-acp.ts
+?? src/lib/melody-bridge-pi-fork.ts
+?? src/lib/melody-bridge-runtime-context.ts
+?? src/stores/agent-store-configuration.ts
+?? src/stores/agent-store-interactions.ts
+?? task_plan.md

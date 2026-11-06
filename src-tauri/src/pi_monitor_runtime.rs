@@ -21,6 +21,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+mod output;
+
+use self::output::{MonitorOutput, bound_line};
 use serde_json::json;
 use tauri::{AppHandle, State};
 
@@ -32,15 +35,7 @@ pub(crate) const PI_MONITOR_TASK_PREFIX: &str = "pi-monitor:";
 /// the bound has to exist before the first one starts.
 pub(crate) const MAX_MONITORS: usize = 16;
 /// Bounded ring of recent lines kept for `get_command_or_subagent_output`.
-const MAX_BUFFERED_LINES: usize = 200;
-const MAX_LINE_BYTES: usize = 4 * 1024;
 const MAX_DESCRIPTION_BYTES: usize = 500;
-/// Volume control, mirroring Melody's "stops it automatically": a monitor may
-/// emit this many lines per rolling window before the Host stops it, and this
-/// many lines in total before it is stopped for good.
-const MAX_LINES_PER_WINDOW: u32 = 120;
-const VOLUME_WINDOW: Duration = Duration::from_secs(60);
-const MAX_LINES_TOTAL: u32 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -94,10 +89,7 @@ struct MonitorTask {
 #[derive(Debug)]
 struct MonitorState {
     status: MonitorStatus,
-    lines: Vec<String>,
-    emitted: u32,
-    window_started: Instant,
-    window_count: u32,
+    output: MonitorOutput,
     last_error: Option<String>,
 }
 
@@ -140,55 +132,6 @@ pub struct MonitorSnapshot {
     pub(crate) output: String,
 }
 
-fn bound_line(value: &str) -> (String, bool) {
-    if value.len() <= MAX_LINE_BYTES {
-        return (value.to_string(), false);
-    }
-    let mut end = MAX_LINE_BYTES;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    (
-        format!("{}… [+{} chars]", &value[..end], value.len() - end),
-        true,
-    )
-}
-
-/// Decide whether one more line may be delivered.
-///
-/// Returns `Ok(())` to deliver and `Err(reason)` when the monitor must be
-/// stopped. Volume is measured twice: a burst inside the rolling window and the
-/// lifetime total, so neither a fast producer nor a slow-forever one can flood
-/// the conversation.
-fn admit_line(state: &mut MonitorState, now: Instant) -> Result<(), String> {
-    if now.duration_since(state.window_started) >= VOLUME_WINDOW {
-        state.window_started = now;
-        state.window_count = 0;
-    }
-    if state.window_count >= MAX_LINES_PER_WINDOW {
-        return Err(format!(
-            "monitor produced more than {MAX_LINES_PER_WINDOW} events in {:?}; add a filter such as `grep --line-buffered`",
-            VOLUME_WINDOW
-        ));
-    }
-    if state.emitted >= MAX_LINES_TOTAL {
-        return Err(format!(
-            "monitor reached its {MAX_LINES_TOTAL}-event lifetime limit"
-        ));
-    }
-    state.window_count += 1;
-    state.emitted += 1;
-    Ok(())
-}
-
-fn push_line(state: &mut MonitorState, line: &str) {
-    state.lines.push(line.to_string());
-    if state.lines.len() > MAX_BUFFERED_LINES {
-        let excess = state.lines.len() - MAX_BUFFERED_LINES;
-        state.lines.drain(..excess);
-    }
-}
-
 fn snapshot(task: &MonitorTask) -> MonitorSnapshot {
     let state = task
         .state
@@ -200,8 +143,8 @@ fn snapshot(task: &MonitorTask) -> MonitorSnapshot {
         description: task.description.clone(),
         status: state.status,
         persistent: task.persistent,
-        emitted: state.emitted,
-        output: state.lines.join("\n"),
+        emitted: state.output.emitted(),
+        output: state.output.output(),
     }
 }
 
@@ -321,10 +264,7 @@ where
         sequence: AtomicU64::new(0),
         state: Mutex::new(MonitorState {
             status: MonitorStatus::Running,
-            lines: Vec::new(),
-            emitted: 0,
-            window_started: Instant::now(),
-            window_count: 0,
+            output: MonitorOutput::new(Instant::now()),
             last_error: None,
         }),
         changed: Condvar::new(),
@@ -344,9 +284,14 @@ where
     }
 
     let emit = Arc::new(emit);
-    spawn_reader(task.clone(), stdout, emit.clone());
-    spawn_reader(task.clone(), stderr, emit);
-    spawn_waiter(task.clone(), child);
+    let readers = [
+        spawn_reader(task.clone(), stdout, emit.clone()),
+        spawn_reader(task.clone(), stderr, emit),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    spawn_waiter(task.clone(), child, readers);
     Ok(snapshot(&task))
 }
 
@@ -355,13 +300,14 @@ fn spawn_reader<E>(
     task: Arc<MonitorTask>,
     stream: Option<impl std::io::Read + Send + 'static>,
     emit: Arc<E>,
-) where
+) -> Option<std::thread::JoinHandle<()>>
+where
     E: Fn(&MonitorLine) + Send + Sync + 'static,
 {
     let Some(stream) = stream else {
-        return;
+        return None;
     };
-    std::thread::spawn(move || {
+    Some(std::thread::spawn(move || {
         let reader = BufReader::new(stream);
         for line in reader.split(b'\n') {
             if task.cancel.load(Ordering::Acquire) {
@@ -375,7 +321,6 @@ fn spawn_reader<E>(
             if text.is_empty() {
                 continue;
             }
-            let (line, truncated) = bound_line(text);
             let sequence = {
                 let Ok(mut state) = task.state.lock() else {
                     return;
@@ -383,10 +328,8 @@ fn spawn_reader<E>(
                 if state.status != MonitorStatus::Running {
                     return;
                 }
-                match admit_line(&mut state, Instant::now()) {
-                    Ok(()) => {
-                        push_line(&mut state, &line);
-                    }
+                let (line, truncated) = match state.output.record_line(text, Instant::now()) {
+                    Ok(line) => line,
                     Err(reason) => {
                         // Volume control: stop the monitor instead of flooding
                         // the conversation, exactly as Melody does.
@@ -394,11 +337,13 @@ fn spawn_reader<E>(
                         task.cancel.store(true, Ordering::Release);
                         state.status = MonitorStatus::AutoStopped;
                         state.last_error = Some(reason.clone());
-                        push_line(&mut state, &format!("[monitor stopped: {reason}]"));
+                        state
+                            .output
+                            .record_notice(&format!("[monitor stopped: {reason}]"));
                         task.changed.notify_all();
                         return;
                     }
-                }
+                };
                 let sequence = task.sequence.fetch_add(1, Ordering::AcqRel) + 1;
                 (sequence, line, truncated)
             };
@@ -411,12 +356,22 @@ fn spawn_reader<E>(
                 truncated,
             });
         }
-    });
+    }))
 }
 
-fn spawn_waiter(task: Arc<MonitorTask>, mut child: Child) {
+fn spawn_waiter(
+    task: Arc<MonitorTask>,
+    mut child: Child,
+    readers: Vec<std::thread::JoinHandle<()>>,
+) {
     std::thread::spawn(move || {
         let status = child.wait();
+        // Do not publish a terminal snapshot until both streams have drained;
+        // otherwise short commands can exit before their reader threads emit
+        // the already-buffered output.
+        for reader in readers {
+            let _ = reader.join();
+        }
         let cancelled = task.cancel.load(Ordering::Acquire);
         let auto_stopped = task.auto_stopped.load(Ordering::Acquire);
         let outcome = if auto_stopped {
@@ -654,276 +609,4 @@ pub fn list_agent_monitors() -> Vec<MonitorSnapshot> {
 pub fn cancel_agent_monitor(task_id: String) -> Result<MonitorSnapshot, String> {
     cancel_monitor(&task_id)?;
     monitor_snapshot(&task_id).ok_or_else(|| format!("monitor {task_id} does not exist"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn collect_lines() -> (Arc<Mutex<Vec<MonitorLine>>>, impl Fn(&MonitorLine)) {
-        let sink = Arc::new(Mutex::new(Vec::new()));
-        let captured = sink.clone();
-        (sink, move |line: &MonitorLine| {
-            captured.lock().expect("sink").push(line.clone());
-        })
-    }
-
-    fn wait_for_status(task_id: &str, expected: MonitorStatus) -> MonitorSnapshot {
-        // Generous on purpose: this only waits for the state to appear, and a
-        // loaded CI machine must not turn slow process startup into a failure.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if let Some(snapshot) = monitor_snapshot(task_id)
-                && snapshot.status == expected
-            {
-                return snapshot;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "monitor did not reach {expected:?}"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    #[test]
-    fn a_monitor_runs_under_the_workspace_sandbox() {
-        if !(cfg!(target_os = "macos") || cfg!(target_os = "linux")) {
-            // Windows still fails closed; the supported Unix implementations
-            // below exercise the same command path used in production.
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("melody-monitor-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-
-        // Some managed macOS test hosts expose sandbox-exec but deny nested
-        // sandbox creation (the probe exits with status 71). In that
-        // environment there is no meaningful monitor assertion to make; the
-        // production path still reports the process failure to the user.
-        let Ok(mut probe) = crate::workspace_sandbox::sandboxed_shell_command(
-            &root,
-            Some("workspace"),
-            "true",
-            false,
-        ) else {
-            unit_cleanup(&root);
-            return;
-        };
-        let Ok(status) = probe.current_dir(&root).status() else {
-            unit_cleanup(&root);
-            return;
-        };
-        if !status.success() {
-            unit_cleanup(&root);
-            return;
-        }
-
-        // A sandboxed monitor may still write inside the workspace.
-        let (_, emit) = collect_lines();
-        let started = start_monitor_with_profile(
-            "session-1",
-            &root,
-            "printf inside > inside.txt",
-            "sandboxed monitor",
-            false,
-            Some("workspace"),
-            emit,
-        )
-        .unwrap();
-        wait_for_status(&started.task_id, MonitorStatus::Completed);
-        assert!(
-            root.join("inside.txt").exists(),
-            "a sandboxed monitor may still write inside the workspace"
-        );
-
-        // It must not be able to escape confinement: this is what makes the
-        // monitor path equivalent to the terminal path instead of a bypass.
-        let home = crate::config_runtime::user_home().unwrap();
-        let outside = home.join(format!(
-            "melody-monitor-outside-{}.txt",
-            uuid::Uuid::new_v4()
-        ));
-        let (_, emit) = collect_lines();
-        let denied = start_monitor_with_profile(
-            "session-1",
-            &root,
-            &format!("printf bad > {}", outside.display()),
-            "escapes",
-            false,
-            Some("workspace"),
-            emit,
-        )
-        .unwrap();
-        wait_for_status(&denied.task_id, MonitorStatus::Failed);
-        assert!(
-            !outside.exists(),
-            "a monitor must not be able to escape the sandbox"
-        );
-
-        // An unenforceable profile refuses to start the monitor at all.
-        let (_, emit) = collect_lines();
-        assert!(
-            start_monitor_with_profile(
-                "session-1",
-                &root,
-                "echo hi",
-                "strict",
-                false,
-                Some("strict"),
-                emit,
-            )
-            .is_err(),
-            "a monitor must not run unconfined when the profile is unenforceable"
-        );
-        unit_cleanup(&root);
-    }
-
-    #[test]
-    fn every_line_becomes_a_bounded_event_with_its_description() {
-        let root = std::env::temp_dir().join(format!("melody-monitor-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let (lines, emit) = collect_lines();
-        let started = start_monitor(
-            "session-1",
-            &root,
-            "printf 'first\\nsecond\\n'",
-            "watch the log",
-            false,
-            emit,
-        )
-        .unwrap();
-        assert_eq!(started.status, MonitorStatus::Running);
-        assert_eq!(started.description, "watch the log");
-        wait_for_status(&started.task_id, MonitorStatus::Completed);
-
-        let lines = lines.lock().unwrap().clone();
-        assert_eq!(
-            lines
-                .iter()
-                .map(|line| line.line.clone())
-                .collect::<Vec<_>>(),
-            vec!["first", "second"]
-        );
-        assert!(lines.iter().all(|line| line.description == "watch the log"));
-        assert_eq!(lines[0].sequence, 1);
-        assert_eq!(lines[1].sequence, 2);
-        // Stderr is part of the same stream, matching Melody's merged file.
-        let (more, emit) = collect_lines();
-        let started = start_monitor(
-            "session-1",
-            &root,
-            "printf 'out\\n'; printf 'err\\n' >&2",
-            "merged",
-            false,
-            emit,
-        )
-        .unwrap();
-        wait_for_status(&started.task_id, MonitorStatus::Completed);
-        let mut merged = more
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|line| line.line.clone())
-            .collect::<Vec<_>>();
-        merged.sort();
-        assert_eq!(merged, vec!["err", "out"]);
-        unit_cleanup(&root);
-    }
-
-    #[test]
-    fn a_chatty_monitor_is_stopped_automatically() {
-        let root = std::env::temp_dir().join(format!("melody-monitor-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let (lines, emit) = collect_lines();
-        // Far beyond the rolling window: the Host must stop it, not forward
-        // thousands of events into the conversation.
-        let started = start_monitor(
-            "session-1",
-            &root,
-            "i=0; while [ $i -lt 400 ]; do echo line-$i; i=$((i+1)); done",
-            "too chatty",
-            false,
-            emit,
-        )
-        .unwrap();
-        let final_state = wait_for_status(&started.task_id, MonitorStatus::AutoStopped);
-        assert!(final_state.emitted <= MAX_LINES_PER_WINDOW + 1);
-        let emitted = lines.lock().unwrap().len() as u32;
-        assert!(
-            emitted <= MAX_LINES_PER_WINDOW + 1,
-            "the Host must cap delivered events, saw {emitted}"
-        );
-        unit_cleanup(&root);
-    }
-
-    #[test]
-    fn a_monitor_can_be_cancelled_and_snapshots_carry_the_tail() {
-        let root = std::env::temp_dir().join(format!("melody-monitor-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let (lines, emit) = collect_lines();
-        let started = start_monitor(
-            "session-1",
-            &root,
-            "echo start; sleep 30",
-            "long running",
-            true,
-            emit,
-        )
-        .unwrap();
-        assert!(started.persistent);
-        // Wait until the first line landed so the snapshot has content.
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while lines.lock().unwrap().is_empty() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let outcome = cancel_monitor(&started.task_id).unwrap();
-        assert_ne!(outcome.status, MonitorStatus::Running);
-        let snapshot = monitor_snapshot(&started.task_id).unwrap();
-        assert!(snapshot.output.contains("start"));
-        // A finished monitor stays visible so its tail can still be read, and
-        // the registry prunes finished entries when the next one starts.
-        assert!(
-            list_monitors()
-                .iter()
-                .any(|entry| entry.task_id == started.task_id)
-        );
-        unit_cleanup(&root);
-    }
-
-    #[test]
-    fn volume_admission_is_rate_limited_per_window_and_in_total() {
-        let mut state = MonitorState {
-            status: MonitorStatus::Running,
-            lines: Vec::new(),
-            emitted: 0,
-            window_started: Instant::now(),
-            window_count: 0,
-            last_error: None,
-        };
-        for _ in 0..MAX_LINES_PER_WINDOW {
-            admit_line(&mut state, Instant::now()).unwrap();
-        }
-        let error = admit_line(&mut state, Instant::now()).expect_err("window must be capped");
-        assert!(error.contains("grep --line-buffered"));
-        // A later window admits again.
-        state.window_started = Instant::now() - VOLUME_WINDOW;
-        admit_line(&mut state, Instant::now()).unwrap();
-        state.emitted = MAX_LINES_TOTAL;
-        state.window_count = 0;
-        state.window_started = Instant::now() - VOLUME_WINDOW;
-        assert!(admit_line(&mut state, Instant::now()).is_err());
-    }
-
-    #[test]
-    fn long_lines_are_bounded_with_an_explicit_marker() {
-        let long = "x".repeat(MAX_LINE_BYTES + 25);
-        let (line, truncated) = bound_line(&long);
-        assert!(truncated);
-        assert!(line.contains("+25 chars"));
-        assert!(line.len() <= MAX_LINE_BYTES + 24);
-    }
-
-    fn unit_cleanup(root: &Path) {
-        let _ = std::fs::remove_dir_all(root);
-    }
 }

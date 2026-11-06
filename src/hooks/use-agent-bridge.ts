@@ -12,15 +12,11 @@ import {
   stopPiWorker,
   subscribeToAcp,
 } from "@/lib/melody-bridge";
-import {
-  createPiAgentEventStream,
-  setAgentSessionEngine as setSessionEngine,
-} from "@/lib/agent-client";
+import { createPiAgentEventStream } from "@/lib/agent-client";
 import { getPiCapabilityReport } from "@/lib/pi-compatibility";
 import { isLegacyArchiveSession } from "@/domain/agent/session-archive";
 import type { SessionRecord } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
-import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 export const useAgentBridge = (
   session?: SessionRecord,
@@ -35,7 +31,6 @@ export const useAgentBridge = (
   const beginArchivedSession = useAgentStore(
     (state) => state.beginArchivedSession,
   );
-  const configuredEngine = useAppSettingsStore((state) => state.agentEngine);
   const sessionId = session?.id;
   const sessionCwd = session?.cwd;
   const sessionRef = useRef(session);
@@ -116,9 +111,9 @@ export const useAgentBridge = (
             return;
           }
         }
-        // Pi is a desktop-only engine for now. Browser preview keeps using
-        // the deterministic ACP fixture even if a persisted setting says Pi.
-        const usePi = isTauriRuntime() && configuredEngine === "pi";
+        // Runtime context is the only router: Desktop is Pi-only and browser
+        // preview retains the deterministic local ACP fixture.
+        const usePi = isTauriRuntime();
         // Peripheral capability gaps keep the session on Pi; the notice rides
         // on the status message so the user sees what is unavailable without a
         // dedicated UI surface for capabilityDiagnostics.
@@ -184,12 +179,9 @@ export const useAgentBridge = (
         if (disposed) {
           return;
         }
-        setSessionEngine(sessionId, usePi ? "pi" : "legacy-acp");
         let listeners: (() => void)[] = [];
-        const subscribeFor = async (
-          engine: "legacy-acp" | "pi",
-        ): Promise<(() => void)[]> => {
-          if (engine === "pi") {
+        const subscribeForRuntime = async (): Promise<(() => void)[]> => {
+          if (usePi) {
             piEventStream = createPiAgentEventStream(
               (event) => {
                 if (!disposed) {
@@ -243,7 +235,7 @@ export const useAgentBridge = (
           unsubscribe = [];
         };
         try {
-          listeners = await subscribeFor(usePi ? "pi" : "legacy-acp");
+          listeners = await subscribeForRuntime();
           if (disposed) {
             detachListeners();
             return;
@@ -298,8 +290,8 @@ export const useAgentBridge = (
         // be replaced when the user opens a session from another project.
         // Call the idempotent start command for every Pi connection so the
         // Host can compare the canonical cwd and restart with the right
-        // model and skill catalog. Legacy ACP keeps its historical
-        // stopped-only start behavior.
+        // model and skill catalog. The legacy start path only supports the
+        // browser preview; Desktop ACP bridge calls fail closed.
         const shouldInitialize = current.phase === "stopped" || usePi;
         let running = current;
         if (usePi || current.phase === "stopped") {
@@ -349,7 +341,6 @@ export const useAgentBridge = (
     };
   }, [
     appendStderr,
-    configuredEngine,
     beginSession,
     beginArchivedSession,
     receiveAgentEvent,

@@ -65,6 +65,11 @@
   },
   "hostBridges": {
     "mcpTransports": ["stdio", "http", "sse"],
+    "mcpInventory": {
+      "command": "list_melody_mcp_servers",
+      "owner": "pi_mcp_runtime::inspect_mcp_config",
+      "validationAuthority": "Host"
+    },
     "sessionExplorer": {
       "command": "session.fork",
       "nativeAnchorField": "nativeEntryId",
@@ -73,8 +78,7 @@
       "materialization": "Pi SessionManager.createBranchedSession into a new opaque product-session file",
       "productLineage": true,
       "bringBack": true,
-      "bringBackMode": "bounded-post-anchor-assistant-text-appended-to-session-keyed-local-draft",
-      "bringBackMaxCodepoints": 12000,
+      "bringBackMode": "explicit-branch-session-reference-appended-to-session-keyed-local-draft",
       "bringBackAutomaticSubmit": false,
       "restartRecovery": "host-persisted-lineage-and-validated-existing-native-file",
       "knownGaps": ["desktop end-to-end and failure-injection verification"]
@@ -154,6 +158,7 @@
         "maxTools": 64,
         "maxServerBytes": 64,
         "maxToolBytes": 96,
+        "maxNameBytes": 128,
         "appliesWhenCeiling": "any ceiling other than all",
         "parentIntersection": true
       }

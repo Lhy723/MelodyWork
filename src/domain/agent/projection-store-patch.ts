@@ -56,7 +56,7 @@ export interface AgentProjectionStoreSnapshot {
 export interface AgentProjectionStorePatch {
   timeline?: TimelineEntry[];
   backgroundTimelines?: Record<string, TimelineEntry[]>;
-  acpCursor?: string;
+  eventCursor?: string;
   backgroundCursors?: Record<string, string>;
   contextUsage?: AgentContextUsage;
   backgroundContextUsage?: Record<string, AgentContextUsage>;
@@ -76,7 +76,7 @@ export interface AgentProjectionStorePatch {
   /** Bumped when a Host-owned schedule changed, so the UI re-reads it. */
   scheduleRevision?: number;
   chatStatus?: AgentProjectionChatStatus;
-  acpPhase?: AgentProjectionPhase;
+  runtimePhase?: AgentProjectionPhase;
   statusMessage?: string;
 }
 
@@ -105,27 +105,27 @@ const statusPatchFor = (
   result: AgentEventProjectionResult,
 ): Pick<
   AgentProjectionStorePatch,
-  "chatStatus" | "acpPhase" | "statusMessage"
+  "chatStatus" | "runtimePhase" | "statusMessage"
 > => {
   const eventType = result.event.event.type;
   if (result.projection.error) {
     return {
       chatStatus: "error",
-      acpPhase: "error",
+      runtimePhase: "error",
       statusMessage: result.projection.error,
     };
   }
   if (result.projection.completed || result.lifecycle === "run-finished") {
-    return { chatStatus: "ready", acpPhase: "ready" };
+    return { chatStatus: "ready", runtimePhase: "ready" };
   }
   if (result.projection.streaming || result.lifecycle === "run-started") {
-    return { chatStatus: "streaming", acpPhase: "prompting" };
+    return { chatStatus: "streaming", runtimePhase: "prompting" };
   }
   if (result.lifecycle === "run-accepted") {
-    return { chatStatus: "submitted", acpPhase: "prompting" };
+    return { chatStatus: "submitted", runtimePhase: "prompting" };
   }
   if (eventType === "tool.requested" || eventType === "interaction.requested") {
-    return { chatStatus: "streaming", acpPhase: "prompting" };
+    return { chatStatus: "streaming", runtimePhase: "prompting" };
   }
   if (
     eventType === "runtime.ready" ||
@@ -133,10 +133,10 @@ const statusPatchFor = (
     eventType === "session.imported" ||
     eventType === "session.configured"
   ) {
-    return { chatStatus: "ready", acpPhase: "ready" };
+    return { chatStatus: "ready", runtimePhase: "ready" };
   }
   if (eventType === "session.closed") {
-    return { chatStatus: "ready", acpPhase: "idle" };
+    return { chatStatus: "ready", runtimePhase: "idle" };
   }
   if (result.projection.statusMessage) {
     return { statusMessage: result.projection.statusMessage };
@@ -272,7 +272,7 @@ export const projectAgentEventToStorePatch = (
 
   if (current && !globalRuntimeEvent) {
     patch.timeline = result.projection.timeline;
-    patch.acpCursor = result.event.eventId;
+    patch.eventCursor = result.event.eventId;
     Object.assign(patch, statusPatchFor(result));
     Object.assign(patch, sessionConfigurationPatch(result, snapshot));
     if (result.projection.contextUsage) {

@@ -13,7 +13,7 @@ export const emptyStatistics: UsageStatistics = {
   cachedReadTokens: 0,
   reasoningTokens: 0,
   modelCalls: 0,
-  apiDurationMs: 0,
+  apiDurationMs: null,
   usageIncompleteTasks: 0,
   longestTaskMs: 0,
   currentStreakDays: 0,
@@ -54,7 +54,10 @@ export const formatDuration = (milliseconds: number) => {
     : `${minutes} 分钟`;
 };
 
-export const formatApiDuration = (milliseconds: number) => {
+export const formatApiDuration = (milliseconds: number | null) => {
+  if (milliseconds === null) {
+    return "供应商未提供";
+  }
   if (milliseconds < 60_000) {
     return `${Math.max(0, Math.round(milliseconds / 1_000))} 秒`;
   }

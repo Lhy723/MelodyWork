@@ -1,4 +1,4 @@
-import { containsControlCharacters } from "./contract.ts";
+import { inspectPiConfigCapabilityPolicies } from "./config-capability-policy.ts";
 import type { AgentCapabilityDiagnostic } from "./contract";
 
 /** A config snapshot read through Melody's trusted config bridge. */
@@ -47,6 +47,14 @@ export interface LspServerSnapshot {
   unsupportedFields?: string[];
 }
 
+/** MCP support status validated by the Host's runtime parser. */
+export interface McpServerSnapshot {
+  name: string;
+  transport: string;
+  supported: boolean;
+  reason?: string;
+}
+
 /** Host-validated command-hook inventory used by Pi preflight. */
 export interface HookDefinitionSnapshot {
   name: string;
@@ -85,494 +93,10 @@ export interface PiCapabilityReport {
   degradations: AgentCapabilityDiagnostic[];
 }
 
-const recordValue = (value: unknown): Record<string, unknown> | undefined =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const objectHasEntries = (value: unknown): boolean => {
-  if (Array.isArray(value)) return value.length > 0;
-  const record = recordValue(value);
-  return Boolean(record && Object.keys(record).length > 0);
-};
-
-const valueAtKey = (value: unknown, key: string): unknown => {
-  const record = recordValue(value);
-  return record?.[key];
-};
-
-const valueAtPath = (value: unknown, path: string[]): unknown =>
-  path.reduce<unknown>((current, key) => valueAtKey(current, key), value);
-
-const hasConfiguredSection = (
-  snapshots: AgentConfigSnapshot[],
-  keys: string[],
-  predicate: (value: unknown) => boolean = objectHasEntries,
-): boolean =>
-  snapshots.some((snapshot) =>
-    keys.some((key) => predicate(valueAtKey(snapshot.values, key))),
-  );
-
-const hasConfiguredPath = (
-  snapshots: AgentConfigSnapshot[],
-  paths: string[][],
-  predicate: (value: unknown) => boolean = objectHasEntries,
-): boolean =>
-  snapshots.some((snapshot) =>
-    paths.some((path) => predicate(valueAtPath(snapshot.values, path))),
-  );
-
-const MCP_CONFIG_KEYS = ["mcp_servers", "mcpServers", "mcp", "mcps"];
-
-const hasMcpDescriptorFields = (value: Record<string, unknown>): boolean =>
-  [
-    "name",
-    "command",
-    "args",
-    "env",
-    "cwd",
-    "transport",
-    "type",
-    "url",
-    "uri",
-    "server_url",
-    "serverUrl",
-  ].some((key) => key in value);
-
-interface McpConfigEntry {
-  name: string;
-  value: unknown;
-}
-
-const collectMcpEntries = (
-  value: unknown,
-  nameHint?: string,
-): McpConfigEntry[] => {
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => collectMcpEntries(item, nameHint));
-  }
-  const record = recordValue(value);
-  if (!record) return [];
-  if (hasMcpDescriptorFields(record)) {
-    const name =
-      (typeof record.name === "string" && record.name.trim()) ||
-      nameHint?.trim() ||
-      "unnamed";
-    return [{ name, value: record }];
-  }
-  const nested = Object.entries(record).flatMap(([key, item]) =>
-    item && typeof item === "object" ? collectMcpEntries(item, key) : [],
-  );
-  return nested.length > 0
-    ? nested
-    : nameHint
-      ? [{ name: nameHint, value }]
-      : [];
-};
-
-const mcpEntrySupported = (value: unknown): boolean => {
-  const record = recordValue(value);
-  if (!record) return false;
-  const command = record.command;
-  const remoteKeys = ["url", "uri", "server_url", "serverUrl"];
-  const hasRemoteField = remoteKeys.some(
-    (key) => record[key] !== undefined && record[key] !== null,
-  );
-  const remote = remoteKeys
-    .map((key) => record[key])
-    .find((candidate) => typeof candidate === "string" && candidate.trim());
-  const transport = record.transport ?? record.type;
-  if (hasRemoteField) {
-    // The Host owns the remote client.  Keep this check in lockstep with the
-    // Rust parser so a malformed mixed entry never silently disappears when
-    // Pi is selected.
-    if (command !== undefined && command !== null) return false;
-    if (typeof remote !== "string" || remote.length > 4096) return false;
-    try {
-      const parsed = new URL(remote.trim());
-      if (
-        !["http:", "https:"].includes(parsed.protocol) ||
-        !parsed.hostname ||
-        parsed.username ||
-        parsed.password ||
-        parsed.hash
-      ) {
-        return false;
-      }
-    } catch {
-      return false;
-    }
-    const remoteTransport =
-      typeof transport === "string" ? transport.trim().toLowerCase() : "http";
-    if (
-      transport !== undefined &&
-      transport !== null &&
-      typeof transport !== "string"
-    ) {
-      return false;
-    }
-    if (
-      transport !== undefined &&
-      ![
-        "http",
-        "streamable-http",
-        "streamable_http",
-        "streamablehttp",
-        "sse",
-        "server-sent-events",
-        "server_sent_events",
-      ].includes(remoteTransport)
-    ) {
-      return false;
-    }
-    if (record.headers !== undefined) {
-      const headers = recordValue(record.headers);
-      if (!headers || Object.keys(headers).length > 64) return false;
-      for (const [name, headerValue] of Object.entries(headers)) {
-        if (
-          !name ||
-          name.length > 256 ||
-          typeof headerValue !== "string" ||
-          headerValue.length > 16 * 1024 ||
-          !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) ||
-          [
-            "accept",
-            "content-type",
-            "content-length",
-            "connection",
-            "host",
-            "mcp-session-id",
-            "transfer-encoding",
-          ].includes(name.toLowerCase())
-        ) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-  if (typeof command !== "string" || command.trim().length === 0) return false;
-  if (
-    transport !== undefined &&
-    (typeof transport !== "string" ||
-      !["stdio", "local"].includes(transport.trim().toLowerCase()))
-  ) {
-    return false;
-  }
-  if (
-    record.args !== undefined &&
-    (!Array.isArray(record.args) ||
-      record.args.some((item) => typeof item !== "string"))
-  ) {
-    return false;
-  }
-  if (
-    record.env !== undefined &&
-    (!recordValue(record.env) ||
-      Object.values(record.env as Record<string, unknown>).some(
-        (item) => typeof item !== "string",
-      ))
-  ) {
-    return false;
-  }
-  return true;
-};
-
-const unsupportedMcpEntries = (
-  snapshots: AgentConfigSnapshot[],
-): McpConfigEntry[] => {
-  const entries: McpConfigEntry[] = [];
-  for (const snapshot of snapshots) {
-    for (const key of MCP_CONFIG_KEYS) {
-      const value = valueAtKey(snapshot.values, key);
-      if (value === undefined || value === null) continue;
-      const collected = collectMcpEntries(value, key);
-      if (collected.length === 0) {
-        entries.push({ name: key, value });
-      } else {
-        entries.push(
-          ...collected.filter((entry) => !mcpEntrySupported(entry.value)),
-        );
-      }
-    }
-  }
-  return entries;
-};
-
-const memoryIsEnabled = (value: unknown): boolean => {
-  if (value === true) return true;
-  if (value === false) return false;
-  const record = recordValue(value);
-  if (!record) return false;
-  // `enabled = false` is an explicit opt-out in Melody-build. Nested
-  // lifecycle settings must not accidentally re-enable the entire feature.
-  if (record.enabled === false) return false;
-  // A non-empty memory table without an explicit `enabled = false` uses
-  // Melody's enabled-by-configuration default and must not be silently lost.
-  return Object.keys(record).length > 0;
-};
-
-/**
- * Pi's Host bridge now owns the common Markdown memory lifecycle: bounded
- * search/get/remember, first-turn injection, and deterministic session snapshots. The
- * Pi compaction extension also owns the bounded first-pass memory-flush note and
- * the user-facing `/flush` command;
- * only the semantic/vector index and dream consolidation paths are unavailable
- * in Pi. Keep this predicate narrow so ordinary memory stays fully available.
- */
-const memoryNeedsPiDegradation = (value: unknown): boolean => {
-  if (!memoryIsEnabled(value)) return false;
-  const memory = recordValue(value);
-  const embedding = recordValue(memory?.embedding);
-  if (
-    embedding &&
-    (configuredString(embedding.model) || embedding.dimensions !== undefined)
-  ) {
-    return true;
-  }
-  return objectHasEntries(memory?.dream);
-};
-
-/**
- * Pi can persist and expose the basic goal lifecycle, but it does not yet
- * reproduce Melody-build's autonomous goal driver.  Keep this predicate
- * deliberately explicit: a harmless `[goal].enabled = true` should stay on
- * Pi, and its deterministic token/stall safety rails are projected through
- * the resource manifest. Classifier/planner/verifier, retry, and model pins
- * are unavailable in Pi and are reported as a session degradation.
- */
-const hasUnsupportedGoalOrchestration = (value: unknown): boolean => {
-  const goal = recordValue(value);
-  if (!goal) return false;
-  const advancedKeys = [
-    "classifier_enabled",
-    "classifierEnabled",
-    "planner_enabled",
-    "plannerEnabled",
-    "verification_enabled",
-    "verificationEnabled",
-    "verifier_enabled",
-    "verifierEnabled",
-    "classifier_max_runs",
-    "classifierMaxRuns",
-    "max_classifier_runs",
-    "maxClassifierRuns",
-    "retry_limit",
-    "retryLimit",
-    "max_retries",
-    "maxRetries",
-    "budget",
-    "planner_model",
-    "plannerModel",
-    "strategist_model",
-    "strategistModel",
-    "skeptic_model",
-    "skepticModel",
-    "skeptic_models",
-    "skepticModels",
-    "completion_gate",
-    "completionGate",
-    "adversarial_verification",
-    "adversarialVerification",
-  ];
-  return advancedKeys.some((key) => {
-    const candidate = goal[key];
-    if (candidate === undefined || candidate === null) return false;
-    if (typeof candidate === "boolean") return candidate;
-    if (typeof candidate === "number") {
-      return Number.isFinite(candidate) && candidate > 0;
-    }
-    if (typeof candidate === "string") return candidate.trim().length > 0;
-    return objectHasEntries(candidate);
-  });
-};
-
-const hasAdvancedGoalOrchestration = (
-  snapshots: AgentConfigSnapshot[],
-): boolean =>
-  snapshots.some((snapshot) => {
-    const root = recordValue(snapshot.values);
-    if (!root) return false;
-    if (hasUnsupportedGoalOrchestration(root.goal)) return true;
-    if (hasUnsupportedGoalOrchestration(root.goal_orchestration)) return true;
-    return [
-      "goal_classifier_enabled",
-      "goal_planner_enabled",
-      "goal_verification_enabled",
-      "goal_retry_limit",
-    ].some((key) => {
-      const candidate = root[key];
-      if (candidate === undefined || candidate === null) return false;
-      if (typeof candidate === "boolean") return candidate;
-      if (typeof candidate === "number") {
-        return Number.isFinite(candidate) && candidate > 0;
-      }
-      if (typeof candidate === "string") return candidate.trim().length > 0;
-      return objectHasEntries(candidate);
-    });
-  });
-
 const unsupportedLspServers = (
   servers: LspServerSnapshot[],
 ): LspServerSnapshot[] =>
   servers.filter((server) => server.enabled && !server.supported);
-
-const MAX_CODEBASE_INDEX_PATTERNS = 64;
-const MAX_CODEBASE_INDEX_PATTERN_BYTES = 512;
-
-/**
- * The default switch and Melody's path-glob form are covered by the bounded
- * Host tree-sitter bridge. Malformed values make codebase navigation
- * unavailable: the Host intentionally fails closed rather than indexing a
- * workspace under an ambiguous policy.
- */
-const codebaseIndexingPolicyInvalid = (value: unknown): boolean => {
-  if (
-    value === undefined ||
-    value === null ||
-    value === false ||
-    value === true
-  ) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    if (value.length > MAX_CODEBASE_INDEX_PATTERNS) return true;
-    return value.some((entry) => {
-      if (typeof entry !== "string") return true;
-      const pattern = entry.trim();
-      if (
-        pattern.length === 0 ||
-        pattern.length > MAX_CODEBASE_INDEX_PATTERN_BYTES ||
-        containsControlCharacters(pattern)
-      ) {
-        return true;
-      }
-      const body = pattern.startsWith("!") ? pattern.slice(1) : pattern;
-      if (!body) return true;
-      let characterClassDepth = 0;
-      for (const character of body) {
-        if (character === "[") characterClassDepth += 1;
-        if (character === "]") characterClassDepth -= 1;
-        if (characterClassDepth < 0) return true;
-      }
-      return characterClassDepth !== 0;
-    });
-  }
-  const record = recordValue(value);
-  return record ? Object.keys(record).length > 0 : true;
-};
-
-const configuredString = (value: unknown): boolean =>
-  typeof value === "string" && value.trim().length > 0;
-
-/** A terminal policy value is safe to project only when it is a positive,
- * finite number. Invalid values must not be silently ignored by the Host
- * parser. */
-const invalidTerminalPolicyValue = (value: unknown): boolean =>
-  value !== undefined &&
-  (typeof value !== "number" || !Number.isFinite(value) || value <= 0);
-
-const invalidQuestionTimeoutEnabledValue = (value: unknown): boolean =>
-  value !== undefined && typeof value !== "boolean";
-
-const invalidQuestionTimeoutSecondsValue = (value: unknown): boolean =>
-  value !== undefined &&
-  (typeof value !== "number" || !Number.isFinite(value) || value <= 0);
-
-/**
- * Basic subagent toggles, model pins, roles and personas are projected by the
- * Pi Host. Only full session/agent definitions with dynamic surfaces are
- * unavailable: they can change the tool graph and system prompt in ways the
- * bounded Pi manifest deliberately does not expose.
- */
-const SAFE_AGENT_DEFINITION_KEYS = new Set([
-  "name",
-  "description",
-  "model",
-  "modelId",
-  "model_id",
-  "effort",
-  "reasoningEffort",
-  "reasoning_effort",
-  "capabilityMode",
-  "capability_mode",
-  "defaultCapabilityMode",
-  "default_capability_mode",
-  "isolation",
-  "defaultIsolation",
-  "default_isolation",
-  "permissionMode",
-  "permission_mode",
-  "instructions",
-  "prompt",
-  "prompt_file",
-  "promptFile",
-  // The Host resolves a tool allowlist into the narrowest Pi capability
-  // ceiling; a list it cannot bound makes the definition unavailable and is
-  // reported through the Host inventory, not through this key allowlist.
-  "tools",
-  "disallowedTools",
-  "disallowed_tools",
-]);
-
-const agentDefinitionEntryUnsupported = (value: unknown): boolean => {
-  const record = recordValue(value);
-  if (!record) return true;
-  return Object.keys(record).some(
-    (key) => !SAFE_AGENT_DEFINITION_KEYS.has(key),
-  );
-};
-
-/** Detect dynamic agent definitions in either array or name-keyed config form. */
-const unsupportedAgentDefinitions = (value: unknown): boolean => {
-  if (Array.isArray(value)) {
-    return value.some(agentDefinitionEntryUnsupported);
-  }
-  const record = recordValue(value);
-  if (!record || Object.keys(record).length === 0) return false;
-  // A single inline definition may itself be supplied as an object.
-  if (Object.keys(record).some((key) => SAFE_AGENT_DEFINITION_KEYS.has(key))) {
-    return agentDefinitionEntryUnsupported(record);
-  }
-  // The common TOML shape is [subagents.agents.<name>]. Treat each value as
-  // an independent definition and fail closed for scalar/nested dynamic data.
-  return Object.values(record).some(agentDefinitionEntryUnsupported);
-};
-
-const unsupportedSubagentPolicy = (value: unknown): boolean => {
-  const record = recordValue(value);
-  if (!record) return false;
-  return ["agents", "agent_definitions", "agentDefinitions"].some((key) =>
-    unsupportedAgentDefinitions(record[key]),
-  );
-};
-
-/**
- * Melody-build's sandbox is an OS-level execution boundary.  Pi's Host
- * gateway validates workspace paths, but it does not reproduce Melody's
- * kernel-enforced profiles or custom deny lists.  Treat every active profile
- * as a compatibility requirement so a sandboxed Melody session never becomes
- * an unconfined Pi session.  Explicit `off`/false values are opt-outs.
- */
-const configuredSandbox = (value: unknown): boolean => {
-  if (value === undefined || value === null || value === false) return false;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    return (
-      normalized.length > 0 && !["off", "false", "none"].includes(normalized)
-    );
-  }
-  if (value === true) return true;
-  const record = recordValue(value);
-  if (!record) return false;
-  if ("profile" in record) {
-    return configuredSandbox(record.profile);
-  }
-  if (record.enabled === false) return false;
-  return Object.entries(record).some(
-    ([key, nested]) => key !== "enabled" && configuredSandbox(nested),
-  );
-};
 
 const enabledExtensions = (
   extensions: AgentExtensionSnapshot[],
@@ -670,6 +194,8 @@ const degradation = (
 export const inspectPiCapabilityReport = (input: {
   configs: AgentConfigSnapshot[];
   extensions: AgentExtensionSnapshot[];
+  /** MCP transport/schema status validated by the Host runtime parser. */
+  mcpServers: McpServerSnapshot[];
   /** Full runtime skill inventory, including external compatibility roots. */
   skills?: AgentExtensionSnapshot[];
   /** Trusted, non-secret environment settings read by the Host. */
@@ -710,22 +236,22 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  const unsupportedMcp = unsupportedMcpEntries(input.configs);
+  const unsupportedMcp = input.mcpServers.filter((server) => !server.supported);
   if (unsupportedMcp.length > 0) {
     diagnostics.push(
       degradation(
         "pi.mcp_unavailable",
         "mcp",
         `当前工作区有 ${unsupportedMcp.length} 个 MCP 配置无法由 Pi 的宿主桥接执行（仅支持校验通过的本地 stdio 与 HTTP/SSE）；这些服务在本次 Pi 会话中不可用，其余能力不受影响。`,
-        unsupportedMcp.map((entry) => entry.name).join(", "),
+        unsupportedMcp.map((server) => server.name).join(", "),
       ),
     );
   }
 
-  const configuredSandboxProfile = input.environment?.sandboxProfile;
-  const sandboxConfigured =
-    hasConfiguredSection(input.configs, ["sandbox"], configuredSandbox) ||
-    configuredSandbox(configuredSandboxProfile);
+  const configPolicies = inspectPiConfigCapabilityPolicies(
+    input.configs,
+    input.environment,
+  );
   if (input.sandboxPlan) {
     // The Host told us what it can enforce. A profile it can enforce on this
     // platform keeps the session on Pi. A platform with no enforcement
@@ -753,26 +279,20 @@ export const inspectPiCapabilityReport = (input: {
             ),
       );
     }
-  } else if (sandboxConfigured) {
+  } else if (configPolicies.sandbox.configured) {
     diagnostics.push(
       blockingDiagnostic(
         "pi.sandbox_unavailable",
         "sandbox",
         "当前工作区启用了 Melody 的 OS 级沙箱配置；Pi 只提供宿主路径校验，无法等价执行内核隔离，因此已阻止打开 Pi 会话。",
-        configuredSandbox(configuredSandboxProfile)
+        configPolicies.sandbox.configuredByEnvironment
           ? "env.MELODY_SANDBOX"
           : "config.sandbox",
       ),
     );
   }
 
-  if (
-    hasConfiguredPath(
-      input.configs,
-      [["features", "codebase_indexing"]],
-      codebaseIndexingPolicyInvalid,
-    )
-  ) {
+  if (configPolicies.codebaseIndexPolicyInvalid) {
     diagnostics.push(
       degradation(
         "pi.codebase_indexing_unavailable",
@@ -783,16 +303,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (
-    hasConfiguredPath(
-      input.configs,
-      [
-        ["auth", "auth_provider_command"],
-        ["grok_com_config", "auth_provider_command"],
-      ],
-      configuredString,
-    )
-  ) {
+  if (configPolicies.externalAuthCommandConfigured) {
     diagnostics.push(
       degradation(
         "pi.external_auth_unavailable",
@@ -803,16 +314,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (
-    hasConfiguredPath(
-      input.configs,
-      [
-        ["grok_com_config", "oidc"],
-        ["auth", "oidc"],
-      ],
-      objectHasEntries,
-    )
-  ) {
+  if (configPolicies.oidcConfigured) {
     diagnostics.push(
       degradation(
         "pi.oidc_unavailable",
@@ -826,11 +328,8 @@ export const inspectPiCapabilityReport = (input: {
   const unsupportedDefinitions = (input.agentDefinitions ?? []).filter(
     (entry) => entry.enabled && !entry.supported,
   );
-  const configHasUnsupportedDefinitions = hasConfiguredPath(
-    input.configs,
-    [["subagents"]],
-    unsupportedSubagentPolicy,
-  );
+  const configHasUnsupportedDefinitions =
+    configPolicies.subagentDefinitionPolicyUnsupported;
   if (configHasUnsupportedDefinitions || unsupportedDefinitions.length > 0) {
     diagnostics.push(
       degradation(
@@ -847,17 +346,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (
-    hasConfiguredPath(
-      input.configs,
-      [
-        ["toolset", "bash", "timeout_secs"],
-        ["toolset", "bash", "max_timeout_secs"],
-        ["toolset", "bash", "output_byte_limit"],
-      ],
-      invalidTerminalPolicyValue,
-    )
-  ) {
+  if (configPolicies.terminalPolicyInvalid) {
     diagnostics.push(
       degradation(
         "pi.terminal_policy_unavailable",
@@ -868,18 +357,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (
-    hasConfiguredPath(
-      input.configs,
-      [["toolset", "ask_user_question", "timeout_enabled"]],
-      invalidQuestionTimeoutEnabledValue,
-    ) ||
-    hasConfiguredPath(
-      input.configs,
-      [["toolset", "ask_user_question", "timeout_secs"]],
-      invalidQuestionTimeoutSecondsValue,
-    )
-  ) {
+  if (configPolicies.questionTimeoutPolicyInvalid) {
     diagnostics.push(
       degradation(
         "pi.question_timeout_policy_unavailable",
@@ -891,19 +369,7 @@ export const inspectPiCapabilityReport = (input: {
   }
 
   const configuredLsp =
-    input.lspServers === undefined
-      ? hasConfiguredSection(input.configs, [
-          "lsp_servers",
-          "lspServers",
-          "lsp",
-          "lsps",
-        ]) ||
-        hasConfiguredPath(
-          input.configs,
-          [["features", "lsp_tools"]],
-          (value) => value === true,
-        )
-      : false;
+    input.lspServers === undefined && configPolicies.lspConfigPresent;
   const unsupportedLsp = unsupportedLspServers(input.lspServers ?? []);
   if (configuredLsp || unsupportedLsp.length > 0) {
     diagnostics.push(
@@ -922,9 +388,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (
-    hasConfiguredSection(input.configs, ["memory"], memoryNeedsPiDegradation)
-  ) {
+  if (configPolicies.semanticMemoryNeedsDegradation) {
     diagnostics.push(
       degradation(
         "pi.memory_semantic_index_unavailable",
@@ -935,7 +399,7 @@ export const inspectPiCapabilityReport = (input: {
     );
   }
 
-  if (hasAdvancedGoalOrchestration(input.configs)) {
+  if (configPolicies.advancedGoalOrchestrationConfigured) {
     diagnostics.push(
       degradation(
         "pi.goal_orchestration_unavailable",

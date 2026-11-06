@@ -62,6 +62,7 @@ commands.allow = [
   "read_melody_runtime_environment",
   "list_melody_agent_definitions",
   "list_melody_lsp_servers",
+  "list_melody_mcp_servers",
   "list_melody_hooks",
   "list_melody_plugin_capabilities",
   "rebuild_melody_memory_index",

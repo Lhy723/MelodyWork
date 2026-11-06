@@ -9,7 +9,6 @@ import type {
 } from "@/domain/agent/contract";
 import type { AgentEventCheckpointOptions } from "@/domain/agent/event-checkpoint";
 import { AgentEventStream } from "@/domain/agent/event-stream";
-import { useAppSettingsStore } from "@/stores/app-settings-store";
 import {
   AgentEventProjector,
   type AgentEventProjectionListener,
@@ -30,14 +29,13 @@ import { toLegacyAcpRequest } from "@/domain/agent/legacy-command-adapter";
 import type { AgentStatus } from "@/domain/acp";
 import {
   inspectPiSessionRecovery,
+  isTauriRuntime,
   sendAcp,
   sendPiAgentCommand,
   readPiAgentEventLog,
   subscribeToAcp,
   subscribeToPiAgentEvents,
 } from "@/lib/melody-bridge";
-
-export type AgentClientEngine = "legacy-acp" | "pi";
 
 export type AgentEventListener = (event: AgentEventEnvelope) => void;
 
@@ -47,10 +45,8 @@ export interface AgentEventSubscriptionOptions extends AgentEventCheckpointOptio
 }
 
 /**
- * Subscribe to the normalized event stream over the legacy ACP transport.
- * Keeping the adapter here lets the existing store and the Pi worker share
- * one renderer-facing event contract while unsupported Pi ecosystem features
- * continue to use the legacy engine.
+ * Adapt the browser-preview ACP fixture into the renderer-facing event stream.
+ * Desktop Agent sessions subscribe through Pi; this is not an ACP fallback.
  */
 export const subscribeToAgentEvents = async (
   onEvent: AgentEventListener,
@@ -77,8 +73,8 @@ export const subscribeToAgentEvents = async (
 
 /**
  * Pi's stdout already carries the normalized protocol. Keep the same
- * checkpoint/replay filter as the ACP adapter so a future engine switch does
- * not require a different renderer subscription contract.
+ * checkpoint/replay filtering used by the preview adapter so consumers retain
+ * one renderer-facing event contract.
  */
 const subscribeToPiEvents = async (
   onEvent: AgentEventListener,
@@ -134,11 +130,9 @@ export interface PiAgentProjectionStreamHandle {
 }
 
 /**
- * Create the opt-in Pi stream that projects normalized events into the
- * existing timeline update model. Replay and live events share one stream
- * barrier and one projector, so callers do not need a second renderer path.
- * The default ACP store deliberately remains on `createPiAgentEventStream`
- * and is not changed by this helper.
+ * Create a Pi stream that projects normalized events into the existing
+ * timeline update model. Replay and live events share one stream barrier and
+ * one projector, so callers do not need a second renderer path.
  */
 export const createPiAgentProjectionStream = (
   onProjection: AgentEventProjectionListener,
@@ -176,7 +170,6 @@ export const createPiAgentProjectionStream = (
 };
 
 export interface AgentClient {
-  readonly engine: AgentClientEngine;
   send(command: AgentCommandEnvelope): Promise<void>;
   subscribe(
     onEvent: AgentEventListener,
@@ -186,111 +179,37 @@ export interface AgentClient {
 }
 
 /**
- * Compatibility client for Melody's validated ACP transport. It satisfies
- * the same engine-neutral interface as Pi so callers do not need another
- * store rewrite when a capability-specific fallback is selected.
+ * Compatibility client for the deterministic browser-preview ACP fixture.
+ * Desktop bridge calls fail closed; archive/import flows use separate adapters.
  */
-export const legacyAgentClient: AgentClient = {
-  engine: "legacy-acp",
+export const browserPreviewAgentClient: AgentClient = {
   send: async (command) => sendAcp(toLegacyAcpRequest(command)),
   subscribe: subscribeToAgentEvents,
 };
 
 /**
- * Opt-in Pi client. The worker now provides the product ToolGateway,
- * interactions, persistence, restore checks, nested tasks, and model/auth
- * boundaries; the setting remains opt-in while legacy plugin hooks, LSP,
- * semantic-memory/media extensions and advanced goal/workflow policies use
- * the compatibility ACP path.
+ * Pi is the only Desktop Agent runtime. The worker provides the product
+ * ToolGateway, interactions, persistence, restore checks, nested tasks, and
+ * model/auth boundaries; unsupported capabilities are blocked or surfaced as
+ * degradations, never routed to ACP.
  */
 export const piAgentClient: AgentClient = {
-  engine: "pi",
   send: sendPiAgentCommand,
   subscribe: subscribeToPiEvents,
 };
 
-export const agentClientFor = (engine: AgentClientEngine): AgentClient =>
-  engine === "pi" ? piAgentClient : legacyAgentClient;
-
 /**
- * Engine routing is normally a single persisted preference. During the Pi
- * migration a workspace can contain a capability (MCP, Hook, LSP, memory, or
- * an executable plugin) that Pi deliberately does not run yet. Keep that
- * decision scoped to the product session so the setting stays user-visible
- * while the compatibility ACP path can serve only the affected workspace.
+ * Desktop is always backed by Pi; non-Tauri rendering uses a deterministic
+ * browser-preview fixture. Persisted preferences cannot change this route.
  */
-const sessionEngineOverrides = new Map<string, AgentClientEngine>();
-const MAX_SESSION_ENGINE_OVERRIDES = 256;
-
-export const setAgentSessionEngine = (
-  sessionId: string,
-  engine: AgentClientEngine,
-): void => {
-  const normalized = sessionId.trim();
-  if (!normalized) return;
-  sessionEngineOverrides.delete(normalized);
-  sessionEngineOverrides.set(normalized, engine);
-  while (sessionEngineOverrides.size > MAX_SESSION_ENGINE_OVERRIDES) {
-    const oldest = sessionEngineOverrides.keys().next().value;
-    if (oldest === undefined) break;
-    sessionEngineOverrides.delete(oldest);
-  }
-};
-
-export const clearAgentSessionEngine = (sessionId: string): void => {
-  const normalized = sessionId.trim();
-  if (!normalized) return;
-  sessionEngineOverrides.delete(normalized);
-};
-
-export const agentEngineForSession = (
-  sessionId?: string,
-): AgentClientEngine => {
-  const normalized = sessionId?.trim();
-  return (
-    (normalized ? sessionEngineOverrides.get(normalized) : undefined) ??
-    configuredAgentEngine()
-  );
-};
-
-const commandSessionId = (
-  command: AgentCommandEnvelope,
-): string | undefined => {
-  if (command.sessionId) return command.sessionId;
-  const value = command.command as {
-    sessionId?: unknown;
-    productSessionId?: unknown;
-  };
-  if (typeof value.sessionId === "string" && value.sessionId.trim()) {
-    return value.sessionId;
-  }
-  return typeof value.productSessionId === "string" &&
-    value.productSessionId.trim()
-    ? value.productSessionId
-    : undefined;
-};
-
-export const agentClientForCommand = (
-  command: AgentCommandEnvelope,
-): AgentClient =>
-  agentClientFor(agentEngineForSession(commandSessionId(command)));
-
-/** Read the persisted engine at call time so a settings change applies to the
- * next command without rebuilding every store action.  Keeping selection in
- * this façade also prevents one legacy call site from silently bypassing the
- * migration switch. */
-export const configuredAgentEngine = (): AgentClientEngine =>
-  useAppSettingsStore.getState().agentEngine;
-
-export const configuredAgentClient = (): AgentClient =>
-  agentClientFor(configuredAgentEngine());
+export const agentClientForRuntime = (): AgentClient =>
+  isTauriRuntime() ? piAgentClient : browserPreviewAgentClient;
 
 export const sendAgentCommand = async (
   command: AgentCommandEnvelope,
-  client?: AgentClient,
 ): Promise<void> => {
   validateAgentCommandEnvelope(command);
-  await (client ?? agentClientForCommand(command)).send(command);
+  await agentClientForRuntime().send(command);
 };
 
 interface AgentTurnInput {
@@ -347,9 +266,9 @@ const attachmentBlocks = (attachments: AgentPromptAttachment[]): JsonObject[] =>
   });
 
 /**
- * Product-level turn entry point. Existing stores can migrate one call site
- * at a time while the default client still translates to ACP. The Pi client
- * will receive the same normalized command without another UI/store change.
+ * Product-level turn entry point. Store call sites remain independent of the
+ * normalized command transport: Desktop uses Pi and browser preview uses its
+ * local ACP fixture.
  */
 export const sendAgentTurn = async ({
   requestId,

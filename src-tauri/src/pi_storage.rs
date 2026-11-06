@@ -77,24 +77,3 @@ pub(crate) fn remove_pi_session_artifacts(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::pi_session_file_name;
-
-    #[test]
-    fn native_file_name_matches_the_opaque_shape() {
-        let name = pi_session_file_name("/workspace/demo", "session-1");
-        assert!(name.starts_with("session-"));
-        assert!(name.ends_with(".jsonl"));
-        assert_eq!(name.len(), "session-".len() + 64 + ".jsonl".len());
-        assert!(!name.contains("session-1"));
-    }
-
-    #[test]
-    fn workspace_and_product_identity_both_affect_the_name() {
-        let first = pi_session_file_name("/workspace/demo", "session-1");
-        assert_ne!(first, pi_session_file_name("/workspace/other", "session-1"));
-        assert_ne!(first, pi_session_file_name("/workspace/demo", "session-2"));
-    }
-}

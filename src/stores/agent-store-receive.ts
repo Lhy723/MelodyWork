@@ -131,13 +131,13 @@ export const receiveAgentAcp = async (
     }
 
     if (isUserQuestionMethod(message.method) && message.id !== undefined) {
-      const request = parseUserQuestionRequest(message, get().acpSessionId);
+      const request = parseUserQuestionRequest(message, get().runtimeSessionId);
       if (!request) {
         return;
       }
       markPromptActivity(request.sessionId);
-      const currentAcpSessionId = get().acpSessionId;
-      if (currentAcpSessionId && request.sessionId !== currentAcpSessionId) {
+      const currentRuntimeSessionId = get().runtimeSessionId;
+      if (currentRuntimeSessionId && request.sessionId !== currentRuntimeSessionId) {
         set((state) => ({
           backgroundTimelines: {
             ...state.backgroundTimelines,
@@ -150,7 +150,7 @@ export const receiveAgentAcp = async (
       } else {
         set((state) => ({
           timeline: questionEntryForRequest(state.timeline, request),
-          acpPhase: "prompting",
+          runtimePhase: "prompting",
           chatStatus: "streaming",
         }));
       }
@@ -164,7 +164,7 @@ export const receiveAgentAcp = async (
     if (message.method === "x.ai/exit_plan_mode" && message.id !== undefined) {
       const params = message.params ?? {};
       const sessionId = stringValue(params.sessionId);
-      markPromptActivity(sessionId ?? get().acpSessionId);
+      markPromptActivity(sessionId ?? get().runtimeSessionId);
       const toolCallId =
         stringValue(params.toolCallId) ?? `exit-plan-${String(message.id)}`;
       const content =
@@ -174,7 +174,7 @@ export const receiveAgentAcp = async (
         requestId: message.id,
         toolCallId,
       };
-      const currentSessionId = get().acpSessionId;
+      const currentSessionId = get().runtimeSessionId;
 
       if (sessionId && currentSessionId && sessionId !== currentSessionId) {
         set((state) => ({
@@ -213,8 +213,8 @@ export const receiveAgentAcp = async (
     const messageSessionId = updateParams
       ? stringValue(wireValue(updateParams, "sessionId", "session_id"))
       : undefined;
-    const currentAcpSessionId = get().acpSessionId;
-    const routedSessionId = messageSessionId ?? currentAcpSessionId;
+    const currentRuntimeSessionId = get().runtimeSessionId;
+    const routedSessionId = messageSessionId ?? currentRuntimeSessionId;
     if (!routedSessionId) {
       return;
     }
@@ -269,8 +269,8 @@ export const receiveAgentAcp = async (
     // 后台会话的 update：缓冲到 backgroundTimelines，不污染当前会话。
     if (
       messageSessionId &&
-      currentAcpSessionId &&
-      messageSessionId !== currentAcpSessionId
+      currentRuntimeSessionId &&
+      messageSessionId !== currentRuntimeSessionId
     ) {
       const buffered = startsFullReplay
         ? []
@@ -357,11 +357,11 @@ export const receiveAgentAcp = async (
     }
     set((state) => ({
       timeline: nextTimeline,
-      ...(metadata.eventId ? { acpCursor: metadata.eventId } : {}),
+      ...(metadata.eventId ? { eventCursor: metadata.eventId } : {}),
       ...(result.streaming ? { chatStatus: "streaming" as const } : {}),
       ...(result.completed
         ? {
-            acpPhase: result.error ? ("error" as const) : ("ready" as const),
+            runtimePhase: result.error ? ("error" as const) : ("ready" as const),
             chatStatus: result.error ? ("error" as const) : ("ready" as const),
             runningSessions: state.localSessionId
               ? { ...state.runningSessions, [state.localSessionId]: false }
@@ -373,7 +373,7 @@ export const receiveAgentAcp = async (
         : {}),
       ...(result.error
         ? {
-            acpPhase: "error" as const,
+            runtimePhase: "error" as const,
             chatStatus: "error" as const,
             status: { ...state.status, message: result.error },
           }
@@ -390,7 +390,7 @@ export const receiveAgentAcp = async (
     const detail = reasonMessage(reason);
     clearTransientState();
     set((state) => ({
-      acpPhase: "error",
+      runtimePhase: "error",
       chatStatus: "error",
       runningSessions: state.localSessionId
         ? { ...state.runningSessions, [state.localSessionId]: false }

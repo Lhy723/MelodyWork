@@ -62,35 +62,4 @@ impl WorkspaceRegistry {
                 .to_string(),
         )
     }
-
-    #[cfg(test)]
-    fn clear(&self) {
-        self.roots.write().unwrap().clear();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_registered_roots_and_descendants_are_authorized() {
-        let root = std::env::temp_dir().join(format!("melody-access-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        let registry = WorkspaceRegistry::default();
-        assert!(registry.authorize(root.to_str().unwrap()).is_err());
-        let canonical = registry.register(&root).unwrap();
-        assert_eq!(
-            registry.authorize(root.to_str().unwrap()).unwrap(),
-            canonical
-        );
-        assert!(
-            registry
-                .authorize(root.join("src").to_str().unwrap())
-                .is_ok()
-        );
-        assert!(registry.authorize("/").is_err());
-        registry.clear();
-        std::fs::remove_dir_all(root).unwrap();
-    }
 }

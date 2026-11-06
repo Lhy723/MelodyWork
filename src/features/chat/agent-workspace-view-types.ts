@@ -10,7 +10,7 @@ import type {
   SetStateAction,
 } from "react";
 import type {
-  AcpSessionPhase,
+  AgentSessionPhase,
   AgentContextUsage,
   AgentModelOption,
   AgentPlanDecision,
@@ -40,7 +40,7 @@ export interface AgentWorkspaceViewProps {
   activeSession?: SessionRecord;
   activeWorkspaceTabId?: string;
   chatDockRef: RefObject<HTMLDivElement | null>;
-  acpPhase: AcpSessionPhase;
+  runtimePhase: AgentSessionPhase;
   appUpdate?: AppUpdateStatus;
   appUpdateProgress?: AppUpdateProgress;
   availableModels: AgentModelOption[];

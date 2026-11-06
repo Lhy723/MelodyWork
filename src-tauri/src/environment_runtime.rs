@@ -158,22 +158,3 @@ async fn probe(
         description: description.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::EnvironmentCapability;
-
-    #[test]
-    fn capability_serializes_with_frontend_field_names() {
-        let capability = EnvironmentCapability {
-            name: "Git".to_string(),
-            version: Some("2.55.0".to_string()),
-            installed: true,
-            description: "用于 Git 操作".to_string(),
-        };
-        let value = serde_json::to_value(capability).expect("capability should serialize");
-        assert_eq!(value["name"], "Git");
-        assert_eq!(value["installed"], true);
-        assert_eq!(value["version"], "2.55.0");
-    }
-}

@@ -1,20 +1,91 @@
-#[path = "config_core.rs"]
-mod config_core;
 #[path = "config_extensions.rs"]
 mod config_extensions;
 #[path = "config_marketplace.rs"]
 mod config_marketplace;
 #[path = "config_plugin_details.rs"]
 mod config_plugin_details;
+#[path = "config_skill_details.rs"]
+mod config_skill_details;
 #[path = "config_subagents.rs"]
 mod config_subagents;
 
 use std::path::Path;
 
-pub use config_core::*;
+use serde_json::Value;
+
+pub use crate::config_core::*;
 pub use config_extensions::*;
 pub use config_marketplace::*;
 pub use config_plugin_details::*;
+
+/// Update config through its storage owner, then refresh the running Pi worker.
+/// Runtime refresh remains best-effort: the persisted config is the source of
+/// truth and the next worker generation will project it again if needed.
+#[tauri::command]
+pub async fn update_melody_config(
+    registry: tauri::State<'_, crate::workspace_access::WorkspaceRegistry>,
+    runtime: tauri::State<'_, crate::pi_worker_runtime::PiWorkerRuntime>,
+    scope: String,
+    cwd: String,
+    patches: Vec<MelodyConfigPatch>,
+) -> Result<MelodyConfigDocument, String> {
+    let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
+    let model_config_changed = patches.iter().any(|patch| {
+        patch.path.first().is_some_and(|key| {
+            matches!(key.as_str(), "model" | "models" | "endpoints" | "features")
+        })
+    });
+    let user_scope = scope == "user";
+    let mut document = crate::config_core::update_melody_config_inner(scope, cwd.clone(), patches)?;
+    let generation = runtime.active_generation();
+    if generation == 0 {
+        return Ok(document);
+    }
+    let refresh_cwd = match runtime.worker_cwd(generation).await {
+        Ok(worker_cwd) if user_scope || worker_cwd == Path::new(&cwd) => worker_cwd,
+        // A project-only edit does not affect a worker in another project.
+        Ok(_) => return Ok(document),
+        Err(_) => {
+            document.runtime_refresh_error =
+                Some("设置已保存，当前会话尚未应用这些变更，请重新连接。".to_string());
+            return Ok(document);
+        }
+    };
+    // User settings apply to the active worker's workspace even when Settings
+    // was opened from another project. Rebuild from that workspace so its
+    // project overrides remain authoritative.
+    let model_refresh_failed = model_config_changed
+        && runtime
+            .refresh_models_if_workspace(&refresh_cwd)
+            .await
+            .is_err();
+    let resource_refresh_failed = runtime
+        .refresh_resources_if_workspace(&refresh_cwd)
+        .await
+        .is_err();
+    if model_refresh_failed || resource_refresh_failed {
+        document.runtime_refresh_error =
+            Some("设置已保存，当前会话尚未应用这些变更，请重新连接。".to_string());
+    }
+    Ok(document)
+}
+
+/// Compose the single Host-owned worker resource manifest from focused config
+/// owners. Keep subagent policy evaluation between resource discovery and the
+/// optional policy projections, matching the previous error and evaluation
+/// order without creating a sibling-module dependency cycle.
+pub(crate) fn pi_resource_manifest(cwd: &str) -> Result<Value, String> {
+    let mut manifest = config_extensions::pi_resource_manifest_parts(cwd)?;
+    manifest["subagentPolicies"] = config_subagents::pi_subagent_policy_manifest(cwd)?;
+    if let Some(policy) = config_extensions::pi_question_timeout_policy(cwd) {
+        manifest["questionTimeoutPolicy"] = serde_json::to_value(policy)
+            .map_err(|error| format!("Failed to serialize Pi question timeout policy: {error}"))?;
+    }
+    if let Some(policy) = config_extensions::pi_goal_policy(cwd) {
+        manifest["goalPolicy"] = policy;
+    }
+    Ok(manifest)
+}
 
 #[tauri::command]
 pub fn list_melody_agent_definitions(
@@ -31,6 +102,16 @@ pub fn list_melody_lsp_servers(
 ) -> Result<Vec<crate::pi_lsp_runtime::MelodyLspServer>, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     crate::pi_lsp_runtime::list_melody_lsp_servers(&cwd)
+}
+
+/// Return the Host-validated MCP transport inventory used by Pi preflight.
+#[tauri::command]
+pub fn list_melody_mcp_servers(
+    registry: tauri::State<'_, crate::workspace_access::WorkspaceRegistry>,
+    cwd: String,
+) -> Result<Vec<crate::pi_mcp_runtime::McpServerStatus>, String> {
+    let cwd = registry.authorize(&cwd)?;
+    crate::pi_mcp_runtime::inspect_mcp_config(&cwd)
 }
 
 /// Return the Host-validated command-hook inventory used by Pi capability
@@ -69,835 +150,4 @@ pub fn rebuild_melody_memory_index(
 ) -> Result<crate::pi_memory_runtime::MemoryIndexSummary, String> {
     let cwd = registry.authorize(&cwd)?.to_string_lossy().into_owned();
     crate::pi_memory_runtime::rebuild_memory_index(Path::new(&cwd))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashSet, env, fs};
-
-    use toml_edit::{DocumentMut, Table};
-
-    use super::config_core::*;
-    use super::config_extensions::*;
-    use super::config_marketplace::*;
-    use super::config_plugin_details::*;
-    use super::*;
-
-    #[test]
-    fn scans_supported_extension_directories() {
-        let root = env::temp_dir().join(format!("melody-work-config-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("skills/review")).unwrap();
-        fs::create_dir_all(root.join("plugins/git-tools")).unwrap();
-        fs::create_dir_all(root.join("hooks")).unwrap();
-        fs::write(root.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::write(root.join("hooks/after-tool.sh"), "#!/bin/sh").unwrap();
-
-        let mut extensions = Vec::new();
-        let disabled = HashSet::new();
-        let plugins = PluginEnablement::explicit(&["git-tools"], &[]);
-        for kind in ["skills", "plugins", "hooks"] {
-            let enablement = if kind == "plugins" {
-                ExtensionEnablement::Plugins(&plugins)
-            } else {
-                ExtensionEnablement::DisabledOnly(&disabled)
-            };
-            scan_kind(
-                &root,
-                "project",
-                kind,
-                "melody",
-                &enablement,
-                &mut extensions,
-            );
-        }
-
-        assert_eq!(extensions.len(), 3);
-        assert!(extensions.iter().any(|item| item.name == "review"));
-        assert!(extensions.iter().any(|item| item.name == "git-tools"));
-        assert!(extensions.iter().any(|item| item.name == "after-tool.sh"));
-        assert!(extensions.iter().all(|item| item.provider == "melody"));
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn scans_claude_compatible_plugins() {
-        let root = env::temp_dir().join(format!("melody-work-claude-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("plugins/review-tools")).unwrap();
-
-        let mut extensions = Vec::new();
-        let plugins = PluginEnablement::explicit(&[], &["review-tools"]);
-        scan_kind(
-            &root,
-            "project",
-            "plugins",
-            "claude",
-            &ExtensionEnablement::Plugins(&plugins),
-            &mut extensions,
-        );
-
-        assert_eq!(extensions.len(), 1);
-        assert_eq!(extensions[0].name, "review-tools");
-        assert_eq!(extensions[0].provider, "claude");
-        assert!(!extensions[0].enabled);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn reads_git_and_local_marketplace_sources() {
-        let document = r#"
-[[marketplace.sources]]
-name = "Team"
-git = "https://example.com/plugins.git"
-branch = "stable"
-
-[[marketplace.sources]]
-name = "Local"
-path = "~/dev/plugins"
-"#
-        .parse::<DocumentMut>()
-        .unwrap();
-
-        let sources = marketplace_sources(&document).unwrap();
-
-        assert_eq!(sources.len(), 2);
-        assert_eq!(sources[0].kind, "git");
-        assert_eq!(sources[0].branch.as_deref(), Some("stable"));
-        assert_eq!(sources[1].kind, "local");
-        assert_eq!(sources[1].location, "~/dev/plugins");
-    }
-
-    #[test]
-    fn creates_marketplace_source_array_without_replacing_other_settings() {
-        let mut document = "[marketplace]\nrequire_sha = true\n"
-            .parse::<DocumentMut>()
-            .unwrap();
-        let sources = marketplace_sources_mut(&mut document).unwrap();
-        let mut entry = Table::new();
-        entry["name"] = toml_edit::value("Team");
-        entry["git"] = toml_edit::value("https://example.com/plugins.git");
-        sources.push(entry);
-
-        let output = document.to_string();
-        assert!(output.contains("require_sha = true"));
-        assert!(output.contains("[[marketplace.sources]]"));
-        assert!(output.contains("name = \"Team\""));
-    }
-
-    #[test]
-    fn infers_marketplace_source_from_common_inputs() {
-        let shorthand = marketplace_source_from_input("acme/team-plugins@stable").unwrap();
-        assert_eq!(shorthand.name, "team-plugins");
-        assert_eq!(shorthand.kind, "git");
-        assert_eq!(
-            shorthand.location,
-            "https://github.com/acme/team-plugins.git"
-        );
-        assert_eq!(shorthand.branch.as_deref(), Some("stable"));
-
-        let git = marketplace_source_from_input("https://example.com/acme/tools.git").unwrap();
-        assert_eq!(git.name, "tools");
-        assert_eq!(git.kind, "git");
-
-        let local = marketplace_source_from_input("~/dev/plugins").unwrap();
-        assert_eq!(local.name, "plugins");
-        assert_eq!(local.kind, "local");
-    }
-
-    #[test]
-    fn reads_plugin_metadata_and_component_inventory() {
-        let root = env::temp_dir().join(format!("melody-work-plugin-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
-        fs::create_dir_all(root.join("skills/review")).unwrap();
-        fs::create_dir_all(root.join("commands")).unwrap();
-        fs::create_dir_all(root.join("agents")).unwrap();
-        fs::write(root.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::write(root.join("commands/check.md"), "# Check").unwrap();
-        fs::write(root.join("agents/reviewer.md"), "# Reviewer").unwrap();
-        fs::write(
-            root.join(".claude-plugin/plugin.json"),
-            serde_json::json!({
-                "name": "team-tools",
-                "version": "1.2.3",
-                "description": "Team utilities",
-                "author": { "name": "Acme" },
-                "hooks": { "PreToolUse": [] },
-                "mcpServers": { "github": { "command": "server" } },
-                "lspServers": { "rust": { "command": "rust-analyzer" } }
-            })
-            .to_string(),
-        )
-        .unwrap();
-
-        let details = plugin_details_from_directory(&root, "team-tools");
-
-        assert_eq!(details.name, "team-tools");
-        assert_eq!(details.version.as_deref(), Some("1.2.3"));
-        assert_eq!(details.author.as_deref(), Some("Acme"));
-        assert_eq!(details.components[0].items, ["review"]);
-        assert_eq!(details.components[1].items, ["check"]);
-        assert_eq!(details.components[2].items, ["reviewer"]);
-        assert_eq!(details.components[3].items, ["PreToolUse"]);
-        assert_eq!(details.components[4].items, ["github"]);
-        assert_eq!(details.components[5].items, ["rust"]);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn classifies_static_plugin_resources_without_projecting_dynamic_surfaces() {
-        let static_root = env::temp_dir().join(format!(
-            "melody-work-static-plugin-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(static_root.join("skills/review")).unwrap();
-        fs::create_dir_all(static_root.join("commands")).unwrap();
-        fs::write(static_root.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::write(static_root.join("commands/check.md"), "# Check").unwrap();
-        let static_capability =
-            plugin_capability_from_directory(&static_root, "user", true).unwrap();
-        assert_eq!(
-            static_capability.name,
-            static_root.file_name().unwrap().to_string_lossy()
-        );
-        assert!(static_capability.static_resources);
-        assert!(static_capability.dynamic_components.is_empty());
-        assert_eq!(static_capability.skill_roots.len(), 1);
-        assert_eq!(static_capability.prompt_roots.len(), 1);
-
-        let dynamic_root = env::temp_dir().join(format!(
-            "melody-work-dynamic-plugin-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(dynamic_root.join("skills/review")).unwrap();
-        fs::create_dir_all(dynamic_root.join("hooks")).unwrap();
-        fs::write(dynamic_root.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::write(dynamic_root.join("hooks/after-tool.json"), "{}").unwrap();
-        let dynamic_capability =
-            plugin_capability_from_directory(&dynamic_root, "user", true).unwrap();
-        assert!(!dynamic_capability.static_resources);
-        assert!(
-            dynamic_capability
-                .dynamic_components
-                .iter()
-                .any(|component| component == "hooks")
-        );
-
-        fs::remove_dir_all(static_root).unwrap();
-        fs::remove_dir_all(dynamic_root).unwrap();
-    }
-
-    #[test]
-    fn rejects_plugin_resource_roots_that_escape_through_symlinks() {
-        let root =
-            env::temp_dir().join(format!("melody-work-plugin-link-{}", uuid::Uuid::new_v4()));
-        let outside = root.with_file_name(format!(
-            "{}-outside",
-            root.file_name().unwrap().to_string_lossy()
-        ));
-        fs::create_dir_all(outside.join("skills/review")).unwrap();
-        fs::write(outside.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("plugin.json"),
-            serde_json::json!({
-                "name": "linked-tools",
-                "skills": "skills"
-            })
-            .to_string(),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            symlink(outside.join("skills"), root.join("skills")).unwrap();
-            let capability = plugin_capability_from_directory(&root, "user", true).unwrap();
-            assert!(capability.skill_roots.is_empty());
-        }
-        fs::remove_dir_all(root).unwrap();
-        fs::remove_dir_all(outside).unwrap();
-    }
-
-    #[test]
-    fn keeps_plugins_with_malformed_manifests_on_acp() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-malformed-plugin-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(root.join("skills/review")).unwrap();
-        fs::write(root.join("skills/review/SKILL.md"), "# Review").unwrap();
-        fs::write(root.join("plugin.json"), "{ this is not json").unwrap();
-
-        let capability = plugin_capability_from_directory(&root, "user", true).unwrap();
-        assert!(!capability.static_resources);
-        assert!(
-            capability
-                .dynamic_components
-                .iter()
-                .any(|component| component == "manifest")
-        );
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_manifest_resource_paths_that_escape_the_plugin_root() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-unsafe-plugin-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("plugin.json"),
-            serde_json::json!({
-                "name": "unsafe-tools",
-                "skills": "../outside/skills",
-                "hooks": "../outside/hooks.json"
-            })
-            .to_string(),
-        )
-        .unwrap();
-
-        let capability = plugin_capability_from_directory(&root, "user", true).unwrap();
-        assert!(!capability.static_resources);
-        assert!(
-            capability
-                .dynamic_components
-                .iter()
-                .any(|component| component == "resource-path")
-        );
-        assert!(capability.skill_roots.is_empty());
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn reads_skill_metadata_content_and_files() {
-        let root = env::temp_dir().join(format!("melody-work-skill-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("references")).unwrap();
-        fs::write(
-            root.join("SKILL.md"),
-            "---\nname: review\ndescription: Review code safely\nlicense: MIT\ncompatibility: Melody 0.0.1+\n---\n\n# Review\n",
-        )
-        .unwrap();
-        fs::write(root.join("references/checklist.md"), "# Checklist").unwrap();
-
-        let details = skill_details_from_directory(&root, "fallback").unwrap();
-
-        assert_eq!(details.name, "review");
-        assert_eq!(details.description.as_deref(), Some("Review code safely"));
-        assert_eq!(details.license.as_deref(), Some("MIT"));
-        assert_eq!(details.compatibility.as_deref(), Some("Melody 0.0.1+"));
-        assert!(details.content.contains("# Review"));
-        assert_eq!(details.files, ["SKILL.md", "references/checklist.md"]);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn maps_pi_skill_catalog_paths_into_settings_inventory() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-pi-skill-inventory-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let active = root.join(".melody/skills/active-skill");
-        let disabled = root.join(".agents/skills/disabled-skill");
-        let plugin_skill = root.join(".melody/plugins/team/skills/plugin-skill");
-        for directory in [&active, &disabled, &plugin_skill] {
-            fs::create_dir_all(directory).unwrap();
-        }
-        fs::write(
-            active.join("SKILL.md"),
-            "---\nname: a-different-display-name\ndescription: Active from Pi\n---\n# Active",
-        )
-        .unwrap();
-        fs::write(
-            disabled.join("SKILL.md"),
-            "---\ndescription: Disabled in Pi config\n---\n# Disabled",
-        )
-        .unwrap();
-        fs::write(plugin_skill.join("SKILL.md"), "# Plugin skill").unwrap();
-
-        let canonical = |path: &Path| path.canonicalize().unwrap();
-        let active_path = canonical(&active);
-        let disabled_path = canonical(&disabled);
-        let plugin_path = canonical(&plugin_skill);
-        let roots = vec![
-            PiSkillScanRoot {
-                path: root.join(".melody/skills"),
-                scope: "project".to_string(),
-                disabled: HashSet::new(),
-                ignore_paths: Vec::new(),
-            },
-            PiSkillScanRoot {
-                path: root.join(".agents/skills"),
-                scope: "project".to_string(),
-                disabled: HashSet::from(["disabled-skill".to_string()]),
-                ignore_paths: Vec::new(),
-            },
-            PiSkillScanRoot {
-                path: plugin_skill.clone(),
-                scope: "project".to_string(),
-                disabled: HashSet::new(),
-                ignore_paths: Vec::new(),
-            },
-        ];
-        let plugins = vec![MelodyPluginCapability {
-            name: "team".to_string(),
-            path: root
-                .join(".melody/plugins/team")
-                .to_string_lossy()
-                .into_owned(),
-            scope: "project".to_string(),
-            enabled: true,
-            static_resources: true,
-            dynamic_components: Vec::new(),
-            skill_roots: vec![plugin_path.to_string_lossy().into_owned()],
-            prompt_roots: Vec::new(),
-            agent_roots: Vec::new(),
-        }];
-
-        let skills = pi_skill_extensions_from_catalog(
-            root.to_str().unwrap(),
-            &[active_path, plugin_path],
-            std::slice::from_ref(&disabled_path),
-            &roots,
-            &plugins,
-        );
-
-        assert_eq!(skills.len(), 3);
-        let active_entry = skills
-            .iter()
-            .find(|skill| skill.name == "active-skill")
-            .unwrap();
-        assert_eq!(active_entry.description.as_deref(), Some("Active from Pi"));
-        assert_eq!(active_entry.provider, "melody");
-        assert!(active_entry.enabled);
-        assert!(active_entry.deletable);
-        let disabled_entry = skills
-            .iter()
-            .find(|skill| skill.name == "disabled-skill")
-            .unwrap();
-        assert_eq!(disabled_entry.provider, "agents");
-        assert!(!disabled_entry.enabled);
-        let plugin_entry = skills
-            .iter()
-            .find(|skill| skill.name == "plugin-skill")
-            .unwrap();
-        assert_eq!(plugin_entry.plugin_name.as_deref(), Some("team"));
-        assert_eq!(plugin_entry.provider, "plugin");
-        assert!(!plugin_entry.deletable);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn skill_paths_must_be_direct_children_of_an_allowed_root() {
-        let root = env::temp_dir().join(format!("melody-work-skills-{}", uuid::Uuid::new_v4()));
-        let allowed = root.join("skills");
-        let valid = allowed.join("review");
-        let nested = valid.join("nested");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(valid.join("SKILL.md"), "# Review").unwrap();
-        fs::write(nested.join("SKILL.md"), "# Nested").unwrap();
-
-        assert!(allowed_skill_path_in_roots(&valid, &[allowed.clone()]).is_ok());
-        assert!(allowed_skill_path_in_roots(&nested, &[allowed]).is_err());
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-
-            let external = root.join("external-SKILL.md");
-            let linked = root.join("skills/linked");
-            fs::write(&external, "# External").unwrap();
-            fs::create_dir_all(&linked).unwrap();
-            symlink(&external, linked.join("SKILL.md")).unwrap();
-            assert!(allowed_skill_path_in_roots(&linked, &[root.join("skills")]).is_err());
-        }
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn pi_skill_scan_accepts_bounded_nested_markdown_roots() {
-        let root = env::temp_dir().join(format!("melody-work-pi-skills-{}", uuid::Uuid::new_v4()));
-        let direct = root.join("review");
-        let nested = root.join("team/ops");
-        let disabled = root.join("disabled");
-        let too_deep = root.join("a/b/c/d/e/f/g");
-        fs::create_dir_all(&direct).unwrap();
-        fs::create_dir_all(&nested).unwrap();
-        fs::create_dir_all(&disabled).unwrap();
-        fs::create_dir_all(&too_deep).unwrap();
-        fs::write(direct.join("SKILL.md"), "# Review").unwrap();
-        fs::write(nested.join("SKILL.md"), "# Ops").unwrap();
-        fs::write(disabled.join("SKILL.md"), "# Disabled").unwrap();
-        fs::write(too_deep.join("SKILL.md"), "# Too deep").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-
-            let external = root.with_file_name(format!(
-                "{}-outside",
-                root.file_name().unwrap().to_string_lossy()
-            ));
-            fs::create_dir_all(&external).unwrap();
-            fs::write(external.join("SKILL.md"), "# Outside").unwrap();
-            symlink(&external, root.join("linked")).unwrap();
-        }
-
-        let mut paths = Vec::new();
-        let mut total_bytes = 0;
-        scan_pi_skill_root(
-            &root,
-            &HashSet::from(["disabled".to_string()]),
-            &[],
-            &mut paths,
-            &mut total_bytes,
-        );
-
-        assert_eq!(
-            paths,
-            vec![
-                direct.canonicalize().unwrap(),
-                nested.canonicalize().unwrap()
-            ]
-        );
-        assert_eq!(
-            total_bytes,
-            fs::metadata(direct.join("SKILL.md")).unwrap().len()
-                + fs::metadata(nested.join("SKILL.md")).unwrap().len()
-        );
-        assert!(paths.len() <= MAX_PI_SKILL_PATHS);
-
-        let mut disabled_paths = Vec::new();
-        let mut disabled_bytes = 0;
-        scan_pi_disabled_skill_root(
-            &root,
-            &HashSet::from(["disabled".to_string()]),
-            &[],
-            &mut disabled_paths,
-            &mut disabled_bytes,
-        );
-        assert_eq!(disabled_paths, vec![disabled.canonicalize().unwrap()]);
-        fs::remove_dir_all(&root).unwrap();
-        #[cfg(unix)]
-        fs::remove_dir_all(root.with_file_name(format!(
-            "{}-outside",
-            root.file_name().unwrap().to_string_lossy()
-        )))
-        .unwrap();
-    }
-
-    #[test]
-    fn pi_prompt_scan_is_flat_sorted_bounded_and_respects_disabled_names() {
-        let root = env::temp_dir().join(format!("melody-work-prompts-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("nested")).unwrap();
-        fs::write(root.join("b.md"), "B").unwrap();
-        fs::write(root.join("a.md"), "A").unwrap();
-        fs::write(root.join("disabled.md"), "disabled").unwrap();
-        fs::write(root.join("nested/nested.md"), "nested").unwrap();
-        fs::write(root.join("not-markdown.txt"), "ignored").unwrap();
-
-        let mut paths = Vec::new();
-        let mut total_bytes = 0;
-        scan_pi_prompt_root(
-            &root,
-            &HashSet::from(["disabled".to_string()]),
-            &mut paths,
-            &mut total_bytes,
-        );
-
-        assert_eq!(
-            paths,
-            vec![
-                root.join("a.md").canonicalize().unwrap(),
-                root.join("b.md").canonicalize().unwrap()
-            ]
-        );
-        assert_eq!(total_bytes, 2);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn pi_prompt_scan_rejects_symlinks_and_oversized_files() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-prompt-limits-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("target.md"), "target").unwrap();
-        fs::write(
-            root.join("large.md"),
-            vec![b'x'; (MAX_PI_PROMPT_FILE_BYTES + 1) as usize],
-        )
-        .unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            symlink(root.join("target.md"), root.join("linked.md")).unwrap();
-        }
-
-        let mut paths = Vec::new();
-        let mut total_bytes = 0;
-        scan_pi_prompt_root(&root, &HashSet::new(), &mut paths, &mut total_bytes);
-        assert_eq!(paths, vec![root.join("target.md").canonicalize().unwrap()]);
-        assert_eq!(total_bytes, 6);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn patches_known_values_without_removing_comments_or_unknown_settings() {
-        let mut document = r#"# Keep this comment
-[models]
-default = "old"
-future_option = "preserved"
-"#
-        .parse::<DocumentMut>()
-        .unwrap();
-        apply_patch(
-            &mut document,
-            &MelodyConfigPatch {
-                path: vec!["models".into(), "default".into()],
-                value: serde_json::json!("new"),
-            },
-        )
-        .unwrap();
-        apply_patch(
-            &mut document,
-            &MelodyConfigPatch {
-                path: vec!["features".into(), "telemetry".into()],
-                value: serde_json::json!(false),
-            },
-        )
-        .unwrap();
-
-        let output = document.to_string();
-        assert!(output.contains("# Keep this comment"));
-        assert!(output.contains("future_option = \"preserved\""));
-        assert!(output.contains("default = \"new\""));
-        assert!(output.contains("telemetry = false"));
-    }
-
-    #[test]
-    fn null_patch_removes_only_the_requested_value() {
-        let mut document = "[ui]\nsimple_mode = true\nvim_mode = true\n"
-            .parse::<DocumentMut>()
-            .unwrap();
-        apply_patch(
-            &mut document,
-            &MelodyConfigPatch {
-                path: vec!["ui".into(), "vim_mode".into()],
-                value: serde_json::Value::Null,
-            },
-        )
-        .unwrap();
-
-        let output = document.to_string();
-        assert!(output.contains("simple_mode = true"));
-        assert!(!output.contains("vim_mode"));
-    }
-
-    #[test]
-    fn parses_available_and_installed_marketplace_plugins() {
-        let plugins = marketplace_plugins_from_json(
-            r#"[
-                {
-                    "status": "available",
-                    "name": "web-tools",
-                    "version": "1.2.0",
-                    "description": "Web tools",
-                    "marketplace": "Official",
-                    "skill_count": 2,
-                    "has_hooks": true,
-                    "has_agents": false,
-                    "has_mcp": true
-                },
-                {
-                    "status": "installed",
-                    "name": "reviewer",
-                    "version": "0.4.0",
-                    "marketplace": "Official"
-                },
-                {
-                    "status": "installed",
-                    "name": "direct-install",
-                    "version": "1.0.0",
-                    "marketplace": null
-                }
-            ]"#,
-        )
-        .unwrap();
-
-        assert_eq!(plugins.len(), 2);
-        assert_eq!(plugins[0].name, "web-tools");
-        assert_eq!(plugins[0].version.as_deref(), Some("1.2.0"));
-        assert_eq!(plugins[0].skill_count, 2);
-        assert!(plugins[0].has_hooks);
-        assert!(plugins[0].has_mcp);
-        assert_eq!(plugins[1].status, "installed");
-        assert_eq!(plugins[1].installed_version.as_deref(), Some("0.4.0"));
-        assert!(!plugins[1].update_available);
-    }
-
-    #[test]
-    fn merges_installed_and_available_entries_before_marking_updates() {
-        let plugins = marketplace_plugins_from_json(
-            r#"[
-                {
-                    "status": "available",
-                    "name": "new-tools",
-                    "version": "2.0.0",
-                    "description": "New tools",
-                    "marketplace": "Official",
-                    "skill_count": 3,
-                    "has_hooks": true,
-                    "has_agents": false,
-                    "has_mcp": false
-                },
-                {
-                    "status": "installed",
-                    "name": "new-tools",
-                    "version": "1.4.0",
-                    "marketplace": "Official"
-                },
-                {
-                    "status": "available",
-                    "name": "same-tools",
-                    "version": "1.4.0",
-                    "marketplace": "Official"
-                },
-                {
-                    "status": "installed",
-                    "name": "same-tools",
-                    "version": "1.4.0",
-                    "marketplace": "Official"
-                },
-                {
-                    "status": "installed",
-                    "name": "unknown-tools",
-                    "version": null,
-                    "marketplace": "Official"
-                }
-            ]"#,
-        )
-        .unwrap();
-
-        assert_eq!(plugins.len(), 3);
-        assert_eq!(plugins[0].status, "installed");
-        assert_eq!(plugins[0].version.as_deref(), Some("2.0.0"));
-        assert_eq!(plugins[0].installed_version.as_deref(), Some("1.4.0"));
-        assert!(plugins[0].update_available);
-        assert_eq!(plugins[0].skill_count, 3);
-        assert!(!plugins[1].update_available);
-        assert!(!plugins[2].update_available);
-    }
-
-    #[test]
-    fn normalizes_plugin_update_messages_without_unknown_version_claims() {
-        assert_eq!(
-            format_plugin_update_message(
-                "agent-sdk-dev",
-                "agent-sdk-dev-df237656: updated (? -> ?)"
-            ),
-            "agent-sdk-dev 已完成同步；插件来源未提供版本号，暂时无法确认是否有版本变化。"
-        );
-        assert_eq!(
-            format_plugin_update_message("tools", "tools-abc: already up to date"),
-            "tools 已是最新版本。"
-        );
-        assert_eq!(
-            format_plugin_update_message("tools", ""),
-            "tools 已是最新版本。"
-        );
-    }
-
-    #[test]
-    fn resolves_pi_terminal_policy_from_project_config() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-terminal-policy-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(root.join(".melody")).unwrap();
-        fs::write(
-            root.join(".melody/config.toml"),
-            "[toolset.bash]\ntimeout_secs = 45.5\nmax_timeout_secs = 90\noutput_byte_limit = 12000\n",
-        )
-        .unwrap();
-
-        let policy = pi_terminal_policy(&root.to_string_lossy()).unwrap();
-        assert_eq!(policy.default_timeout_ms, 45_500);
-        assert_eq!(policy.max_timeout_ms, 90_000);
-        assert_eq!(policy.output_byte_limit, 12_000);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn ignores_empty_pi_terminal_policy_when_no_bash_settings_exist() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-terminal-policy-empty-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        assert!(pi_terminal_policy(&root.to_string_lossy()).is_none());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn resolves_pi_question_timeout_policy_from_project_config() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-question-policy-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(root.join(".melody")).unwrap();
-        fs::write(
-            root.join(".melody/config.toml"),
-            "[toolset.ask_user_question]\ntimeout_enabled = false\ntimeout_secs = 12.5\n",
-        )
-        .unwrap();
-
-        let policy = pi_question_timeout_policy(&root.to_string_lossy()).unwrap();
-        assert!(!policy.enabled);
-        assert_eq!(policy.timeout_ms, 12_500);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn ignores_empty_pi_question_timeout_policy_without_config() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-question-policy-empty-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        assert!(pi_question_timeout_policy(&root.to_string_lossy()).is_none());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn resolves_pi_goal_safety_policy_from_project_config() {
-        let root =
-            env::temp_dir().join(format!("melody-work-goal-policy-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join(".melody")).unwrap();
-        fs::write(
-            root.join(".melody/config.toml"),
-            "[goal]\ntoken_budget = 50000\nstall_detection = true\nstall_timeout_secs = 120\nmax_blocked_attempts = 4\n",
-        )
-        .unwrap();
-
-        let policy = pi_goal_policy(&root.to_string_lossy()).unwrap();
-        assert_eq!(policy["tokenBudget"], 50_000);
-        assert_eq!(policy["stallDetection"], true);
-        assert_eq!(policy["stallTimeoutSecs"], 120);
-        assert_eq!(policy["maxBlockedAttempts"], 4);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn leaves_pi_goal_policy_absent_without_safety_settings() {
-        let root = env::temp_dir().join(format!(
-            "melody-work-goal-policy-empty-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        assert!(pi_goal_policy(&root.to_string_lossy()).is_none());
-        fs::remove_dir_all(root).unwrap();
-    }
 }

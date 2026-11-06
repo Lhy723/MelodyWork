@@ -1,0 +1,10 @@
+ref=refs/backup/wip-2026-11-07
+commit=89da53381c583caf1aaef45e89976224852620bd
+tree=5f0290ef785b9f3f035b2e267c600b9abc343c03
+tree_entries=858
+sampled_untracked=packages/agent-worker/src/pi/attachment-policy.ts
+sampled_untracked_in_ref=1
+tracked_diff_vs_ref=0
+files_only_in_worktree=.trellis/tasks/11-07-baseline-recovery/snapshot.txt
+files_only_in_snapshot=0
+worktree_status_count=266

@@ -1,4 +1,4 @@
-import type { AcpSessionPhase, AgentSubagent } from "@/domain/acp";
+import type { AgentSessionPhase, AgentSubagent } from "@/domain/acp";
 
 import type { WorkspaceMode } from "@/features/sessions/sidebar-types";
 
@@ -124,7 +124,7 @@ export const subagentsForSession = (
 
 export const sessionStatusLabel = (
   agentPhase: keyof typeof statusLabel,
-  sessionPhase: AcpSessionPhase,
+  sessionPhase: AgentSessionPhase,
 ) => {
   if (agentPhase !== "running") {
     return statusLabel[agentPhase];

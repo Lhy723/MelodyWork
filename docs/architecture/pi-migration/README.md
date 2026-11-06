@@ -1,6 +1,6 @@
 # MelodyWork → Pi 迁移设计
 
-状态：2026-10-08。**Pi 已是唯一 Agent runtime，桌面 Agent 会话默认 Pi；旧 ACP 会话只读归档，不作为 Pi 失败时的运行时回退。** 插件市场已迁为 Host 原生实现，旧 `melody-pager` 已退出构建、启动与发布；`vendor/melody-build` 子模块和 `.gitmodules` 已移除。Pi worker、Host ToolGateway、产品事件投影、原生会话持久化、Browser/Explorer 有界交互及迁移导入已接通；Browser/Explorer 的目标平台真实桌面、权限及故障恢复验收仍未完成。版本与公开能力由 [`pi-compatibility-manifest.json`](./pi-compatibility-manifest.json) 维护，并在 `pnpm check` 中防漂移。当前差距、最新本地门禁与交接顺序以[交接文档](./handoff.md)、[功能对照](./feature-parity.md)和[验收报告](./acceptance-report.md)为准。
+状态：2026-10-11。**Pi 已是唯一 Agent runtime，Tauri Desktop 固定使用 Pi；browser preview 固定使用 deterministic ACP fixture，旧 ACP 会话只读归档，不作为 Pi 失败时的运行时回退。** `agentClientForRuntime()` 是唯一 renderer route selector，旧 `agentEngine` persisted key 只用于兼容归一化。插件市场已迁为 Host 原生实现，旧 `melody-pager` 已退出构建、启动与发布；`vendor/melody-build` 子模块和 `.gitmodules` 已移除。Pi worker、Host ToolGateway、产品事件投影、原生会话持久化、Browser/Explorer 有界交互及迁移导入已接通；Browser/Explorer 的目标平台真实桌面、权限及故障恢复验收仍未完成。版本与公开能力由 [`pi-compatibility-manifest.json`](./pi-compatibility-manifest.json) 维护，并在 `pnpm check` 中防漂移。当前差距、最新本地门禁与交接顺序以[交接文档](./handoff.md)、[功能对照](./feature-parity.md)和[验收报告](./acceptance-report.md)为准。
 
 说明：以下章节保留原始迁移设计与阶段性观察，部分段落记录早期 opt-in/ACP fallback 方案，**不代表当前运行行为或能力状态**；若与上述交接文档、功能对照或兼容清单冲突，以它们为准。不要据旧文档执行引擎回退或 stable release。
 
@@ -12,7 +12,7 @@
 
 这样可以跟进 Pi 的模型供应商适配、流式处理、会话与压缩能力，减少这部分 harness 维护；不会自动免除 Melody 兼容层、产品工作流、安全策略和桌面打包的维护。迁移初期维护量会上升，因为需要双引擎验证。本文追求适合现有项目的清晰边界，不把“换底层”承诺为零维护或无风险。
 
-本次迁移已经把执行主链路接通：Pi worker 通过协议 v1 与 Rust Host 通信，Host 负责资源、权限、事件持久化和进程生命周期，React 只消费规范事件。新会话可在设置中选择 Pi；已有 ACP 会话只有通过完整性检查和显式导入计划后才会切换，无法无损转换的历史保持 ACP。受控的平面 Markdown `/commands`、标准外部 Markdown Skills（`.agents/skills`、`.claude/skills`、`.cursor/skills`）以及纯 Markdown 插件 Skill/命令都由 Host 显式投影给 Pi；插件脚本/扩展命令和不安全 Skill 仍按兼容边界回退。此前讨论的 UI 组件改动不纳入迁移验收。当前实现与残余兼容边界见[实施计划](./implementation-plan.md#11-当前实施进度2026-09-09beta)。
+执行主链路已接通：Pi worker 通过协议 v1 与 Rust Host 通信，Host 负责资源、权限、事件持久化和进程生命周期，React 只消费规范事件。Desktop 固定运行 Pi；browser preview 保留确定性的 ACP fixture，不存在设置切换或能力缺口触发的 ACP Agent runtime fallback。旧 ACP 会话只读展示；ACP→Pi import plan 与 journal 作为显式兼容路径保留。受控的平面 Markdown `/commands`、标准外部 Markdown Skills（`.agents/skills`、`.claude/skills`、`.cursor/skills`）以及纯 Markdown 插件 Skill/命令由 Host 显式投影给 Pi；未支持或不安全表达的能力会诊断或阻断 Pi 会话。当前实现与残余验收边界见[交接文档](./handoff.md)、[功能对照](./feature-parity.md)和[实施计划](./implementation-plan.md)。
 
 ### 1.1 “功能不能减少”的定义
 
@@ -21,7 +21,7 @@
 - 所有已验证可用的 MelodyWork 功能必须在 Pi 路径下工作；用户启用的 MCP、插件、模型和工具纳入样本。
 - UI 已接入、但当前存在缺陷的功能不得以缺陷为理由删除，应记录预期行为和修复目标。
 - 仅存在于 vendored CLI 文档、尚未确定桌面是否开放的能力，列为待确认项；不能直接宣布已支持，也不能默默排除。
-- 过渡期使用旧引擎可以保障用户继续工作，但**不算 Pi 已实现功能对等**。最终去掉 melody-build 前必须清零必需能力缺口。
+- 能力缺口必须明确诊断为未实现/不支持；无法安全保留策略时阻断 Pi 会话。ACP 只读归档、browser-preview fixture 与显式导入都不是 Agent runtime fallback。
 - 历史消息“能显示”不等于“能准确恢复原生上下文”。迁移不能伪造连续性；无法无损转换的会话必须有明确、可验证的继续方式。
 
 ### 1.2 早期桌面 opt-in 接入记录（历史）
@@ -30,7 +30,7 @@
 
 - Rust 注册 `pi_worker_status`、`start_pi_worker`、`send_pi_agent_command`、`stop_pi_worker` 四个 Tauri 命令。启动前由 `WorkspaceRegistry` 校验工作区，Host 只从应用资源目录或 `MELODY_PI_WORKER_PATH` 解析 worker，不接受 renderer 传入任意可执行文件；停止时优先发送受校验的 `runtime.shutdown`，等待 worker 刷新会话，超时才强制回收。
 - Host 使用 1 MiB 上限的 LF JSONL，启动后发送 `runtime.health`，只有收到 protocol v1、非空 `eventId`、稳定 `workerEpoch`、严格递增 `seq` 的 `runtime.ready` 才标记为运行；异常帧、世代变化、超时和 stdout 关闭都会进入可解释状态并回收进程。Pi worker 的 `runtime.shutdown` 会先取消/关闭其活动会话并刷新 writer，再退出；正常停止、切换工作区、协议失败和 stdout 意外关闭也会同步回收该工作区的 Host-owned MCP 子进程。执行回合通过产品 `idempotencyKey` 做有界去重，冲突 key 不会静默覆盖；data URL 附件在接受回合前完成解码并受大小上限约束。worker 发送的能力矩阵现在还会在命令分发前做统一门禁：缺少认证、模型目录、权限模式、后台任务或媒体能力时立即返回结构化 `agent.capability_unavailable`，不会先创建会话或调用 provider。
-- 前端 Pi opt-in 会话使用 `createPiAgentEventStream` 与 `receiveAgentEvent`，复用规范事件检查点、重放去重和现有 store 投影；`piAgentClient` 仍保留为无 UI 依赖的兼容 façade。浏览器预览不会伪装成 Pi worker 已运行。
+- Desktop Agent 会话固定使用 `createPiAgentEventStream` 与 `receiveAgentEvent`，复用规范事件检查点、重放去重和现有 store 投影；`agentClientForRuntime()` 是唯一 renderer route selector。browser preview 使用 deterministic ACP fixture，不伪装成 Pi worker 已运行；旧 `agentEngine` persisted key 只为兼容归一化，不改变 runtime。
 - Host 已提供完整的受控 ToolGateway：worker 只能请求 `workspace_read_file`、`workspace_read_tool_output`、`workspace_search`、`workspace_list_directory`（对应 Melody-build 的 `list_dir`）、`codebase_navigation`、`workspace_write_file`、`workspace_edit`、`workspace_apply_patch`、`run_terminal_command`、`ask_user_question`、`update_plan`、`spawn_subagent`、`run_background_task`、`get_command_or_subagent_output`、`wait_commands_or_subagents`、`kill_command_or_subagent`、`mcp_list_tools` 与 `mcp_call_tool`；Rust 按登记工作区、路径规范化、符号链接、命令/输出/并发上限和权限规则执行，再通过 `tool.resolve` 返回结果。代码库导航桥以 tree-sitter 做有限定义/引用/符号查询，支持 Rust、TypeScript/JavaScript、Python、Go，并按 `features.codebase_indexing` 处理布尔值或路径 glob；索引缓存最多保留 16 个工作区，严格语义代码图和未支持语言继续进入能力诊断。目录浏览默认跳过隐藏项和常见生成目录，递归深度、条目数和输出均有界；当 Melody 的 `.gitignore` 策略开启时，Host 使用与 Pi 原生文件遍历相同的 `ignore` 规则过滤搜索/目录列表，并阻止读取、编辑和删除被忽略文件，策略由受信资源清单投影到 worker。该策略不再触发能力回退。同一 workspace 的写入、编辑、补丁、终端变更和 MCP 工具调用由 Host 级策略保护；`workspace_apply_patch` 会先完整预检 Add/Delete/Update/Move，再落盘，避免并行会话互相覆盖或在校验失败时留下半应用状态。Pi 内置文件/终端工具仍关闭，避免绕过 Host 策略。MCP 进程由 Host 读取用户/项目配置后以无 shell、最小环境启动，远程请求也由 Host 使用固定 HTTP/SSE 客户端发送；JSON-RPC 帧、工具数量和输出均有界，所有请求有超时和回合取消。空闲 stdio 进程失活或调用失败会丢弃连接并在下一次请求时重连；工作区/worker 生命周期结束时会主动回收本地连接。另以 Pi `extensionFactories` 注入 first-party `todo_write`，任务状态写入 Pi custom entry 并可随会话分支恢复，不把原生扩展暴露为可任意加载的用户脚本。后台子代理与后台终端任务均提供 Melody 兼容的输出查询、wait-any/wait-all 和取消工具；后台终端 ID 使用 `pi-terminal-task:*`，由 Host 任务注册表统一负责回收。
 - 项目级权限规则由 Rust Host 作为最终裁决者：`allow`/`deny` 会在 Pi 的权限交互发给 renderer 后自动解析，并在真正执行工具时再次校验；权限身份使用“工具标题 + 命令/路径”的稳定摘要，不把完整文件内容或补丁写入规则/事件。数据库查询失败、规则损坏或历史回放不会自动放宽权限，而是保留显式交互或拒绝结果。
 - 当前 SQLite schema v10 包含 `agent_session_bindings`、`agent_event_log` 与 `migration_journal`；Pi 绑定保存最后一次权威的会话模式、权限模式、模型和思考强度。Host 在同一事务中幂等保存规范事件、product session ID、Pi native session ID、worker epoch、最后序号及这些配置；绑定用于恢复检查点和配置恢复，事件日志为后续重放/崩溃恢复提供事实源，迁移 journal 记录源摘要、转换计划、备份引用和可重试阶段。旧数据库启动时会按列/表补齐 v6–v10 增量，不会覆盖已有绑定或迁移历史。Pi worker 在 Host 注入的 `MELODY_PI_SESSION_ROOT` 下按 product ID 派生不透明文件名，重新打开同一 product session 时由 Pi `SessionManager.open` 恢复原生 JSONL；这仍不等同于导入旧 ACP 上下文。
@@ -48,7 +48,7 @@
 - Pi 原生会话使用应用管理的 opaque 文件名；删除项目或会话时先停止对应 workspace worker（由 workspace store 负责），再移除原生 JSONL、导入备份和临时残留，SQLite 删除失败时不会留下半完成的产品记录。
 - worker 关闭会话时先取消子任务、清空队列、尽力中止流并刷新 writer；`runtime.shutdown` 完成后才退出进程。Pi 事件回放与 live 订阅仍通过同一 barrier，避免断线重连时乱序或重复投影。
 
-这组入口用于验证进程边界、受控宿主能力、原生会话持久化和检查点边界。Pi 的核心工作流已经接通，但它仍是桌面 opt-in：默认 ACP 不变，本地 stdio 与受控 HTTP/SSE MCP、Web、基础 Memory（含持久 lexical sidecar）、只读 LSP、有限 tree-sitter 代码库导航、静态插件资源和受限 JSON command hooks 通过 Host bridge，Pi 扩展负责两阶段 Memory Flush 与基础 goal 状态，旧 Melody/Claude JS hooks、插件动态扩展/非 stdio LSP、严格语义代码图、记忆 embedding/vector/dream、远端媒体生成和 headless OAuth 等能力继续由 ACP 提供并在能力矩阵中标明。未知工作区路径、绝对路径、路径穿越、符号链接和非 UTF-8 文件会被拒绝；终端超大输出返回有界预览并归档到工作区内的受控路径，MCP/Web/Memory/LSP/代码库导航响应仍遵守独立的大小和深度上限。
+这组入口用于验证进程边界、受控宿主能力、原生会话持久化和检查点边界。Pi 是 Desktop 唯一 Agent runtime，不再 opt-in，也不因能力缺口、worker 错误或旧偏好回退 ACP；受支持能力经 Host bridge 暴露，缺口通过能力诊断说明或 fail closed。browser preview 独立保留 deterministic ACP fixture；旧 Melody/Claude JS hooks、插件动态扩展/非 stdio LSP、严格语义代码图、记忆 embedding/vector/dream、远端媒体生成和 headless OAuth 等差距见能力矩阵，不属于 ACP runtime fallback。未知工作区路径、绝对路径、路径穿越、符号链接和非 UTF-8 文件会被拒绝；终端超大输出返回有界预览并归档到工作区内的受控路径，MCP/Web/Memory/LSP/代码库导航响应仍遵守独立的大小和深度上限。
 
 本地验证 worker 协议可使用：
 
@@ -71,7 +71,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"health","command":{"type":"runt
 2. worker 发出 `tool.requested` 后暂停当前回合；Rust Host 校验 `toolCallId`、product `sessionId`、worker 世代和工作区根，在受限范围内执行，再发送带同一调用 ID 的 `tool.resolve`。工具调用、结果和超时不会绕过协议边界。
 3. `session.open` 同时携带稳定的 `productSessionId` 与可选的引擎 `sessionId`，并可恢复绑定中的 `sessionModeId`、`permissionMode`、`modelId` 与 `reasoningEffort`；返回本次 Pi 运行的 `nativeSessionId`。Host 将规范事件连同 `nativeSessionId`、`workerEpoch`、`seq` 及权威配置在一个事务中写入 schema v10 的 `agent_event_log` 与 `agent_session_bindings`；ACP→Pi 导入则额外由 `migration_journal` 锁定计划和 `migrationId`。
 4. 若 Host 注入 `MELODY_PI_SESSION_ROOT`，worker 根据 product ID 与工作区派生固定的 opaque JSONL 路径，通过 Pi 公开的 `SessionManager.open` 恢复同一 Pi 会话；模型凭据/目录同时使用 Host 注入的应用内 `pi/` 文件。未提供 Host 根目录时使用内存会话和临时模型数据，避免直接写入用户的 `~/.pi`。
-5. 产品事件日志、绑定检查点和原生文件是三种不同层次的数据：日志保存规范事实，绑定保存恢复游标，原生文件保存 Pi 上下文。它们不会把旧 ACP 时间线伪装成 Pi 原生上下文。当前旧 `cursor`/ACP 原生 JSONL 导入仍明确拒绝；默认 ACP store、UI 和发布产物不受影响。
+5. 产品事件日志、绑定检查点和原生文件是三种不同层次的数据：日志保存规范事实，绑定保存恢复游标，原生文件保存 Pi 上下文。它们不会把旧 ACP 时间线伪装成 Pi 原生上下文。当前旧 `cursor`/ACP 原生 JSONL 导入仍明确拒绝；Desktop 使用 Pi，browser preview 使用隔离的 ACP fixture，旧 ACP 会话仅只读展示或作为显式 Pi 导入来源。
 
 #### 1.2.2 恢复检查
 
@@ -81,7 +81,9 @@ Host 还提供只读的 Pi 会话恢复检查入口。它验证产品会话存�
 
 迁移演练还提供 `getPiSessionImportPlanForSession`。它优先读取完整 Host 时间线归档，输出版本化 `sourceDigest`、源条目到目标条目的映射以及 `native-message`/`custom-entry` 分级。没有附件的用户消息，以及携带完整 Pi `provider/api/model/usage/cost/stopReason` 元数据的 Pi 助手消息，才是原生消息候选；旧 ACP 投影缺少这些元数据的助手消息、思考、计划和工具仍作为展示归档，不会被伪造或重放。计划对条数、文本和附件大小设上限，活动交互、运行中工具、损坏归档或外部附件会明确返回 `blocked`。它是后续转换器的输入和审计凭据，不会自动创建会话、写 Pi JSONL 或改变引擎绑定。
 
-### 1.2.4 能力预检与按会话回退（2026-09-08）
+### 1.2.4 能力预检与按会话回退（2026-09-08，历史方案）
+
+> 本节以下段落记录早期按会话 ACP runtime fallback 设计，已被 2026-10-11 的 Pi-only 决定取代。当前能力缺口显示诊断，不支持或无法安全保留策略时阻断 Pi 会话；不会启动 ACP Agent runtime。browser preview fixture、旧 ACP 只读归档与显式导入不是运行时回退。当前边界以本文件开头、[交接文档](./handoff.md)与 `runtimeFallback=none` 的兼容清单为准。
 
 Pi 连接现在会在启动前读取同一套受信任的用户/项目配置和扩展清单，只做静态预检，不加载或执行扩展代码。预检发现配置解析失败，或启用的未知/不完整 MCP、非 stdio/未受信任 LSP、需要语义索引的 Memory、动态 Hook/插件扩展、复杂 goal 编排，或无法安全枚举的 Skill 时，会为当前会话生成结构化阻塞诊断，并只把该会话路由到 Legacy ACP；受信任的 stdio LSP 通过 Host 的一次性只读桥接执行。Host 会将 `.melody/skills`、标准 `.agents/skills`、`.claude/skills`、`.cursor/skills` 以及纯 Markdown 插件 Skill 解析为有界、去符号链接的具体目录，再交给 Pi Host bridge。插件脚本/扩展以及超出路径、深度、文件大小或总量上限的 Skill 仍回退。基础 Memory 的首轮注入、session-end 保存、Markdown 检索和两阶段 Memory Flush 不再触发回退；embedding/vector/dream 等尚未等价的开关仍会纳入检查。基础 goal 状态和 `update_goal` 也由 Pi 扩展提供；有界 token budget、停滞检测和 blocked-attempt 上限由 Host 配置投影执行，只有分类器、规划/验证器、重试编排或角色模型策略会单独触发 ACP 回退。Pi 设置仍保留为用户选择，其他会话不受影响。这样不会因为一个项目的兼容缺口把整个应用切回旧引擎，也不会静默丢掉已启用的生态能力。
 
@@ -97,14 +99,15 @@ Pi worker 的订阅、状态读取、握手或启动失败也会触发同一条�
 
 - Host 的 workspace 变更锁使用弱引用注册表：同一 canonical workspace 的写入/编辑/补丁仍串行，但已关闭工作区不会把锁对象永久留在进程内；所有变更型路径都会拒绝符号链接，读取型路径才允许在已登记根内解析链接。Pi 只加载受控根下的普通技能目录和普通 `SKILL.md`，技能文件本身的外链也会被拒绝。
 - `session.open` 除了检查会话存在和 Pi engine binding，还必须确认数据库中的 `cwd` 与当前 worker generation 的 canonical workspace 一致。工作区切换、项目/会话删除都会先按工作区安全停止 Pi worker，再清理 opaque JSONL、导入备份和临时残留，最后删除 SQLite 绑定、事件和时间线，避免晚到事件写入已删除会话。
+- Host 对 persisted Pi session commands 的 workspace registration、active-worker workspace、engine binding、migration journal 和 fork intent checks 由 `src-tauri/src/pi_worker_runtime/session_commands.rs` 统一 preflight；`PiWorkerRuntime` 仍负责 process supervision/dispatch，Tauri command 保留 MCP/monitor 等跨运行时副作用。
 - MCP 子进程与 worker generation 绑定：正常 stop、切换 workspace、协议错误、握手后异常退出和 stdout 提前关闭都会触发按 workspace 的取消与回收；活动调用按工作区子路径匹配，避免 MCP 配置使用受控 workspace 子目录时留下孤儿进程。
 - worker 收到 `runtime.shutdown` 后停止消费后续 stdin 帧，等待已经排队的命令完成并刷新 JSONL writer，再自然退出；不会用强制 `process.exit` 截断仍在写出的终止事件。Host 仍保留超时强杀作为最后一道回收措施。
 
 ### 1.2.6 Prompt template 与 Markdown Skill 资源边界（2026-09-09）
 
-Pi worker 保持 `noPromptTemplates: true`，但 Host 会把已登记工作区、用户目录和纯 Markdown 插件中的平面 `commands/*.md` 解析为显式文件清单，通过 `MELODY_PI_PROMPT_PATHS_JSON` 注入 `additionalPromptTemplatePaths`，并通过 `MELODY_PI_PROMPT_ROOTS_JSON` 传递同一批受控根及禁用名称快照。项目配置按最近仓库目录优先，其次是应用 `.melody`、用户 `.agents`/`.claude`/`.cursor` 与已验证插件；禁用列表、符号链接、嵌套目录、非 Markdown、单文件 1 MiB、总量 64 MiB、数量 512 的限制在 Rust 与 worker 两端同时执行。它只加载声明式文本，不执行插件/扩展代码；动态插件命令、需要目录层级命名的命令和其他未映射 slash command 仍会保留 Legacy ACP 路径。
+Pi worker 保持 `noPromptTemplates: true`，但 Host 会把已登记工作区、用户目录和纯 Markdown 插件中的平面 `commands/*.md` 解析为显式文件清单，通过 `MELODY_PI_PROMPT_PATHS_JSON` 注入 `additionalPromptTemplatePaths`，并通过 `MELODY_PI_PROMPT_ROOTS_JSON` 传递同一批受控根及禁用名称快照。项目配置按最近仓库目录优先，其次是应用 `.melody`、用户 `.agents`/`.claude`/`.cursor` 与已验证插件；禁用列表、符号链接、嵌套目录、非 Markdown、单文件 1 MiB、总量 64 MiB、数量 512 的限制在 Rust 与 worker 两端同时执行。它只加载声明式文本，不执行插件/扩展代码；动态插件命令、需要目录层级命名的命令和其他未映射 slash command 在 Pi 内保持不可用/诊断，不再保留 Legacy ACP runtime 路径。
 
-Skill 资源也保持 `noSkills: true`，由 Host 先枚举具体目录，再通过 `MELODY_PI_SKILL_PATHS_JSON` 注入 `additionalSkillPaths`，并通过 `MELODY_PI_SKILL_ROOTS_JSON` 注入同一批受控根及禁用名称快照。项目根从当前工作区向上查找到最近的 `.git`，按 `.melody`、`.agents`、`.claude`、`.cursor` 顺序建立优先级；随后才是应用 `MELODY_HOME/skills`、用户外部兼容根和静态插件 Skill 根。每个 Skill 必须是普通目录中的普通 `SKILL.md`，不接受符号链接、隐藏目录、`node_modules`、动态插件目录或外链文件；最多 256 个路径、深度 6、单文件 1 MiB、总量 64 MiB。目录内的其他文件仅作为 Skill 的声明式上下文，不会获得工具、Hook、MCP、LSP 或进程执行权限。该边界使标准外部和纯 Markdown 插件 Skill 在 Pi 下可用，同时保留动态插件能力的明确 ACP 回退。
+Skill 资源也保持 `noSkills: true`，由 Host 先枚举具体目录，再通过 `MELODY_PI_SKILL_PATHS_JSON` 注入 `additionalSkillPaths`，并通过 `MELODY_PI_SKILL_ROOTS_JSON` 注入同一批受控根及禁用名称快照。项目根从当前工作区向上查找到最近的 `.git`，按 `.melody`、`.agents`、`.claude`、`.cursor` 顺序建立优先级；随后才是应用 `MELODY_HOME/skills`、用户外部兼容根和静态插件 Skill 根。每个 Skill 必须是普通目录中的普通 `SKILL.md`，不接受符号链接、隐藏目录、`node_modules`、动态插件目录或外链文件；最多 256 个路径、深度 6、单文件 1 MiB、总量 64 MiB。目录内的其他文件仅作为 Skill 的声明式上下文，不会获得工具、Hook、MCP、LSP 或进程执行权限。该边界使标准外部和纯 Markdown 插件 Skill 在 Pi 下可用；不安全或动态扩展不由 ACP Agent runtime 兜底。
 
 资源路径不是只在 `session.open` 时读取：每个新的顶层回合和后台子任务在调用 Pi `prompt()` 前都会重新枚举受控根，并通过 Pi `session.reload()` 重建系统提示。这样新增、修改和删除的 Markdown Skill/命令会在下一回合生效；正在运行的 steer/follow-up 不会中途重建运行时，避免打断当前 provider 请求。根目录清单只由 Host 生成，worker 会再次校验根路径、符号链接和资源大小，不会因刷新而打开 Pi 的 ambient 扫描。
 
@@ -120,7 +123,7 @@ ACP → Pi 导入不是一次不可审计的文件复制，而是由 Host 管理
 
 Pi 原生已经承接模型/provider、流式事件、会话树、分支、压缩、公开扩展工具和 custom entry；MelodyWork 只保留产品级的 Host 权限、工作区、事件日志、任务归属、配置投影和恢复检查。提问超时策略也由 Host 配置投影为 worker gateway 的有界计时，资源刷新会清除旧策略，避免配置删除后继续使用启动时快照。MCP、文件/终端、权限、计划、问题、子代理和任务因此是“Pi 回合 + Host bridge”，不是把 Pi 当作安全沙箱。
 
-第三方插件动态扩展/Hook、插件或非 stdio/不受信任的 LSP、记忆 embedding/vector/dream、远程媒体、Windows sandbox、Linux 上不可表达的 deny/旧内核与外部网络限制 profile、外部/OIDC 认证、复杂 goal 分类/规划/验证状态机仍没有 Pi 原生等价物；启用时继续按能力预检回退 ACP（持久 scheduler 与 monitor 已由 Host 接管）。纯 Markdown 插件 Skill/命令、受信任 stdio LSP、基础 Markdown memory（含 SQLite lexical sidecar）、两阶段 Memory Flush 和基础 `update_goal` 已由 Host/Pi 扩展接管；Linux workspace/devbox 的 Landlock 仅在 ABI 3+ 内核上执行。每次升级 Pi 先依据[原生能力对照](./native-alternatives.md)确认公开 API 和安全边界，再运行完整门禁，不因接口名称相似而删除兼容层。
+第三方插件动态扩展/Hook、插件或非 stdio/不受信任的 LSP、记忆 embedding/vector/dream、远程媒体、Windows sandbox、Linux 上不可表达的 deny/旧内核与外部网络限制 profile、外部/OIDC 认证、复杂 goal 分类/规划/验证状态机仍没有 Pi 原生等价物；能力清单会诊断这些差距，无法安全表达的配置阻断 Pi 会话，不切换到 ACP（持久 scheduler 与 monitor 已由 Host 接管）。纯 Markdown 插件 Skill/命令、受信任 stdio LSP、基础 Markdown memory（含 SQLite lexical sidecar）、两阶段 Memory Flush 和基础 `update_goal` 已由 Host/Pi 扩展接管；Linux workspace/devbox 的 Landlock 仅在 ABI 3+ 内核上执行。每次升级 Pi 先依据[原生能力对照](./native-alternatives.md)确认公开 API 和安全边界，再运行完整门禁，不因接口名称相似而删除兼容层。
 
 ### 1.3 阅读顺序
 
@@ -128,7 +131,7 @@ Pi 原生已经承接模型/provider、流式事件、会话树、分支、压�
 2. [功能对等矩阵](./feature-parity.md)：迁移清单与逐项验收。
 3. [协议、数据与安全](./protocol-and-data.md)：事件、会话转换、权限、回滚。
 4. [实施、测试与发布计划](./implementation-plan.md)：阶段门禁、验证场景、升级机制。
-5. [原生能力对照](./native-alternatives.md)：Pi 原生、Host bridge 与 ACP 回退的职责边界。
+5. [原生能力对照](./native-alternatives.md)：Pi 原生与 Host bridge 的边界；旧 ACP 仅为归档/导入来源。
 6. [Pi 官方能力研究](../../research/pi-harness-capabilities.md)：固定版本的源码证据与 API 注意事项。
 
 ## 2. 研究基线与现状
@@ -211,7 +214,7 @@ Rust 保留数据库、桌面、工作区与进程所有权。TS worker 负责 P
 
 ## 4. 目录设计与依赖规则
 
-以下目录是职责边界而不是要求机械搬迁。当前仓库已在 `src/domain/agent/`、`src/lib/agent-client.ts`、`src-tauri/src/pi_worker_runtime.rs`、`src-tauri/src/pi_tool_gateway.rs`、`src-tauri/src/pi_mcp_runtime.rs`、`src-tauri/src/database_agent_bindings.rs`、`src-tauri/src/database_agent_events.rs`、`src-tauri/src/database_agent_migrations.rs` 和两个 workspace 包中落地协议/适配器、Pi worker、opt-in 宿主握手、完整 Host ToolGateway、Host 管理的原生会话目录、v10 绑定检查点、幂等产品事件日志、显式历史导入、可重试迁移 journal 和恢复检查；UI 通过 `useAgentBridge`/`agent-store-pi` 选择 Pi，默认仍保留 ACP。先只引入两个 workspace 包，不按每个小服务拆十几个包。
+以下目录表示职责归属，不要求机械搬迁。当前 Agent runtime 为 Pi-only：`packages/agent-contract/` 定义共享协议，`packages/agent-worker/` 适配 Pi SDK 并通过 Host ToolGateway 请求访问产品能力；`src-tauri/src/pi_worker_runtime.rs` 管理 worker 与会话事件，Host 负责持久化、权限裁决、工作区约束和原生工具实现。ACP 仅保留为只读历史归档/导入，不运行，也不是 Pi 的兼容回退（`runtimeFallback=none`）。具体实现状态、平台限制和验收边界以 [`handoff.md`](handoff.md) 与 `pi-compatibility-manifest.json` 为准。先保持这些稳定 seam 清晰，不按每个小函数机械拆包。
 
 ```text
 packages/
@@ -262,9 +265,9 @@ docs/architecture/pi-migration/
 ### 4.1 现有文件的渐进迁移
 
 - 将 `domain/acp.ts` 中产品类型抽到 `domain/agent/`；ACP结构留在 legacy 边界，不一次性删除全文件。
-- `agent-store-runtime.ts` 保留对 UI 的动作签名，内部改调用 `agent-client`，先用旧引擎跑同样测试。
+- `agent-store-runtime.ts` 与 `agent-store-session.ts` 已由 Pi-only renderer route 使用；活动 store 状态用 `runtimeSessionId`/`runtimePhase`/`eventCursor`，持久化适配器在写入边界映射回 legacy ACP cursor 字段。
 - 将 `session-projection-persistence.ts` 的 wire 解析移入适配器，投影只读规范事件；保持历史投影迁移器。
-- Pi 接入 store 时只调用 `receiveAgentEvent`/`AgentEventStoreAdapter`，不在组件里解析 Pi 事件；该动作目前显式 opt-in，默认 ACP bridge 仍走 `receiveAcp`。
+- Desktop Pi 通过 `receiveAgentEvent`/`AgentEventStoreAdapter` 投影规范事件，组件不解析 Pi 事件；browser preview 的 deterministic ACP fixture 独立适配，不是 Desktop 默认 bridge 或 ACP fallback。
 - `agent_runtime.rs` 逐步变为兼容入口和 supervisor，不立即改所有 invoke 名称。
 - `config_marketplace.rs` 的旧 CLI 调用逐项替换为插件服务，不能等到删除 sidecar 后才发现安装/卸载失效。
 - `prepare-sidecar.mjs` 过渡期支持明确的两个产物；生产构建必须声明引擎，不能静默复制用户电脑中旧二进制。
@@ -275,11 +278,13 @@ docs/architecture/pi-migration/
 
 模型配置保存后，Host 会重新生成当前 workspace 的模型目录、策略文件和短生命周期凭据引用，并向活动 worker 发送 `runtime.models.sync`。worker 串行更新生成的 `MELODY_PI_MODEL_*` 环境变量、清理对应 provider 的运行时认证覆盖、替换旧的重试/空闲超时覆盖并刷新 `ModelRuntime`；正在进行的回合保持原模型，下一回合读取新快照。同步载荷由 Host 生成并在 worker 内复核，renderer 不能注入自定义路径、provider ID、策略或密钥；没有活动 Pi 会话时不发送命令，下一次启动直接使用最新快照。
 
-建立单一 `ModelCatalog`，设置页、模型选择器、worker 使用同一快照与 revision。当前 Pi worker 已提供 `runtime.models.list`/`runtime.models` 快照：包含 provider/id、API、输入类型、上下文/输出上限、思考能力和 `available`/`auth-needed`/`unavailable`/`unknown` 状态，不含密钥；Host 启动时已把 Melody 用户/项目配置投影到应用内 `pi/melody-models.json`，前端新增 `projectPiModelCatalog`/`requestPiModelOptions` 适配层，把可用模型转换为现有 `AgentModelOption`，并把认证失败或 provider 错误保留在 `unavailableModels` 供设置与诊断使用。Pi opt-in 会话在打开前请求同一目录，运行中切换使用 canonical `provider/model` id 和 revision；默认 ACP store 仍保留为兼容路径。保留模型显示名与真实请求 ID、提供商、base URL、API 类型、认证、上下文、思考强度及生成参数。自定义模型的 `input = ["text", "image"]` 会保留图片输入能力；缺省仍为纯文本，提交图片到纯文本模型会在 worker 边界给出明确错误。UI 显示“配置成功”后需等目录更新确认，不能由 worker 启动时的一份缓存决定下拉列表。
+建立单一 `ModelCatalog`，设置页、模型选择器、worker 使用同一快照与 revision。当前 Pi worker 已提供 `runtime.models.list`/`runtime.models` 快照：包含 provider/id、API、输入类型、上下文/输出上限、思考能力和 `available`/`auth-needed`/`unavailable`/`unknown` 状态，不含密钥；Host 启动时已把 Melody 用户/项目配置投影到应用内 `pi/melody-models.json`，前端新增 `projectPiModelCatalog`/`requestPiModelOptions` 适配层，把可用模型转换为现有 `AgentModelOption`，并把认证失败或 provider 错误保留在 `unavailableModels` 供设置与诊断使用。Desktop Pi session 在打开前请求同一目录，运行中切换使用 canonical `provider/model` id 和 revision；browser preview 使用独立 ACP fixture，不构成桌面 ACP runtime fallback。保留模型显示名与真实请求 ID、提供商、base URL、API 类型、认证、上下文、思考强度及生成参数。自定义模型的 `input = ["text", "image"]` 会保留图片输入能力；缺省仍为纯文本，提交图片到纯文本模型会在 worker 边界给出明确错误。UI 显示“配置成功”后需等目录更新确认，不能由 worker 启动时的一份缓存决定下拉列表。
 
 当前 `responses`、`messages`、`chat_completions` 逐一与 Pi 模型接口映射；自定义 OpenAI 兼容接口不能只凭名称推断支持 Responses 或推理参数。未知 provider 字段必须保留原配置并标记待支持，不能静默丢弃。无法映射且当前可工作的模型是迁移阻塞，不是删除模型的理由。
 
-Host 还会按同一覆盖优先级生成独立的 `pi/melody-model-policies.json`，通过 `MELODY_PI_MODEL_POLICIES_PATH` 传给 worker。该快照只承载经过校验的 `maxRetries` 与 `inferenceIdleTimeoutMs`，并限制文件大小、模型数量和数值范围；它不进入 Pi 严格模型目录，文件损坏会显式失败而不是静默使用错误默认值。
+Host 模型目录 projection 的实现所有权现拆为三段：`pi_remote_model_catalog.rs` 负责受限 remote catalog acquisition，`pi_model_config/model_projection.rs` 负责 user/project merge、remote model overlay、provider/model schema 与 credential-reference projection，`pi_model_config.rs` 负责读取输入、调用各 owner、写入生成文件和注入 resolved credential values。该拆分保持既有模型目录与 auth 文件格式。
+
+Host 还会按同一覆盖优先级生成独立的 `pi/melody-model-policies.json`，通过 `MELODY_PI_MODEL_POLICIES_PATH` 传给 worker。该快照只承载经过校验的 `maxRetries`、`inferenceIdleTimeoutMs` 与 `autoCompactThresholdPercent`，并限制文件大小、模型数量和数值范围；纯 Host policy projection 位于 `src-tauri/src/pi_model_config/model_policy.rs`，模型目录/credential-reference projection 位于 `pi_model_config/model_projection.rs`，目录读取、remote acquisition、文件写入和 resolved credential injection 仍由 `pi_model_config.rs` 组合。策略快照不进入 Pi 严格模型目录，文件损坏会显式失败而不是静默使用错误默认值。
 
 启动握手返回协议版本、worker版本、Pi版本、支持工具/工作流和限制。能力缺失在开发与 beta 明确报告，稳定版验收不能用隐藏按钮掩盖缺失。
 
@@ -289,7 +294,7 @@ Host 还会按同一覆盖优先级生成独立的 `pi/melody-model-policies.jso
 
 保留 ask/auto/always-approve 的现有语义，但 always-approve 不能绕过 plan mode 的写入禁令、工作区边界或企业/用户显式拒绝。计划是显式状态机，不是 system prompt 里写一句“不要改文件”。结构化问题必须保留多选、补充文字、预览和接受/跳过/取消等分支。
 
-对 shell、第三方扩展、MCP 权限的安全边界另见[安全设计](./protocol-and-data.md#5-权限与信任边界)。进程分离不等于沙箱；隔离由 Host 施加在它派生的命令上（macOS Seatbelt 与 Linux Landlock，见 `workspace_sandbox`），profile 不支持执行时（网络受限 profile、glob deny、Linux exact deny/旧 ABI、Windows）会回退 Legacy ACP，不会静默降低隔离级别。
+对 shell、第三方扩展、MCP 权限的安全边界另见[安全设计](./protocol-and-data.md#5-权限与信任边界)。进程分离不等于沙箱；隔离由 Host 施加在它派生的命令上（macOS Seatbelt 与 Linux Landlock，见 `workspace_sandbox`），profile 不支持安全执行时（网络受限 profile、glob deny、Linux exact deny/旧 ABI、Windows）会阻断相关 Pi 会话，不会静默降低隔离级别或回退 Legacy ACP。
 
 ### 5.3 Subagent 与后台工作
 

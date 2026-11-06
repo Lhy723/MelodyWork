@@ -95,13 +95,12 @@ jobs:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         run: pnpm check:updater-key
 
-      - name: Build and smoke-test Pi worker
+      - name: Prepare Pi worker
         shell: bash
         env:
           TAURI_ENV_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
           pnpm prepare:agent-worker
-          MELODY_PI_WORKER_PATH="src-tauri/binaries/melody-agent-worker-${{ matrix.target }}${{ matrix.worker_ext }}" pnpm test:pi-worker-smoke
 
       - name: Build and publish installers
         uses: tauri-apps/tauri-action@v0

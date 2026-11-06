@@ -1,161 +1,100 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { checkPiAgentScheduleCompatibility } from "./pi-agent-schedule-compatibility.mjs";
+import { checkPiModelPolicyCompatibility } from "./pi-model-policy-compatibility.mjs";
+import { checkTauriCommandPermissions } from "./tauri-command-permission-check.mjs";
+import { checkPiResourceCompatibility } from "./pi-resource-compatibility.mjs";
+import { checkPiSubagentPolicyCompatibility } from "./pi-subagent-policy-compatibility.mjs";
+import { checkPiTerminalCompatibility } from "./pi-terminal-compatibility.mjs";
+import { checkPiQuestionTimeoutCompatibility } from "./pi-question-timeout-compatibility.mjs";
+import { checkPiMemoryToolsCompatibility } from "./pi-memory-tools-compatibility.mjs";
+import { checkPiMcpInventoryCompatibility } from "./pi-mcp-inventory-compatibility.mjs";
+import { checkPiMcpTransportsCompatibility } from "./pi-mcp-transports-compatibility.mjs";
+import { checkPiWebToolsCompatibility } from "./pi-web-tools-compatibility.mjs";
+import { checkPiLspCompatibility } from "./pi-lsp-compatibility.mjs";
+import { checkPiCodebaseIndexCompatibility } from "./pi-codebase-index-compatibility.mjs";
+import { checkPiHooksCompatibility } from "./pi-hooks-compatibility.mjs";
+import { checkPiCompactionCompatibility } from "./pi-compaction-compatibility.mjs";
+import { readNumericSourceConstant } from "./source-numeric-constant.mjs";
 
 const root = process.cwd();
 const failures = [];
+failures.push(...checkTauriCommandPermissions(root));
 
-const readJson = (relativePath) => {
+const readJsonObject = (relativePath) => {
+  let value;
   try {
-    return JSON.parse(readFileSync(resolve(root, relativePath), "utf8"));
+    value = JSON.parse(readFileSync(resolve(root, relativePath), "utf8"));
   } catch (error) {
     failures.push(`${relativePath}: 无法读取 JSON（${error.message}）`);
     return undefined;
   }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    failures.push(`${relativePath}: JSON 根节点必须是对象。`);
+    return undefined;
+  }
+
+  return value;
 };
 
-const manifest = readJson(
+const manifest = readJsonObject(
   "docs/architecture/pi-migration/pi-compatibility-manifest.json",
 );
 
-const rustMainPath = resolve(root, "src-tauri/src/lib.rs");
-const tauriPermissionPath = resolve(root, "src-tauri/permissions/default.toml");
-try {
-  const rustMain = readFileSync(rustMainPath, "utf8");
-  const handlerMatch = rustMain.match(
-    /tauri::generate_handler!\s*\[([\s\S]*?)\]/u,
-  );
-  const permissionSource = readFileSync(tauriPermissionPath, "utf8");
-  const permissionMatch = permissionSource.match(
-    /commands\.allow\s*=\s*\[([\s\S]*?)\]/u,
-  );
-  if (!handlerMatch) {
-    failures.push("Tauri invoke_handler 注册清单无法读取。");
-  } else if (!permissionMatch) {
-    failures.push("Tauri 主窗口 command allowlist 无法读取。");
-  } else {
-    const registeredCommands = new Set(
-      handlerMatch[1]
-        .replace(/\/\*[\s\S]*?\*\//gu, "")
-        .replace(/\/\/.*$/gmu, "")
-        .split(",")
-        .map((entry) => entry.trim().split("::").at(-1))
-        .filter(Boolean),
-    );
-    const allowedCommands = new Set(
-      [...permissionMatch[1].matchAll(/"([^"]+)"/gu)].map((match) => match[1]),
-    );
-    const frontendFiles = [];
-    const visit = (directory) => {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        const path = resolve(directory, entry.name);
-        if (entry.isDirectory()) visit(path);
-        else if (/\.(?:ts|tsx)$/u.test(entry.name)) frontendFiles.push(path);
-      }
-    };
-    visit(resolve(root, "src"));
-
-    const invokedCommands = new Set();
-    for (const path of frontendFiles) {
-      const source = readFileSync(path, "utf8");
-      for (const match of source.matchAll(
-        /\binvoke(?:<[^>]*>)?\s*\(\s*["']([^"']+)["']/gu,
-      )) {
-        invokedCommands.add(match[1]);
-      }
-    }
-
-    for (const command of [...invokedCommands].sort()) {
-      if (registeredCommands.has(command) && !allowedCommands.has(command)) {
-        failures.push(
-          `前端调用的 Tauri 命令 ${command} 未加入主窗口权限白名单。`,
-        );
-      }
-    }
-  }
-} catch (error) {
-  failures.push(`Tauri command permissions: ${error.message}`);
-}
-
-/**
- * Read the top-level keys of a typebox schema by brace matching.
- *
- * A regex over the declaration would silently include keys of the next schema
- * (or miss a single-line `Type.Object({})`), which is exactly the kind of drift
- * this check exists to catch. Braces inside string literals (descriptions) are
- * skipped, and indices stay aligned because nothing is rewritten in place.
- */
-const schemaTopLevelKeys = (source, name) => {
-  const marker = `const ${name} = Type.Object(`;
-  const start = source.indexOf(marker);
-  if (start < 0) return undefined;
-  let index = source.indexOf("{", start + marker.length - 1);
-  if (index < 0) return undefined;
-  const open = index;
-  let depth = 0;
-  let end = -1;
-  let inString = false;
-  let escaped = false;
-  for (; index < source.length; index += 1) {
-    const character = source[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-    if (character === '"') {
-      inString = true;
-      continue;
-    }
-    if (character === "{") depth += 1;
-    if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        end = index;
-        break;
-      }
-    }
-  }
-  if (end < 0) return undefined;
-
-  const body = source.slice(open + 1, end);
-  const keys = [];
-  let inner = 0;
-  inString = false;
-  escaped = false;
-  let atLineStart = true;
-  for (let cursor = 0; cursor < body.length; cursor += 1) {
-    const character = body[cursor];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-    if (character === '"') {
-      inString = true;
-      continue;
-    }
-    if (atLineStart && inner === 0) {
-      const match = /^([a-z_]+):/.exec(body.slice(cursor, cursor + 64));
-      if (match) keys.push(match[1]);
-    }
-    if (character === "\n") {
-      atLineStart = true;
-      continue;
-    }
-    if (character !== " " && character !== "\t" && atLineStart)
-      atLineStart = false;
-    if (character === "{" || character === "[") inner += 1;
-    if (character === "}" || character === "]") inner -= 1;
-  }
-  return keys;
-};
-const workerPackage = readJson("packages/agent-worker/package.json");
+const workerPackage = readJsonObject("packages/agent-worker/package.json");
 const adapterPath = resolve(
   root,
   "packages/agent-worker/src/pi/session-adapter.ts",
+);
+const sessionResourceLoaderPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/session-resource-loader.ts",
+);
+const sessionResourceRefreshPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/session-resource-refresh-runtime.ts",
+);
+const sessionOpenRuntimePath = resolve(
+  root,
+  "packages/agent-worker/src/pi/session-open-runtime.ts",
+);
+const resourceDiscoveryPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/resource-discovery.ts",
+);
+const skillDiscoveryPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/skill-discovery.ts",
+);
+const promptDiscoveryPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/prompt-discovery.ts",
+);
+const resourcePolicyPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/resource-policy-snapshot.ts",
+);
+const modelPolicyPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/model-policy.ts",
+);
+const modelCatalogRuntimePath = resolve(
+  root,
+  "packages/agent-worker/src/pi/model-catalog-runtime.ts",
+);
+const subagentRecordsPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/subagent-records.ts",
+);
+const subagentSessionBoundariesPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/subagent-session-boundaries.ts",
+);
+const subagentRuntimePath = resolve(
+  root,
+  "packages/agent-worker/src/pi/subagent-runtime.ts",
 );
 const todoExtensionPath = resolve(
   root,
@@ -165,62 +104,504 @@ const goalExtensionPath = resolve(
   root,
   "packages/agent-worker/src/pi/goal-extension.ts",
 );
+const goalStatePath = resolve(
+  root,
+  "packages/agent-worker/src/pi/goal-state.ts",
+);
+const goalGuardsPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/goal-guards.ts",
+);
 const importPath = resolve(
   root,
   "packages/agent-worker/src/pi/session-import.ts",
 );
 const modesPath = resolve(root, "packages/agent-contract/src/session-modes.ts");
 const toolGatewayPath = resolve(root, "src-tauri/src/pi_tool_gateway.rs");
+const requestPolicyPath = resolve(
+  root,
+  "src-tauri/src/pi_tool_gateway/request_policy.rs",
+);
+const workspaceToolsPath = resolve(
+  root,
+  "src-tauri/src/pi_tool_gateway/workspace_tools.rs",
+);
+const terminalTasksPath = resolve(
+  root,
+  "src-tauri/src/pi_tool_gateway/terminal_tasks.rs",
+);
+const toolOutputArchivePath = resolve(
+  root,
+  "src-tauri/src/pi_tool_output_archive.rs",
+);
+const monitorToolsPath = resolve(
+  root,
+  "src-tauri/src/pi_tool_gateway/monitor_tools.rs",
+);
+const schedulerToolsPath = resolve(
+  root,
+  "src-tauri/src/pi_tool_gateway/scheduler_tools.rs",
+);
 const workerToolGatewayPath = resolve(
   root,
   "packages/agent-worker/src/pi/tool-gateway.ts",
+);
+const workerToolNamesPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/tool-names.ts",
+);
+const workerToolAccessPolicyPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/tool-access-policy.ts",
+);
+const workerToolSchemasPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/tool-schemas.ts",
+);
+const workerToolRequestLifecyclePath = resolve(
+  root,
+  "packages/agent-worker/src/pi/tool-request-lifecycle.ts",
+);
+const workerToolPermissionPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/tool-permission.ts",
+);
+const workerTaskToolsPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/task-tools.ts",
 );
 const configExtensionsPath = resolve(
   root,
   "src-tauri/src/config_extensions.rs",
 );
-const workerRuntimePath = resolve(root, "src-tauri/src/pi_worker_runtime.rs");
-const memoryRuntimePath = resolve(root, "src-tauri/src/pi_memory_runtime.rs");
+const configPiPolicyPath = resolve(root, "src-tauri/src/config_pi_policy.rs");
+const configPiResourcesPath = resolve(
+  root,
+  "src-tauri/src/config_pi_resources.rs",
+);
+const configPromptResourcesPath = resolve(
+  root,
+  "src-tauri/src/config_prompt_resources.rs",
+);
+const configPluginCatalogPath = resolve(
+  root,
+  "src-tauri/src/config_plugin_catalog.rs",
+);
 const configRuntimePath = resolve(root, "src-tauri/src/config_runtime.rs");
+const workerRuntimePath = resolve(root, "src-tauri/src/pi_worker_runtime.rs");
+const webRuntimePath = resolve(root, "src-tauri/src/pi_web_runtime.rs");
+const workerMemoryLifecyclePath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/memory_lifecycle.rs",
+);
+const workerProtocolPath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/protocol.rs",
+);
+const workerSessionCommandsPath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/session_commands.rs",
+);
+const workerEventAcceptancePath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/event_acceptance.rs",
+);
+const workerEventPipelinePath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/event_pipeline.rs",
+);
+const workerEnvrcPath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/envrc.rs",
+);
+const workerLaunchPath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/launch.rs",
+);
+const workerToolRoutingPath = resolve(
+  root,
+  "src-tauri/src/pi_worker_runtime/host_tool_routing.rs",
+);
+const memoryRuntimePath = resolve(root, "src-tauri/src/pi_memory_runtime.rs");
+const memoryStorePath = resolve(
+  root,
+  "src-tauri/src/pi_memory_runtime/store.rs",
+);
+const memoryStoreSearchIndexPath = resolve(
+  root,
+  "src-tauri/src/pi_memory_runtime/store/search_index.rs",
+);
+const browserRuntimePath = resolve(root, "src-tauri/src/pi_browser_runtime.rs");
+const browserPolicyPath = resolve(
+  root,
+  "src-tauri/src/pi_browser_runtime/browser_policy.rs",
+);
+const browserPageToolsPath = resolve(
+  root,
+  "src-tauri/src/pi_browser_runtime/page_tools.rs",
+);
+const browserScreenshotPath = resolve(
+  root,
+  "src-tauri/src/pi_browser_runtime/screenshot.rs",
+);
+const browserSessionLifecyclePath = resolve(
+  root,
+  "src-tauri/src/pi_browser_runtime/session_lifecycle.rs",
+);
+const mcpRuntimePath = resolve(root, "src-tauri/src/pi_mcp_runtime.rs");
+const mcpConfigPath = resolve(
+  root,
+  "src-tauri/src/pi_mcp_runtime/mcp_config.rs",
+);
+const mcpStdioTransportPath = resolve(
+  root,
+  "src-tauri/src/pi_mcp_runtime/stdio_transport.rs",
+);
+const mcpRemoteTransportPath = resolve(
+  root,
+  "src-tauri/src/pi_mcp_runtime/remote_transport.rs",
+);
 const lspRuntimePath = resolve(root, "src-tauri/src/pi_lsp_runtime.rs");
+const lspConfigPath = resolve(root, "src-tauri/src/pi_lsp_config.rs");
+const lspProjectionPath = resolve(root, "src-tauri/src/pi_lsp_projection.rs");
 const codebaseRuntimePath = resolve(
   root,
   "src-tauri/src/pi_codebase_runtime.rs",
 );
+const codebaseParserPath = resolve(
+  root,
+  "src-tauri/src/pi_codebase_runtime/parser.rs",
+);
+const codebaseRequestPath = resolve(
+  root,
+  "src-tauri/src/pi_codebase_runtime/request.rs",
+);
+const codebaseIndexPath = resolve(
+  root,
+  "src-tauri/src/pi_codebase_runtime/index.rs",
+);
 const hookRuntimePath = resolve(root, "src-tauri/src/pi_hook_runtime.rs");
+const hookConfigPath = resolve(
+  root,
+  "src-tauri/src/pi_hook_runtime/hook_config.rs",
+);
+const hookExecutionPath = resolve(
+  root,
+  "src-tauri/src/pi_hook_runtime/hook_execution.rs",
+);
 const configPluginDetailsPath = resolve(
   root,
   "src-tauri/src/config_plugin_details.rs",
 );
 const configSubagentsPath = resolve(root, "src-tauri/src/config_subagents.rs");
+const subagentMarkdownPath = resolve(
+  root,
+  "src-tauri/src/config_subagent_markdown.rs",
+);
 const workerPolicyPath = resolve(
   root,
   "packages/agent-worker/src/pi/subagent-policy.ts",
 );
+const workerPolicyNormalizationPath = resolve(
+  root,
+  "packages/agent-worker/src/pi/subagent-policy-normalization.ts",
+);
 
 let adapter = "";
+let sessionResourceLoader = "";
+let sessionResourceRefresh = "";
+let sessionOpenRuntime = "";
+let resourceDiscovery = "";
+let skillDiscovery = "";
+let promptDiscovery = "";
+let resourcePolicy = "";
+let modelPolicy = "";
+let modelCatalogRuntime = "";
+let subagentRecords = "";
+let subagentSessionBoundaries = "";
+let subagentRuntime = "";
 let todoExtension = "";
 let goalExtension = "";
+let goalState = "";
+let goalGuards = "";
 let importModule = "";
 let modesModule = "";
 let toolGateway = "";
+let requestPolicy = "";
+let workspaceTools = "";
+let terminalTasks = "";
+let toolOutputArchive = "";
+let monitorTools = "";
+let schedulerTools = "";
 let workerToolGateway = "";
+let workerToolGatewayEntry = "";
+let workerToolNames = "";
+let workerToolAccessPolicy = "";
+let workerToolSchemas = "";
+let workerToolRequestLifecycle = "";
+let workerToolPermission = "";
+let workerTaskTools = "";
 let configExtensions = "";
-let workerRuntime = "";
-let memoryRuntime = "";
+let configExtensionsWiring = "";
+let configPiPolicy = "";
+let configPiResources = "";
+let configPromptResources = "";
+let configPluginCatalog = "";
 let configRuntime = "";
+let workerRuntime = "";
+let webRuntime = "";
+let workerMemoryLifecycle = "";
+let workerProtocol = "";
+let workerSessionCommands = "";
+let workerEventAcceptance = "";
+let workerEventPipeline = "";
+let workerEnvrc = "";
+let workerLaunch = "";
+let workerToolRouting = "";
+let memoryRuntime = "";
+let memoryStoreRuntime = "";
+let memoryStoreSearchIndex = "";
+let browserRuntime = "";
+let browserPolicy = "";
+let browserPageTools = "";
+let browserScreenshot = "";
+let browserSessionLifecycle = "";
 let lspRuntime = "";
+let lspConfig = "";
+let lspProjection = "";
 let codebaseRuntime = "";
+let codebaseParser = "";
+let codebaseRequest = "";
+let codebaseIndex = "";
 let hookRuntime = "";
+let hookConfig = "";
+let hookExecution = "";
+let mcpRuntime = "";
+let mcpConfig = "";
+let mcpStdioTransport = "";
+let mcpRemoteTransport = "";
 let configPluginDetails = "";
 let configSubagents = "";
+let subagentMarkdown = "";
 let workerPolicy = "";
+let workerPolicyNormalization = "";
 try {
   adapter = readFileSync(adapterPath, "utf8");
 } catch (error) {
   failures.push(
     `packages/agent-worker/src/pi/session-adapter.ts: ${error.message}`,
   );
+}
+try {
+  sessionResourceLoader = readFileSync(sessionResourceLoaderPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/session-resource-loader.ts: ${error.message}`,
+  );
+}
+try {
+  sessionResourceRefresh = readFileSync(sessionResourceRefreshPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/session-resource-refresh-runtime.ts: ${error.message}`,
+  );
+}
+try {
+  sessionOpenRuntime = readFileSync(sessionOpenRuntimePath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/session-open-runtime.ts: ${error.message}`,
+  );
+}
+try {
+  resourceDiscovery = readFileSync(resourceDiscoveryPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/resource-discovery.ts: ${error.message}`,
+  );
+}
+try {
+  skillDiscovery = readFileSync(skillDiscoveryPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/skill-discovery.ts: ${error.message}`,
+  );
+}
+try {
+  promptDiscovery = readFileSync(promptDiscoveryPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/prompt-discovery.ts: ${error.message}`,
+  );
+}
+try {
+  resourcePolicy = readFileSync(resourcePolicyPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/resource-policy-snapshot.ts: ${error.message}`,
+  );
+}
+try {
+  modelPolicy = readFileSync(modelPolicyPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/model-policy.ts: ${error.message}`,
+  );
+}
+try {
+  modelCatalogRuntime = readFileSync(modelCatalogRuntimePath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/model-catalog-runtime.ts: ${error.message}`,
+  );
+}
+try {
+  subagentRecords = readFileSync(subagentRecordsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/subagent-records.ts: ${error.message}`,
+  );
+}
+try {
+  subagentSessionBoundaries = readFileSync(
+    subagentSessionBoundariesPath,
+    "utf8",
+  );
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/subagent-session-boundaries.ts: ${error.message}`,
+  );
+}
+try {
+  subagentRuntime = readFileSync(subagentRuntimePath, "utf8");
+} catch (error) {
+  failures.push(
+    "packages/agent-worker/src/pi/subagent-runtime.ts: " + error.message,
+  );
+}
+if (
+  !adapter.includes('from "./session-resource-loader.ts"') ||
+  !sessionResourceLoader.includes('from "./resource-discovery.ts"') ||
+  !sessionResourceLoader.includes('from "./skill-discovery.ts"') ||
+  !sessionResourceLoader.includes('from "./prompt-discovery.ts"') ||
+  !sessionResourceLoader.includes("new pi.DefaultResourceLoader") ||
+  !sessionResourceLoader.includes("additionalSkillPaths") ||
+  !sessionResourceLoader.includes("additionalPromptTemplatePaths")
+) {
+  failures.push(
+    "Pi session resource-loader owner is not wired to the resource-root, Skill, and prompt discovery owners.",
+  );
+}
+if (
+  !adapter.includes('from "./resource-policy-snapshot.ts"') ||
+  !adapter.includes('from "./session-resource-refresh-runtime.ts"') ||
+  !adapter.includes("new PiSessionResourceRefreshRuntime") ||
+  !adapter.includes(
+    "this.sessionResourceRefresh.refresh(command, requestId)",
+  ) ||
+  !adapter.includes("parsePiRuntimePolicyEnvironment(process.env)") ||
+  !sessionResourceRefresh.includes('from "./resource-policy-snapshot.ts"') ||
+  !sessionResourceRefresh.includes("normalizePiResourcePolicySnapshot(") ||
+  !sessionResourceRefresh.includes("applyPolicySnapshot(normalizedManifest)") ||
+  !sessionResourceLoader.includes('from "./resource-policy-snapshot.ts"') ||
+  !sessionResourceLoader.includes("normalizePiResourcePolicySnapshot(") ||
+  !sessionResourceLoader.includes("applyPolicySnapshot(normalized)") ||
+  !resourcePolicy.includes("export const normalizePiResourcePolicySnapshot") ||
+  !resourcePolicy.includes("export const parsePiRuntimePolicyEnvironment")
+) {
+  failures.push(
+    "Pi session adapter is not wired to the resource/policy snapshot owner.",
+  );
+}
+const normalizedRootArguments =
+  resourcePolicy.match(/normalizePiResourceRoots\(([\s\S]*?)\n\s*\);/u)?.[1] ??
+  "";
+if (
+  !normalizedRootArguments.includes("environment") ||
+  !resourceDiscovery.includes(
+    "environment: PiResourceRootEnvironment = process.env",
+  ) ||
+  !resourceDiscovery.includes("skillRootsFor(cwd, pluginRoots, environment)") ||
+  !resourceDiscovery.includes("promptRootsFor(cwd, pluginRoots, environment)")
+) {
+  failures.push(
+    "Pi resource roots are not validated with the explicit policy environment snapshot.",
+  );
+}
+if (
+  !adapter.includes('from "./session-open-runtime.ts"') ||
+  !adapter.includes("new PiSessionOpenRuntime") ||
+  !adapter.includes("this.sessionOpen.open(command, requestId, emitLifecycle)")
+) {
+  failures.push("Pi session adapter is not wired to the session-open owner.");
+}
+if (
+  !sessionOpenRuntime.includes('from "./model-policy.ts"') ||
+  !sessionOpenRuntime.includes("applyModelPolicyOverrides(")
+) {
+  failures.push(
+    "Pi session open owner is not wired to the model-policy module.",
+  );
+}
+if (!adapter.includes('from "./model-catalog-runtime.ts"')) {
+  failures.push(
+    "Pi session adapter is not wired to the model-catalog runtime owner.",
+  );
+}
+for (const marker of [
+  "ModelRuntime.create(",
+  "mapPiModelCatalog(",
+  "MELODY_PI_MODEL_",
+  "catalogRevision",
+  "enqueueCatalog(",
+]) {
+  if (!modelCatalogRuntime.includes(marker)) {
+    failures.push(`Pi model catalog runtime owner is missing ${marker}.`);
+  }
+}
+if (
+  adapter.includes("ModelRuntime.create(") ||
+  adapter.includes("mapPiModelCatalog(")
+) {
+  failures.push(
+    "Pi model runtime/catalog logic must remain owned by model-catalog-runtime.ts.",
+  );
+}
+if (!subagentRuntime.includes('from "./subagent-records.ts"')) {
+  failures.push(
+    "Pi subagent runtime is not wired to the subagent-records module.",
+  );
+}
+if (!adapter.includes('from "./subagent-session-boundaries.ts"')) {
+  failures.push(
+    "Pi session adapter is not wired to the subagent session-boundaries module.",
+  );
+}
+for (const marker of [
+  "normalizePiResumeFrom",
+  "normalizePiSubagentCwd",
+  "assertPiResumeTarget",
+  "assertPiResumeScope",
+  "assertPiResumeIdentity",
+  "parsePiWorktreeResponse",
+]) {
+  if (!subagentSessionBoundaries.includes(marker)) {
+    failures.push(`Pi subagent session-boundaries owner is missing ${marker}.`);
+  }
+}
+for (const marker of [
+  "PI_SUBAGENT_RECORD_DIRECTORY",
+  "MAX_PERSISTED_MCP_TOOLS",
+  "PI_MCP_TOOL_PATTERN",
+  "parsePersistedPiSubagentRecord",
+  "loadPiSubagentRecord",
+  "savePiSubagentRecord",
+  "isPiSubagentType",
+  "isPiThinkingLevel",
+]) {
+  if (!subagentRecords.includes(marker)) {
+    failures.push(`Pi subagent record owner is missing ${marker}.`);
+  }
 }
 try {
   todoExtension = readFileSync(todoExtensionPath, "utf8");
@@ -234,6 +615,18 @@ try {
 } catch (error) {
   failures.push(
     `packages/agent-worker/src/pi/goal-extension.ts: ${error.message}`,
+  );
+}
+try {
+  goalState = readFileSync(goalStatePath, "utf8");
+} catch (error) {
+  failures.push(`packages/agent-worker/src/pi/goal-state.ts: ${error.message}`);
+}
+try {
+  goalGuards = readFileSync(goalGuardsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/goal-guards.ts: ${error.message}`,
   );
 }
 try {
@@ -256,21 +649,360 @@ try {
   failures.push(`src-tauri/src/pi_tool_gateway.rs: ${error.message}`);
 }
 try {
-  workerToolGateway = readFileSync(workerToolGatewayPath, "utf8");
+  requestPolicy = readFileSync(requestPolicyPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_tool_gateway/request_policy.rs: ${error.message}`,
+  );
+}
+try {
+  workspaceTools = readFileSync(workspaceToolsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_tool_gateway/workspace_tools.rs: ${error.message}`,
+  );
+}
+try {
+  terminalTasks = readFileSync(terminalTasksPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_tool_gateway/terminal_tasks.rs: ${error.message}`,
+  );
+}
+try {
+  toolOutputArchive = readFileSync(toolOutputArchivePath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_tool_output_archive.rs: ${error.message}`);
+}
+try {
+  monitorTools = readFileSync(monitorToolsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_tool_gateway/monitor_tools.rs: ${error.message}`,
+  );
+}
+try {
+  schedulerTools = readFileSync(schedulerToolsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_tool_gateway/scheduler_tools.rs: ${error.message}`,
+  );
+}
+if (!toolGateway.includes("mod workspace_tools;")) {
+  failures.push("Host ToolGateway is not wired to its workspace-tools module.");
+}
+if (!toolGateway.includes("mod request_policy;")) {
+  failures.push("Host ToolGateway is not wired to its request-policy module.");
+}
+if (!toolGateway.includes("mod terminal_tasks;")) {
+  failures.push("Host ToolGateway is not wired to its terminal-tasks module.");
+}
+if (
+  !toolGateway.includes("mod monitor_tools;") ||
+  !toolGateway.includes("mod scheduler_tools;")
+) {
+  failures.push(
+    "Host ToolGateway is not wired to monitor/scheduler tool modules.",
+  );
+}
+if (
+  !terminalTasks.includes("struct BackgroundTerminalTask") ||
+  !terminalTasks.includes("collect_terminal_output_controlled") ||
+  !terminalTasks.includes("pub(super) fn run_terminal_with_policy") ||
+  !toolGateway.includes("terminal_tasks::resolve_control")
+) {
+  failures.push(
+    "Host ToolGateway is not wired to the terminal process/task lifecycle owner.",
+  );
+}
+if (
+  !monitorTools.includes("pub(super) fn start_monitor_tool") ||
+  !monitorTools.includes("pub(super) fn resolve_monitor_task_control") ||
+  !schedulerTools.includes("pub(super) fn scheduler_tool") ||
+  !toolGateway.includes("monitor_tools::start_monitor_tool") ||
+  !toolGateway.includes("scheduler_tools::scheduler_tool")
+) {
+  failures.push(
+    "Host ToolGateway is not wired to monitor/scheduler tool owners.",
+  );
+}
+try {
+  workerToolGatewayEntry = readFileSync(workerToolGatewayPath, "utf8");
 } catch (error) {
   failures.push(
     `packages/agent-worker/src/pi/tool-gateway.ts: ${error.message}`,
   );
 }
 try {
+  workerToolNames = readFileSync(workerToolNamesPath, "utf8");
+} catch (error) {
+  failures.push(`packages/agent-worker/src/pi/tool-names.ts: ${error.message}`);
+}
+try {
+  workerToolAccessPolicy = readFileSync(workerToolAccessPolicyPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/tool-access-policy.ts: ${error.message}`,
+  );
+}
+try {
+  workerToolSchemas = readFileSync(workerToolSchemasPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/tool-schemas.ts: ${error.message}`,
+  );
+}
+try {
+  workerToolRequestLifecycle = readFileSync(
+    workerToolRequestLifecyclePath,
+    "utf8",
+  );
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/tool-request-lifecycle.ts: ${error.message}`,
+  );
+}
+try {
+  workerToolPermission = readFileSync(workerToolPermissionPath, "utf8");
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/tool-permission.ts: ${error.message}`,
+  );
+}
+try {
+  workerTaskTools = readFileSync(workerTaskToolsPath, "utf8");
+} catch (error) {
+  failures.push(`packages/agent-worker/src/pi/task-tools.ts: ${error.message}`);
+}
+if (
+  !workerToolGatewayEntry.includes('export * from "./tool-names.ts"') ||
+  !workerToolGatewayEntry.includes('from "./tool-access-policy.ts"') ||
+  !workerToolGatewayEntry.includes(
+    'from "./subagent-policy-normalization.ts"',
+  ) ||
+  !workerToolGatewayEntry.includes('from "./tool-schemas.ts"') ||
+  !workerToolGatewayEntry.includes('from "./tool-request-lifecycle.ts"') ||
+  !workerToolGatewayEntry.includes('from "./tool-permission.ts"') ||
+  !workerToolGatewayEntry.includes('from "./task-tools.ts"') ||
+  !workerToolGatewayEntry.includes('from "./tool-results.ts"') ||
+  !workerToolGatewayEntry.includes("new PiToolRequestLifecycle(emit)")
+) {
+  failures.push(
+    "Pi ToolGateway 没有接入稳定工具名、访问策略、schema 与 request-lifecycle 模块。",
+  );
+}
+if (
+  !workerToolGatewayEntry.includes('from "./tool-errors.ts"') ||
+  !workerToolRequestLifecycle.includes('from "./tool-errors.ts"')
+) {
+  failures.push(
+    "Pi worker gateway 与 request lifecycle 没有共享规范错误构造器。",
+  );
+}
+for (const marker of [
+  "public async request(",
+  "public async requestInteraction(",
+  "public resolve(",
+  "public resolveInteraction(",
+  "public rejectAll(",
+  'type: "tool.requested"',
+  'type: "tool.finished"',
+  'type: "interaction.requested"',
+  'type: "interaction.resolved"',
+]) {
+  if (!workerToolRequestLifecycle.includes(marker)) {
+    failures.push(`Pi request-lifecycle module is missing ${marker}.`);
+  }
+}
+for (const marker of [
+  "export const createSubagentTools",
+  "export const createTaskControlTools",
+  "export interface PiTaskController",
+  "name: PI_TASK,",
+  "name: PI_GET_TASK_OUTPUT,",
+  "name: PI_WAIT_TASKS,",
+  "name: PI_KILL_TASK,",
+]) {
+  if (!workerTaskTools.includes(marker)) {
+    failures.push(`Pi worker task-tools module is missing ${marker}.`);
+  }
+}
+for (const marker of [
+  "export const isAllowedPermissionOutcome",
+  "export const permissionRawInput",
+  "PI_WORKSPACE_WRITE_FILE",
+  "PI_BROWSER_NAVIGATE",
+]) {
+  if (!workerToolPermission.includes(marker)) {
+    failures.push(`Pi worker permission-contract module is missing ${marker}.`);
+  }
+}
+for (const marker of [
+  "export const intersectPiSubagentCapabilityModes",
+  "export const subagentCapabilityAllowsTool",
+  "export const sessionModeAllowsTool",
+]) {
+  if (!workerToolAccessPolicy.includes(marker)) {
+    failures.push(`Pi worker access-policy module is missing ${marker}.`);
+  }
+}
+// Keep contract checks pointed at the ownership modules after the gateway
+// stops declaring these protocol names inline.
+workerToolGateway = [
+  workerToolGatewayEntry,
+  workerToolNames,
+  workerToolSchemas,
+  workerToolRequestLifecycle,
+  workerToolPermission,
+  workerTaskTools,
+].join("\n");
+try {
   configExtensions = readFileSync(configExtensionsPath, "utf8");
+  configExtensionsWiring = configExtensions;
 } catch (error) {
   failures.push(`src-tauri/src/config_extensions.rs: ${error.message}`);
 }
 try {
+  configPiPolicy = readFileSync(configPiPolicyPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_pi_policy.rs: ${error.message}`);
+}
+try {
+  configPiResources = readFileSync(configPiResourcesPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_pi_resources.rs: ${error.message}`);
+}
+try {
+  configPromptResources = readFileSync(configPromptResourcesPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_prompt_resources.rs: ${error.message}`);
+}
+try {
+  configPluginCatalog = readFileSync(configPluginCatalogPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_plugin_catalog.rs: ${error.message}`);
+}
+try {
+  configRuntime = readFileSync(configRuntimePath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_runtime.rs: ${error.message}`);
+}
+if (manifest?.hostBridges?.webTools) {
+  try {
+    webRuntime = readFileSync(webRuntimePath, "utf8");
+  } catch (error) {
+    failures.push(`src-tauri/src/pi_web_runtime.rs: ${error.message}`);
+  }
+}
+if (
+  !configExtensions.includes('#[path = "config_pi_policy.rs"]') ||
+  !configExtensions.includes("mod pi_runtime_policy;") ||
+  !configExtensions.includes("pi_terminal_policy") ||
+  !configPiPolicy.includes("pub(crate) fn pi_terminal_policy") ||
+  !configPiPolicy.includes("pub(crate) fn pi_question_timeout_policy") ||
+  !configPiPolicy.includes("pub(crate) fn pi_goal_policy")
+) {
+  failures.push(
+    "Host Pi runtime-policy projections are not owned by config_pi_policy.rs or wired through config_extensions.rs.",
+  );
+}
+if (
+  !configExtensions.includes('#[path = "config_pi_resources.rs"]') ||
+  !configExtensions.includes('#[path = "config_prompt_resources.rs"]') ||
+  !configExtensions.includes("mod pi_resources;") ||
+  !configExtensions.includes("mod prompt_resources;") ||
+  !configExtensions.includes(
+    "pub(crate) use self::prompt_resources::pi_prompt_paths",
+  ) ||
+  !configExtensions.includes("pi_resource_manifest_parts") ||
+  !configPiResources.includes("pub(crate) fn pi_resource_manifest_parts") ||
+  !configRuntime.includes("pub(crate) fn pi_resource_manifest") ||
+  !configRuntime.includes(
+    "config_subagents::pi_subagent_policy_manifest(cwd)?",
+  ) ||
+  configPiResources.includes("config_subagents::") ||
+  !configPiResources.includes("scan_pi_skill_root_by_status") ||
+  !configPiResources.includes(
+    "super::prompt_resources::pi_prompt_scan_roots",
+  ) ||
+  configPiResources.includes("pub(crate) fn scan_pi_prompt_root") ||
+  !configPromptResources.includes("pub(crate) fn scan_pi_prompt_root") ||
+  !configPromptResources.includes("pub(crate) fn pi_prompt_paths") ||
+  !configPromptResources.includes("pub(crate) fn pi_prompt_scan_roots")
+) {
+  failures.push(
+    "Host Pi resource discovery or subagent manifest composition is not owned by its focused module and runtime facade.",
+  );
+}
+if (
+  !configExtensions.includes('#[path = "config_plugin_catalog.rs"]') ||
+  !configExtensions.includes("mod plugin_catalog;") ||
+  !configExtensions.includes("PluginEnablement") ||
+  !configExtensions.includes("pi_plugin_resources") ||
+  !configPluginCatalog.includes("pub(crate) struct PluginEnablement") ||
+  !configPluginCatalog.includes("pub(crate) fn pi_plugin_resources")
+) {
+  failures.push(
+    "Host plugin catalog discovery and enablement are not owned by config_plugin_catalog.rs or wired through config_extensions.rs.",
+  );
+}
+configExtensions = [configExtensions, configPiPolicy].join("\n");
+try {
   workerRuntime = readFileSync(workerRuntimePath, "utf8");
 } catch (error) {
   failures.push(`src-tauri/src/pi_worker_runtime.rs: ${error.message}`);
+}
+try {
+  workerMemoryLifecycle = readFileSync(workerMemoryLifecyclePath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/memory_lifecycle.rs: ${error.message}`,
+  );
+}
+try {
+  workerProtocol = readFileSync(workerProtocolPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/protocol.rs: ${error.message}`,
+  );
+}
+try {
+  workerSessionCommands = readFileSync(workerSessionCommandsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/session_commands.rs: ${error.message}`,
+  );
+}
+try {
+  workerEventAcceptance = readFileSync(workerEventAcceptancePath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/event_acceptance.rs: ${error.message}`,
+  );
+}
+try {
+  workerEventPipeline = readFileSync(workerEventPipelinePath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/event_pipeline.rs: ${error.message}`,
+  );
+}
+try {
+  workerEnvrc = readFileSync(workerEnvrcPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_worker_runtime/envrc.rs: ${error.message}`);
+}
+try {
+  workerLaunch = readFileSync(workerLaunchPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_worker_runtime/launch.rs: ${error.message}`);
+}
+try {
+  workerToolRouting = readFileSync(workerToolRoutingPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_worker_runtime/host_tool_routing.rs: ${error.message}`,
+  );
 }
 try {
   memoryRuntime = readFileSync(memoryRuntimePath, "utf8");
@@ -278,9 +1010,49 @@ try {
   failures.push(`src-tauri/src/pi_memory_runtime.rs: ${error.message}`);
 }
 try {
-  configRuntime = readFileSync(configRuntimePath, "utf8");
+  memoryStoreRuntime = readFileSync(memoryStorePath, "utf8");
 } catch (error) {
-  failures.push(`src-tauri/src/config_runtime.rs: ${error.message}`);
+  failures.push(`src-tauri/src/pi_memory_runtime/store.rs: ${error.message}`);
+}
+try {
+  memoryStoreSearchIndex = readFileSync(memoryStoreSearchIndexPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_memory_runtime/store/search_index.rs: ${error.message}`,
+  );
+}
+try {
+  browserRuntime = readFileSync(browserRuntimePath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_browser_runtime.rs: ${error.message}`);
+}
+try {
+  browserPolicy = readFileSync(browserPolicyPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_browser_runtime/browser_policy.rs: ${error.message}`,
+  );
+}
+try {
+  browserPageTools = readFileSync(browserPageToolsPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_browser_runtime/page_tools.rs: ${error.message}`,
+  );
+}
+try {
+  browserScreenshot = readFileSync(browserScreenshotPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_browser_runtime/screenshot.rs: ${error.message}`,
+  );
+}
+try {
+  browserSessionLifecycle = readFileSync(browserSessionLifecyclePath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_browser_runtime/session_lifecycle.rs: ${error.message}`,
+  );
 }
 try {
   lspRuntime = readFileSync(lspRuntimePath, "utf8");
@@ -288,14 +1060,57 @@ try {
   failures.push(`src-tauri/src/pi_lsp_runtime.rs: ${error.message}`);
 }
 try {
+  lspConfig = readFileSync(lspConfigPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_lsp_config.rs: ${error.message}`);
+}
+try {
+  lspProjection = readFileSync(lspProjectionPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_lsp_projection.rs: ${error.message}`);
+}
+try {
   codebaseRuntime = readFileSync(codebaseRuntimePath, "utf8");
 } catch (error) {
   failures.push(`src-tauri/src/pi_codebase_runtime.rs: ${error.message}`);
 }
 try {
+  codebaseParser = readFileSync(codebaseParserPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_codebase_runtime/parser.rs: ${error.message}`,
+  );
+}
+try {
+  codebaseRequest = readFileSync(codebaseRequestPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_codebase_runtime/request.rs: ${error.message}`,
+  );
+}
+try {
+  codebaseIndex = readFileSync(codebaseIndexPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/pi_codebase_runtime/index.rs: ${error.message}`);
+}
+try {
   hookRuntime = readFileSync(hookRuntimePath, "utf8");
 } catch (error) {
   failures.push(`src-tauri/src/pi_hook_runtime.rs: ${error.message}`);
+}
+try {
+  hookConfig = readFileSync(hookConfigPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_hook_runtime/hook_config.rs: ${error.message}`,
+  );
+}
+try {
+  hookExecution = readFileSync(hookExecutionPath, "utf8");
+} catch (error) {
+  failures.push(
+    `src-tauri/src/pi_hook_runtime/hook_execution.rs: ${error.message}`,
+  );
 }
 try {
   configPluginDetails = readFileSync(configPluginDetailsPath, "utf8");
@@ -308,11 +1123,248 @@ try {
   failures.push(`src-tauri/src/config_subagents.rs: ${error.message}`);
 }
 try {
+  subagentMarkdown = readFileSync(subagentMarkdownPath, "utf8");
+} catch (error) {
+  failures.push(`src-tauri/src/config_subagent_markdown.rs: ${error.message}`);
+}
+try {
+  workerPolicyNormalization = readFileSync(
+    workerPolicyNormalizationPath,
+    "utf8",
+  );
+} catch (error) {
+  failures.push(
+    `packages/agent-worker/src/pi/subagent-policy-normalization.ts: ${error.message}`,
+  );
+}
+try {
   workerPolicy = readFileSync(workerPolicyPath, "utf8");
 } catch (error) {
   failures.push(
     `packages/agent-worker/src/pi/subagent-policy.ts: ${error.message}`,
   );
+}
+for (const marker of [
+  "export const defaultPiSubagentCapabilityMode",
+  "export const intersectPiPermissionModes",
+  "defaultPiSubagentCapabilityMode(type)",
+  "export const resolvePiSubagentPolicy",
+  "export const resolvePiSubagentLaunchPolicy",
+  "export const composePiSubagentPrompt",
+]) {
+  if (!workerPolicy.includes(marker)) {
+    failures.push(`Pi subagent policy owner is missing ${marker}.`);
+  }
+}
+for (const marker of [
+  "export const normalizePiSubagentType",
+  "export const normalizePiSubagentIsolation",
+  "export const normalizePiSubagentCapabilityMode",
+  "export const normalizePiSubagentPolicyManifest",
+  "export const emptyPiSubagentPolicyManifest",
+]) {
+  if (!workerPolicyNormalization.includes(marker)) {
+    failures.push(`Pi subagent normalization owner is missing ${marker}.`);
+  }
+}
+if (
+  !workerPolicy.includes('from "./subagent-policy-normalization.ts"') ||
+  !workerPolicy.includes("normalizePiSubagentPolicyManifest") ||
+  !workerPolicy.includes("createPiSubagentPolicyError as policyError") ||
+  !workerPolicy.includes("export {\n  emptyPiSubagentPolicyManifest")
+) {
+  failures.push(
+    "Pi subagent policy owner is not wired through the bounded normalization module.",
+  );
+}
+if (
+  !subagentRuntime.includes("resolvePiSubagentLaunchPolicy") ||
+  adapter.includes("resolvePiSubagentLaunchPolicy") ||
+  adapter.includes("defaultPiSubagentCapabilityMode") ||
+  adapter.includes("intersectPiPermissionModes") ||
+  adapter.includes("const permissionModeRank")
+) {
+  failures.push(
+    "Pi subagent launch policy is not delegated to the subagent-policy owner.",
+  );
+}
+
+for (const marker of [
+  "fn validate_url",
+  "fn validate_local_preview_url",
+  "fn browser_url_is_allowed_for_snapshot",
+  "fn is_allowed_popup_url",
+]) {
+  if (!browserPolicy.includes(marker)) {
+    failures.push(`Pi Browser URL policy module is missing ${marker}.`);
+  }
+}
+if (
+  !browserRuntime.includes(
+    '#[path = "pi_browser_runtime/browser_policy.rs"]',
+  ) ||
+  !browserRuntime.includes("validate_url") ||
+  !browserRuntime.includes('#[path = "pi_browser_runtime/page_tools.rs"]') ||
+  !browserRuntime.includes('#[path = "pi_browser_runtime/screenshot.rs"]') ||
+  !browserPageTools.includes(
+    "use super::browser_policy::browser_url_is_allowed_for_snapshot;",
+  ) ||
+  !browserPageTools.includes(
+    "browser_url_is_allowed_for_snapshot(&snapshot.url, local_origin)",
+  ) ||
+  !browserScreenshot.includes(
+    "use super::browser_policy::browser_url_is_allowed_for_snapshot;",
+  ) ||
+  !browserScreenshot.includes(
+    "browser_url_is_allowed_for_snapshot(url.as_str(), local_origin.as_deref())",
+  )
+) {
+  failures.push("Pi Browser runtime is not wired to its URL policy module.");
+}
+
+for (const marker of [
+  "pub(super) trait BrowserTabAdapter",
+  "pub(super) struct BrowserSessionLifecycle<Entry>",
+  "pub(super) fn open<Adapter>",
+  "pub(super) fn ensure_active_entry<Adapter>",
+  "pub(super) fn select<Adapter>",
+  "pub(super) fn close<Adapter>",
+]) {
+  if (!browserSessionLifecycle.includes(marker)) {
+    failures.push(`Pi Browser session lifecycle module is missing ${marker}.`);
+  }
+}
+if (
+  !browserRuntime.includes(
+    '#[path = "pi_browser_runtime/session_lifecycle.rs"]',
+  ) ||
+  !browserRuntime.includes(
+    "impl BrowserTabAdapter<BrowserEntry> for TauriBrowserTabAdapter",
+  ) ||
+  !browserRuntime.includes("session.open(") ||
+  !browserRuntime.includes("session.select(tab_id") ||
+  !browserRuntime.includes("session.close(tab_id")
+) {
+  failures.push(
+    "Pi Browser runtime is not wired through the shared session lifecycle and Tauri adapter.",
+  );
+}
+
+for (const marker of [
+  "AGENT_PROTOCOL_VERSION",
+  "MAX_FRAME_BYTES",
+  "fn validate_command_session_identity",
+  "fn encode_command",
+  "fn read_frame",
+]) {
+  if (!workerProtocol.includes(marker)) {
+    failures.push(`Pi worker protocol module is missing ${marker}.`);
+  }
+}
+if (
+  !workerRuntime.includes("mod protocol;") ||
+  !workerRuntime.includes("self::protocol") ||
+  !workerRuntime.includes("encode_command") ||
+  !workerRuntime.includes("read_frame")
+) {
+  failures.push("Pi worker supervisor is not wired to its protocol module.");
+}
+for (const marker of [
+  "trait WorkerWorkspace",
+  "impl WorkerWorkspace for PiWorkerRuntime",
+  "SESSION_BOUND_PI_COMMANDS",
+  "fn prepare_session_command",
+  "fn authorize_for_worker",
+  "async fn preflight",
+  "workspace_for_generation",
+  "begin_pi_session_fork",
+  "validate_pi_session_open",
+  "validate_pi_session_import",
+  "validate_pi_session_command",
+  "validate_pi_migration_import",
+]) {
+  if (!workerSessionCommands.includes(marker)) {
+    failures.push(`Pi worker session-command module is missing ${marker}.`);
+  }
+}
+if (
+  !workerRuntime.includes("mod session_commands;") ||
+  !workerRuntime.includes("session_commands::preflight(") ||
+  workerRuntime.includes("SESSION_BOUND_PI_COMMANDS")
+) {
+  failures.push(
+    "Pi worker command handling must delegate Host session preflight to its owner module.",
+  );
+}
+for (const marker of [
+  "MAX_SEEN_EVENT_IDS: usize = 4096",
+  "struct PiWorkerEventAcceptance",
+  "fn accept(&mut self, value: &Value)",
+  "fn validate_event_metadata",
+  "fn is_sequence_violation",
+  "seen_events",
+  "worker_epoch",
+  "last_seq",
+]) {
+  if (!workerEventAcceptance.includes(marker)) {
+    failures.push(`Pi worker event-acceptance module is missing ${marker}.`);
+  }
+}
+if (
+  !workerRuntime.includes("mod event_pipeline;") ||
+  !workerRuntime.includes("event_pipeline::process_stdout_event(") ||
+  !workerEventPipeline.includes(
+    "process_with_port(&port, value, worker_cwd).await",
+  ) ||
+  !workerEventPipeline.includes(
+    "self.runtime.accept_event(self.generation, value)",
+  ) ||
+  !workerEventPipeline.includes("PiEventPersistence::Duplicate")
+) {
+  failures.push(
+    "Pi worker supervisor is not wired to event acceptance and SQLite duplicate arbitration.",
+  );
+}
+for (const marker of [
+  "fn parse_envrc_json",
+  "async fn load_envrc",
+  "ENVRC_MAX_OUTPUT_BYTES",
+  "ENVRC_MAX_VALUE_BYTES",
+  ".envrc",
+]) {
+  if (!workerEnvrc.includes(marker)) {
+    failures.push(`Pi worker envrc module is missing ${marker}.`);
+  }
+}
+if (
+  !workerRuntime.includes("mod envrc;") ||
+  !workerRuntime.includes("self::envrc::load_envrc") ||
+  !workerRuntime.includes("INHERITED_WORKER_ENV).await")
+) {
+  failures.push(
+    "Pi worker supervisor is not wired to its bounded envrc module.",
+  );
+}
+for (const marker of [
+  "INHERITED_WORKER_ENV",
+  "MELODY_PI_WORKER_PATH",
+  "fn worker_executable_names",
+  "fn runtime_target_triples",
+  "fn resolve_worker_binary",
+  "fn configure_worker_command",
+  ".env_clear()",
+]) {
+  if (!workerLaunch.includes(marker)) {
+    failures.push(`Pi worker launch module is missing ${marker}.`);
+  }
+}
+if (
+  !workerRuntime.includes("mod launch;") ||
+  !workerRuntime.includes("launch::resolve_worker_binary(app)") ||
+  !workerRuntime.includes("launch::configure_worker_command(") ||
+  !workerRuntime.includes("launch::INHERITED_WORKER_ENV")
+) {
+  failures.push("Pi worker supervisor is not wired to its launch module.");
 }
 
 if (manifest && workerPackage) {
@@ -451,7 +1503,7 @@ if (manifest && workerPackage) {
   if ((manifest.worker?.tools ?? []).includes("monitor")) {
     if (
       !workerToolGateway.includes('export const PI_MONITOR = "monitor"') ||
-      !toolGateway.includes('pub(crate) const MONITOR: &str = "monitor";') ||
+      !requestPolicy.includes('pub(crate) const MONITOR: &str = "monitor";') ||
       !toolGateway.includes("MONITOR => ")
     ) {
       failures.push("monitor 工具没有在 worker 与 Host 之间同步。");
@@ -461,15 +1513,6 @@ if (manifest && workerPackage) {
   // owns the durable store and the per-session identity snapshot.
   const agentSchedules = manifest.hostBridges?.agentSchedules;
   if (agentSchedules) {
-    for (const tool of agentSchedules.tools ?? []) {
-      const constant = tool.replace(/^scheduler_/, "").toUpperCase();
-      if (
-        !workerToolGateway.includes(`export const PI_SCHEDULER_${constant}`) ||
-        !toolGateway.includes(`pub(crate) const SCHEDULER_${constant}`)
-      ) {
-        failures.push(`${tool} 工具没有在 worker 与 Host 之间同步。`);
-      }
-    }
     const schedulesSource = (() => {
       try {
         return readFileSync(
@@ -483,56 +1526,33 @@ if (manifest && workerPackage) {
         return "";
       }
     })();
-    if (!toolGateway.includes("fn scheduler_tool(")) {
-      failures.push("Host 网关没有调度工具的入口。");
-    }
-    // The model must never be able to choose its own authority: the schedule
-    // identity has to be copied from the live session binding.
-    if (!schedulesSource.includes("agent_session_bindings")) {
-      failures.push(
-        "Host 调度器没有从会话绑定继承身份（模型不能自行放宽权限）。",
-      );
-    }
-    if (!schedulesSource.includes("MAX_SCHEDULE_INTERVAL_MS")) {
-      failures.push("Host 调度器没有实现间隔上限。");
-    }
-    // Both directions of the tool contract: every advertised argument must be
-    // read by the Host, and the worker must not advertise a field the Host
-    // silently ignores (the model would ask for it and get something else).
-    const schemaFor = {
-      scheduler_create: "schedulerCreateParameters",
-      scheduler_list: "schedulerListParameters",
-      scheduler_delete: "schedulerDeleteParameters",
-    };
-    // The gateway is a large Rust file; scope the read check to the dispatcher.
-    const dispatcherStart = toolGateway.indexOf("fn scheduler_tool(");
-    const dispatcherEnd = toolGateway.indexOf("\nfn ", dispatcherStart + 1);
-    const dispatcher = toolGateway.slice(
-      dispatcherStart,
-      dispatcherEnd > 0 ? dispatcherEnd : toolGateway.length,
-    );
-    for (const [tool, fields] of Object.entries(
-      agentSchedules.toolFields ?? {},
-    )) {
-      const schemaName = schemaFor[tool];
-      const declared = schemaTopLevelKeys(workerToolGateway, schemaName);
-      if (declared === undefined) {
-        failures.push(`worker 缺少 ${schemaName} 或无法解析。`);
-        continue;
-      }
-      const advertised = [...declared].sort().join();
-      const honored = [...fields].sort().join();
-      if (advertised !== honored) {
-        failures.push(
-          `${tool} 的参数与清单不一致：worker 声明 [${advertised}]，清单 [${honored}]。`,
+    const schedulePolicySource = (() => {
+      try {
+        return readFileSync(
+          resolve(root, "src-tauri/src/database_agent_schedules/policy.rs"),
+          "utf8",
         );
+      } catch (error) {
+        failures.push(
+          `src-tauri/src/database_agent_schedules/policy.rs: ${error.message}`,
+        );
+        return "";
       }
-      for (const field of fields) {
-        if (!dispatcher.includes(`.get("${field}")`)) {
-          failures.push(`${tool} 的参数 ${field} 没有被 Host 读取。`);
-        }
-      }
-    }
+    })();
+    failures.push(
+      ...checkPiAgentScheduleCompatibility({
+        contract: agentSchedules,
+        sources: {
+          workerToolNames,
+          workerToolSchemas,
+          hostRequestPolicy: requestPolicy,
+          hostToolGateway: toolGateway,
+          schedulerTools,
+          schedulesStore: schedulesSource,
+          schedulePolicy: schedulePolicySource,
+        },
+      }),
+    );
   }
 
   for (const mode of manifest.worker?.sessionModes ?? []) {
@@ -555,330 +1575,81 @@ if (manifest && workerPackage) {
 
   const modelPolicySnapshot = manifest.hostBridges?.modelPolicySnapshot;
   if (modelPolicySnapshot) {
-    if (
-      !adapter.includes(
-        `const PI_MODEL_POLICIES_PATH_ENV = "${modelPolicySnapshot.environmentVariable}"`,
-      )
-    ) {
-      failures.push("worker 模型策略环境变量没有同步兼容清单。");
+    let hostModelConfig = "";
+    let hostModelProjection = "";
+    let hostModelPolicy = "";
+    try {
+      hostModelConfig = readFileSync(
+        resolve(root, "src-tauri/src/pi_model_config.rs"),
+        "utf8",
+      );
+    } catch (error) {
+      failures.push(`src-tauri/src/pi_model_config.rs: ${error.message}`);
     }
-    if (
-      modelPolicySnapshot.thresholdEnvironmentVariable &&
-      !adapter.includes(
-        `const PI_AUTO_COMPACT_THRESHOLD_ENV = "${modelPolicySnapshot.thresholdEnvironmentVariable}"`,
-      )
-    ) {
-      failures.push("worker 自动压缩阈值环境变量没有同步兼容清单。");
+    try {
+      hostModelProjection = readFileSync(
+        resolve(root, "src-tauri/src/pi_model_config/model_projection.rs"),
+        "utf8",
+      );
+    } catch (error) {
+      failures.push(
+        `src-tauri/src/pi_model_config/model_projection.rs: ${error.message}`,
+      );
     }
-    const numericConstant = (name) => {
-      const match = adapter.match(new RegExp(`const ${name} = ([^;]+);`, "u"));
-      if (!match) return undefined;
-      const terms = match[1]
-        .split("*")
-        .map((term) => Number(term.trim().replaceAll("_", "")));
-      return terms.every(Number.isSafeInteger)
-        ? terms.reduce((total, term) => total * term, 1)
-        : undefined;
-    };
-    for (const [name, expected, label] of [
-      [
-        "MAX_PI_POLICY_FILE_BYTES",
-        modelPolicySnapshot.maxBytes,
-        "模型策略文件上限",
-      ],
-      [
-        "MAX_PI_MODEL_POLICIES",
-        modelPolicySnapshot.maxModels,
-        "模型策略数量上限",
-      ],
-      ["MAX_PI_POLICY_RETRIES", modelPolicySnapshot.maxRetries, "模型重试上限"],
-      [
-        "MAX_PI_COMPACTION_THRESHOLD_PERCENT",
-        modelPolicySnapshot.maxAutoCompactThresholdPercent,
-        "模型自动压缩阈值上限",
-      ],
-    ]) {
-      if (numericConstant(name) !== expected) {
-        failures.push(`worker ${label}没有同步兼容清单。`);
-      }
+    try {
+      hostModelPolicy = readFileSync(
+        resolve(root, "src-tauri/src/pi_model_config/model_policy.rs"),
+        "utf8",
+      );
+    } catch (error) {
+      failures.push(
+        `src-tauri/src/pi_model_config/model_policy.rs: ${error.message}`,
+      );
     }
-    const timeoutLimit = modelPolicySnapshot.maxIdleTimeoutMs;
-    const workerTimeoutLimit = numericConstant("MAX_PI_POLICY_TIMEOUT_MS");
-    if (
-      !Number.isSafeInteger(timeoutLimit) ||
-      workerTimeoutLimit === undefined ||
-      !Number.isSafeInteger(workerTimeoutLimit) ||
-      workerTimeoutLimit < timeoutLimit
-    ) {
-      failures.push("worker 模型空闲超时上限没有同步兼容清单。");
-    }
-  }
-
-  const promptTemplates = manifest.hostBridges?.promptTemplates;
-  if (promptTemplates) {
-    if (
-      !adapter.includes(
-        `const PI_PROMPT_PATHS_ENV = "${promptTemplates.environmentVariable}"`,
-      )
-    ) {
-      failures.push("worker prompt template 环境变量没有同步兼容清单。");
-    }
-    if (
-      promptTemplates.rootsEnvironmentVariable &&
-      !adapter.includes(
-        `const PI_PROMPT_ROOTS_ENV = "${promptTemplates.rootsEnvironmentVariable}"`,
-      )
-    ) {
-      failures.push("worker prompt template 根目录环境变量没有同步兼容清单。");
-    }
-    const numericConstant = (name) => {
-      const match = adapter.match(new RegExp(`const ${name} = ([^;]+);`, "u"));
-      if (!match) return undefined;
-      const terms = match[1]
-        .split("*")
-        .map((term) => Number(term.trim().replaceAll("_", "")));
-      return terms.every(Number.isSafeInteger)
-        ? terms.reduce((total, term) => total * term, 1)
-        : undefined;
-    };
-    for (const [name, expected, label] of [
-      [
-        "MAX_PI_PROMPT_PATHS",
-        promptTemplates.maxPaths,
-        "prompt template 数量上限",
-      ],
-      [
-        "MAX_PI_PROMPT_FILE_BYTES",
-        promptTemplates.maxFileBytes,
-        "prompt template 单文件上限",
-      ],
-      [
-        "MAX_PI_PROMPT_TOTAL_BYTES",
-        promptTemplates.maxTotalBytes,
-        "prompt template 总量上限",
-      ],
-    ]) {
-      if (numericConstant(name) !== expected) {
-        failures.push(`worker ${label}没有同步兼容清单。`);
-      }
-    }
-    if (
-      promptTemplates.flatCommandsOnly &&
-      !adapter.includes("isDirectChild")
-    ) {
-      failures.push("worker prompt template 没有保持平面 commands 目录边界。");
-    }
-  }
-
-  const skillPaths = manifest.hostBridges?.skillPaths;
-  if (skillPaths) {
-    if (
-      !adapter.includes(
-        `const PI_SKILL_PATHS_ENV = "${skillPaths.environmentVariable}"`,
-      )
-    ) {
-      failures.push("worker Skill 路径环境变量没有同步兼容清单。");
-    }
-    if (
-      skillPaths.rootsEnvironmentVariable &&
-      !adapter.includes(
-        `const PI_SKILL_ROOTS_ENV = "${skillPaths.rootsEnvironmentVariable}"`,
-      )
-    ) {
-      failures.push("worker Skill 根目录环境变量没有同步兼容清单。");
-    }
-    const numericConstant = (name) => {
-      const match = adapter.match(new RegExp(`const ${name} = ([^;]+);`, "u"));
-      if (!match) return undefined;
-      const terms = match[1]
-        .split("*")
-        .map((term) => Number(term.trim().replaceAll("_", "")));
-      return terms.every(Number.isSafeInteger)
-        ? terms.reduce((total, term) => total * term, 1)
-        : undefined;
-    };
-    for (const [name, expected, label] of [
-      ["MAX_PI_SKILL_PATHS", skillPaths.maxPaths, "Skill 路径数量上限"],
-      ["MAX_PI_SKILL_DEPTH", skillPaths.maxDepth, "Skill 路径深度上限"],
-      ["MAX_PI_SKILL_FILE_BYTES", skillPaths.maxFileBytes, "Skill 单文件上限"],
-      ["MAX_PI_SKILL_TOTAL_BYTES", skillPaths.maxTotalBytes, "Skill 总量上限"],
-    ]) {
-      if (numericConstant(name) !== expected) {
-        failures.push(`worker ${label}没有同步兼容清单。`);
-      }
-    }
-    if (
-      skillPaths.externalMarkdownOnly &&
-      (!adapter.includes("isWithinRoot") || !adapter.includes("realpathSync"))
-    ) {
-      failures.push("worker Skill 没有保持外部 Markdown 根目录边界。");
-    }
-    if (skillPaths.pluginStaticResources) {
-      if (
-        !adapter.includes("discoverPluginRoots") ||
-        !adapter.includes("isPluginRoot") ||
-        !configExtensions.includes("pi_plugin_resources")
-      ) {
-        failures.push(
-          "静态插件 Skill/命令没有接入 Host 与 worker 的受控投影。",
-        );
-      }
-      for (const [name, expected, label] of [
-        [
-          "MAX_PI_PLUGIN_ROOTS",
-          skillPaths.maxPluginRoots,
-          "插件根目录数量上限",
-        ],
-        [
-          "MAX_PI_PLUGIN_SCAN_DEPTH",
-          skillPaths.maxPluginScanDepth,
-          "插件扫描深度上限",
-        ],
-        [
-          "MAX_PI_PLUGIN_SCAN_ENTRIES",
-          skillPaths.maxPluginScanEntries,
-          "插件扫描条目上限",
-        ],
-      ]) {
-        const rustMatch = configExtensions.match(
-          new RegExp(
-            `(?:const|pub\\(crate\\) const) ${name}[^=]*=\\s*([^;]+);`,
-            "u",
-          ),
-        );
-        const actual = rustMatch
-          ? rustMatch[1]
-              .split("*")
-              .map((term) => Number(term.replaceAll("_", "").trim()))
-              .reduce((total, term) => total * term, 1)
-          : undefined;
-        if (actual !== expected) {
-          failures.push(`Host ${label}没有同步兼容清单。`);
-        }
-      }
-      const activation = skillPaths.pluginActivation;
-      if (
-        activation?.explicitEnablement &&
-        !(
-          configExtensions.includes("if listed(&self.disabled)") &&
-          configExtensions.includes("listed(&self.enabled)")
-        )
-      ) {
-        failures.push(
-          "Host 插件启用判定没有保持 Melody 的“显式启用且未禁用”语义。",
-        );
-      }
-      if (activation?.configuredPaths) {
-        if (
-          !configExtensions.includes(
-            'merged_config_array(cwd, "plugins", "paths")',
-          )
-        ) {
-          failures.push("Host 没有扫描 [plugins].paths。");
-        }
-        const bound = configExtensions.match(
-          /const MAX_PI_PLUGIN_PATH_ENTRIES: usize = (\d+);/u,
-        );
-        if (
-          !bound ||
-          Number(bound[1]) !== activation.configuredPaths.maxEntries
-        ) {
-          failures.push("[plugins].paths 数量上限没有同步兼容清单。");
-        }
-        if (!configExtensions.includes('scope == "config"')) {
-          failures.push("Host 没有按配置来源自动启用 [plugins].paths 插件。");
-        }
-      }
-      if (
-        Array.isArray(activation?.nameConflictPrecedence) &&
-        !configExtensions.includes("fn scope_rank")
-      ) {
-        failures.push("Host 没有按 name 优先级解决插件重名。");
-      }
-      // A plugin is only Markdown-only once its declarative surfaces no longer
-      // count as dynamic; the skill/command/agent roots have to stay wired.
-      if (
-        skillPaths.pluginStaticResources &&
-        (!configExtensions.includes("agent_roots") ||
-          !configPluginDetails.includes('"agents"'))
-      ) {
-        failures.push("Host 插件声明式 agent 根目录没有接入投影。");
-      }
-      const skillIgnore = skillPaths.skillIgnore;
-      if (skillIgnore) {
-        if (
-          !configExtensions.includes("fn pi_skill_ignore_paths") ||
-          !configExtensions.includes("ignorePaths") ||
-          !adapter.includes("ignorePaths")
-        ) {
-          failures.push("[skills].ignore 没有在 Host 与 worker 之间同步。");
-        }
-        const hostBound = configExtensions.match(
-          /const MAX_PI_SKILL_IGNORE_PATHS: usize = (\d+);/u,
-        );
-        if (!hostBound || Number(hostBound[1]) !== skillIgnore.maxPaths) {
-          failures.push("Host [skills].ignore 数量上限没有同步兼容清单。");
-        }
-        const workerBound = adapter.match(
-          /const MAX_PI_SKILL_IGNORE_PATHS = (\d+);/u,
-        );
-        if (!workerBound || Number(workerBound[1]) !== skillIgnore.maxPaths) {
-          failures.push("worker [skills].ignore 数量上限没有同步兼容清单。");
-        }
-        const byteBound = configExtensions.match(
-          /const MAX_PI_SKILL_IGNORE_BYTES: usize = (\d+);/u,
-        );
-        if (
-          !byteBound ||
-          Number(byteBound[1]) !== skillIgnore.maxBytesPerPath
-        ) {
-          failures.push("Host [skills].ignore 单条长度上限没有同步兼容清单。");
-        }
-        if (!adapter.includes("isIgnoredPath")) {
-          failures.push("worker 没有按前缀过滤被忽略的 Skill。");
-        }
-      }
-    }
-  }
-
-  const subagentPolicy = manifest.hostBridges?.subagentPolicy;
-  if (subagentPolicy?.mcpToolGrants) {
-    const grants = subagentPolicy.mcpToolGrants;
-    if (
-      !configSubagents.includes("fn valid_mcp_tool_name") ||
-      !configSubagents.includes("mcpTools") ||
-      !adapter.includes("mcpTools") ||
-      !workerPolicy.includes("mcpTools")
-    ) {
-      failures.push("MCP 工具授权没有在 Host 与 worker 之间同步。");
-    }
-    const hostBound = configSubagents.match(
-      /const MAX_MCP_TOOL_GRANTS: usize = (\d+);/u,
+    failures.push(
+      ...checkPiModelPolicyCompatibility({
+        contract: modelPolicySnapshot,
+        sources: {
+          workerModelPolicy: modelPolicy,
+          hostModelConfig,
+          hostModelProjection,
+          hostModelPolicy,
+          workerLaunch,
+        },
+      }),
     );
-    if (!hostBound || Number(hostBound[1]) !== grants.maxTools) {
-      failures.push("Host MCP 授权数量上限没有同步兼容清单。");
-    }
-    const workerBound = workerPolicy.match(/const MAX_MCP_TOOLS = (\d+);/u);
-    if (!workerBound || Number(workerBound[1]) !== grants.maxTools) {
-      failures.push("worker MCP 授权数量上限没有同步兼容清单。");
-    }
-    if (!workerToolGateway.includes("mcp__${server}__${tool}")) {
-      failures.push("worker 没有按 mcp__<server>__<tool> 校验 MCP 授权。");
-    }
   }
-  if (subagentPolicy?.toolAllowlistMapping) {
-    if (!configSubagents.includes("fn apply_agent_tool_ceiling")) {
-      failures.push("Host 没有把工具白名单换算为 Pi 能力档。");
-    }
-    for (const mode of ["read-write-execute"]) {
-      if (
-        !configSubagents.includes(`"${mode}"`) ||
-        !workerToolGateway.includes(`"${mode}"`)
-      ) {
-        failures.push(`Host/worker 能力档 ${mode} 没有同步。`);
-      }
-    }
-  }
+
+  failures.push(
+    ...checkPiResourceCompatibility({
+      promptTemplates: manifest.hostBridges?.promptTemplates,
+      skillPaths: manifest.hostBridges?.skillPaths,
+      sources: {
+        workerResourceRoots: resourceDiscovery,
+        workerSkillDiscovery: skillDiscovery,
+        workerPromptDiscovery: promptDiscovery,
+        hostExtensions: configExtensions,
+        hostPiResources: configPiResources,
+        hostPromptResources: configPromptResources,
+        hostPluginCatalog: configPluginCatalog,
+        hostPluginDetails: configPluginDetails,
+      },
+    }),
+  );
+
+  failures.push(
+    ...checkPiSubagentPolicyCompatibility({
+      policy: manifest.hostBridges?.subagentPolicy,
+      sources: {
+        hostSubagentParser: subagentMarkdown,
+        hostSubagentConfig: configSubagents,
+        workerSessionAdapter: adapter + "\n" + subagentRuntime,
+        workerPolicy: `${workerPolicyNormalization}\n${workerPolicy}`,
+        workerToolGateway,
+        workerToolAccessPolicy,
+      },
+    }),
+  );
 
   const sandbox = manifest.hostBridges?.sandbox;
   if (sandbox) {
@@ -893,6 +1664,32 @@ if (manifest && workerPackage) {
         return "";
       }
     })();
+    const profileOwnerSource = (() => {
+      try {
+        return readFileSync(
+          resolve(root, "src-tauri/src/workspace_sandbox/profile.rs"),
+          "utf8",
+        );
+      } catch (error) {
+        failures.push(
+          `src-tauri/src/workspace_sandbox/profile.rs: ${error.message}`,
+        );
+        return "";
+      }
+    })();
+    const seatbeltOwnerSource = (() => {
+      try {
+        return readFileSync(
+          resolve(root, "src-tauri/src/workspace_sandbox/seatbelt.rs"),
+          "utf8",
+        );
+      } catch (error) {
+        failures.push(
+          `src-tauri/src/workspace_sandbox/seatbelt.rs: ${error.message}`,
+        );
+        return "";
+      }
+    })();
     const libSource = (() => {
       try {
         return readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
@@ -901,19 +1698,31 @@ if (manifest && workerPackage) {
         return "";
       }
     })();
-    // Match the enforced branch, not the availability probe: a check that
-    // passes on the `exists()` line would not notice a broken wrapper.
+    // Follow the real platform owner through the Host decision seam so a
+    // stale parent-level marker cannot pass after the wrapper moves.
     if (
-      !sandboxSource.includes('program: PathBuf::from("/usr/bin/sandbox-exec")')
+      !sandboxSource.includes("mod seatbelt;") ||
+      !sandboxSource.includes("seatbelt::command(&profile)") ||
+      !seatbeltOwnerSource.includes(
+        'const EXECUTOR: &str = "/usr/bin/sandbox-exec"',
+      ) ||
+      !seatbeltOwnerSource.includes("Path::new(EXECUTOR).exists()") ||
+      !seatbeltOwnerSource.includes("program: PathBuf::from(EXECUTOR)") ||
+      !seatbeltOwnerSource.includes("profile_rules(profile)")
     ) {
-      failures.push("Host 终端沙箱没有接入 macOS Seatbelt 包装。");
-    }
-    if (!sandboxSource.includes("canonical(")) {
       failures.push(
-        "Host 终端沙箱没有 canonicalize 路径（Seatbelt 按解析后路径匹配）。",
+        "Host 终端沙箱没有通过 Seatbelt owner 构造并 fail-close macOS 命令。",
       );
     }
-    if (!sandboxSource.includes('"read-only" | "readonly" | "strict"')) {
+    if (
+      !sandboxSource.includes("resolve_profile(workspace, requested)") ||
+      !profileOwnerSource.includes("fn canonical(")
+    ) {
+      failures.push(
+        "Host 终端沙箱必须通过 profile owner 解析，并在那里 canonicalize 路径。",
+      );
+    }
+    if (!profileOwnerSource.includes('"read-only" | "readonly" | "strict"')) {
       failures.push("Host 终端沙箱没有把网络受限 profile 判为不可执行。");
     }
     if (
@@ -940,41 +1749,16 @@ if (manifest && workerPackage) {
         return "";
       }
     })();
-    if (!compactionSource.includes('pi.on("session_before_compact"')) {
-      failures.push(
-        "worker 压缩扩展没有挂在 Pi 的 session_before_compact 上。",
-      );
-    }
-    if (
-      !compactionSource.includes("compact(") ||
-      !compactionSource.includes("memoryFlushPrompt")
-    ) {
-      failures.push("worker 压缩扩展丢失了两遍式压缩的某一遍。");
-    }
-    for (const entry of compaction.taskDigest?.sources ?? []) {
-      // The digest reads tracker state through the same reconstruct helpers the
-      // tools use, so the check follows the import to the owning extension.
-      const owner = entry.replace(/^melody\./, "").replace(/_state$/, "");
-      if (
-        !compactionSource.includes(`from "./${owner}-extension.ts"`) ||
-        !compactionSource.includes(
-          `reconstruct${owner[0].toUpperCase()}${owner.slice(1)}State`,
-        )
-      ) {
-        failures.push(`worker 压缩摘要没有读取 ${entry}。`);
-      }
-    }
-    // Fail-open is the contract: a broken flush must never strand a session.
-    if (!compactionSource.includes("compactTaskStateOnly")) {
-      failures.push("worker 压缩扩展缺少失败兜底路径。");
-    }
+    failures.push(
+      ...checkPiCompactionCompatibility(compaction, compactionSource),
+    );
   }
 
   const gitignorePolicy = manifest.hostBridges?.gitignorePolicy;
   if (gitignorePolicy) {
     const environmentVariable = gitignorePolicy.environmentVariable;
     if (
-      !adapter.includes(
+      !resourcePolicy.includes(
         `const PI_RESPECT_GITIGNORE_ENV = "${environmentVariable}"`,
       )
     ) {
@@ -989,7 +1773,7 @@ if (manifest && workerPackage) {
     if (
       gitignorePolicy.implementation === "host-tool-gateway" &&
       (!toolGateway.includes("resolve_request_with_policy") ||
-        !toolGateway.includes("gitignore_walk_builder"))
+        !workspaceTools.includes("gitignore_walk_builder"))
     ) {
       failures.push("Host ToolGateway 没有实现清单声明的 .gitignore 策略。");
     }
@@ -1008,119 +1792,50 @@ if (manifest && workerPackage) {
     }
   }
 
-  const terminalPolicy = manifest.hostBridges?.terminalPolicy;
-  if (terminalPolicy) {
-    if (
-      terminalPolicy.implementation === "host-tool-gateway" &&
-      (!toolGateway.includes("resolve_request_with_host_policy") ||
-        !toolGateway.includes("run_terminal_with_policy") ||
-        !toolGateway.includes("PiTerminalPolicy"))
-    ) {
-      failures.push("Host ToolGateway 没有实现清单声明的终端策略。");
-    }
-    if (!configExtensions.includes("pi_terminal_policy")) {
-      failures.push("Host 配置层没有实现清单声明的终端策略解析。");
-    }
-    for (const variable of terminalPolicy.environmentVariables ?? []) {
-      if (!configExtensions.includes(variable)) {
-        failures.push(`终端策略环境变量没有同步：${variable}。`);
-      }
-    }
-    const terminalTimeoutMatch = workerToolGateway.match(
-      /PI_TERMINAL_MAX_TIMEOUT_MS\s*=\s*([^;]+)/u,
-    );
-    const terminalTimeoutValue = terminalTimeoutMatch
-      ? Number(terminalTimeoutMatch[1].replaceAll("_", "").trim())
-      : undefined;
-    if (terminalTimeoutValue !== Number(terminalPolicy.maxTimeoutMs)) {
-      failures.push("worker 终端超时上限没有同步兼容清单。");
-    }
-    if (Number(terminalPolicy.maxOutputBytes) !== 8 * 1024 * 1024) {
-      failures.push("终端输出预览上限没有同步兼容清单。");
-    }
-    for (const path of terminalPolicy.configPaths ?? []) {
-      const key = path.split(".").at(-1);
-      if (key && !configExtensions.includes(`\"${key}\"`)) {
-        failures.push(`终端策略配置项没有同步：${path}。`);
-      }
-    }
-  }
+  failures.push(
+    ...checkPiTerminalCompatibility({
+      terminalPolicy: manifest.hostBridges?.terminalPolicy,
+      backgroundTerminalTasks: manifest.hostBridges?.backgroundTerminalTasks,
+      sources: {
+        hostToolGateway: toolGateway,
+        hostConfig: configPiPolicy,
+        hostTerminalTasks: terminalTasks,
+        hostToolOutputArchive: toolOutputArchive,
+        workerToolSchemas,
+        workerToolNames,
+        workerRuntime,
+      },
+    }),
+  );
 
-  const questionTimeoutPolicy = manifest.hostBridges?.questionTimeoutPolicy;
-  if (questionTimeoutPolicy) {
-    if (
-      questionTimeoutPolicy.implementation === "worker-gateway" &&
-      (!workerToolGateway.includes("interactionTimeoutMsFor") ||
-        !workerToolGateway.includes("questionTimeoutPolicy()"))
-    ) {
-      failures.push("worker ToolGateway 没有实现清单声明的提问等待策略。");
-    }
-    if (
-      questionTimeoutPolicy.manifestField &&
-      (!adapter.includes(questionTimeoutPolicy.manifestField) ||
-        !adapter.includes(
-          "this.questionTimeoutPolicy = normalizedManifest.questionTimeoutPolicy",
-        ))
-    ) {
-      failures.push("worker 提问等待策略清单字段没有同步。");
-    }
-    if (
-      !adapter.includes(
-        `const PI_QUESTION_TIMEOUT_POLICY_ENV = "${questionTimeoutPolicy.environmentVariable}"`,
-      )
-    ) {
-      failures.push("worker 提问等待策略环境变量没有同步兼容清单。");
-    }
-    if (!configExtensions.includes("pi_question_timeout_policy")) {
-      failures.push("Host 配置层没有实现清单声明的提问等待策略解析。");
-    }
-    if (!workerRuntime.includes(questionTimeoutPolicy.environmentVariable)) {
-      failures.push("Host worker 启动链路没有传递提问等待策略环境变量。");
-    }
-    const maxTimeoutMatch = workerToolGateway.match(
-      /PI_QUESTION_TIMEOUT_MAX_MS\s*=\s*([^;]+)/u,
-    );
-    const maxTimeoutValue = maxTimeoutMatch
-      ? Number(maxTimeoutMatch[1].replaceAll("_", "").trim())
-      : undefined;
-    if (maxTimeoutValue !== Number(questionTimeoutPolicy.maxTimeoutMs)) {
-      failures.push("worker 提问等待超时上限没有同步兼容清单。");
-    }
-  }
+  failures.push(
+    ...checkPiQuestionTimeoutCompatibility({
+      policy: manifest.hostBridges?.questionTimeoutPolicy,
+      sources: {
+        hostConfig: configPiPolicy,
+        hostConfigExtensions: configExtensionsWiring,
+        hostResourceManifest: configRuntime,
+        hostWorkerLaunch: workerLaunch,
+        workerToolGateway,
+        workerSessionAdapter: adapter,
+        workerResourceRefresh: sessionResourceRefresh,
+        workerResourcePolicy: resourcePolicy,
+      },
+    }),
+  );
 
   const webTools = manifest.hostBridges?.webTools;
   if (webTools) {
-    for (const tool of webTools.tools ?? []) {
-      if (!workerToolGateway.includes(`"${tool}"`)) {
-        failures.push(`Host web 工具桥接缺少工具 ${tool}。`);
-      }
-    }
-    if (
-      webTools.implementation === "host-tool-gateway" &&
-      (!workerToolGateway.includes("webSearchParameters") ||
-        !workerToolGateway.includes("webFetchParameters") ||
-        !toolGateway.includes("WEB_SEARCH") ||
-        !toolGateway.includes("WEB_FETCH"))
-    ) {
-      failures.push("Pi web 工具没有实现清单声明的 Host bridge。 ");
-    }
-    const webRuntimePath = resolve(root, "src-tauri/src/pi_web_runtime.rs");
-    let webRuntime = "";
-    try {
-      webRuntime = readFileSync(webRuntimePath, "utf8");
-    } catch (error) {
-      failures.push(`src-tauri/src/pi_web_runtime.rs: ${error.message}`);
-    }
-    for (const marker of [
-      "resolve_request",
-      "read_bounded_body",
-      "public_https_url",
-      "format_search_output",
-    ]) {
-      if (!webRuntime.includes(marker)) {
-        failures.push(`Host web bridge 缺少安全边界实现 ${marker}。`);
-      }
-    }
+    failures.push(
+      ...checkPiWebToolsCompatibility({
+        policy: webTools,
+        sources: {
+          workerToolGateway,
+          hostToolGateway: toolGateway,
+          hostWebRuntime: webRuntime,
+        },
+      }),
+    );
   }
 
   const envrcProjection = manifest.hostBridges?.envrcProjection;
@@ -1134,9 +1849,15 @@ if (manifest && workerPackage) {
       "env_clear",
       "direnv",
     ]) {
-      if (!workerRuntime.includes(marker)) {
+      if (!workerEnvrc.includes(marker)) {
         failures.push(`Host .envrc 投影缺少边界实现 ${marker}。`);
       }
+    }
+    if (
+      !workerRuntime.includes("mod envrc;") ||
+      !workerRuntime.includes("load_envrc(&cwd, launch::INHERITED_WORKER_ENV)")
+    ) {
+      failures.push("Host worker 启动链路没有接入受限 .envrc loader。");
     }
     if (
       envrcProjection.environmentVariable &&
@@ -1149,23 +1870,50 @@ if (manifest && workerPackage) {
   const remoteModelCatalog = manifest.hostBridges?.remoteModelCatalog;
   if (remoteModelCatalog) {
     const modelConfigPath = resolve(root, "src-tauri/src/pi_model_config.rs");
+    const remoteCatalogPath = resolve(
+      root,
+      "src-tauri/src/pi_remote_model_catalog.rs",
+    );
     let modelConfig = "";
+    let remoteCatalog = "";
     try {
       modelConfig = readFileSync(modelConfigPath, "utf8");
     } catch (error) {
       failures.push(`src-tauri/src/pi_model_config.rs: ${error.message}`);
     }
+    try {
+      remoteCatalog = readFileSync(remoteCatalogPath, "utf8");
+    } catch (error) {
+      failures.push(
+        `src-tauri/src/pi_remote_model_catalog.rs: ${error.message}`,
+      );
+    }
     for (const marker of [
       "prepare_pi_models_with_remote",
+      "remote_model_catalog::resolve_remote_catalog",
+    ]) {
+      if (!modelConfig.includes(marker)) {
+        failures.push(`Host model projection is not wired through ${marker}.`);
+      }
+    }
+    for (const marker of [
       "fetch_remote_catalog",
       "load_remote_catalog_cache",
       "GENERATED_REMOTE_CATALOG_FILE",
       "models_list_url",
       "models_base_url",
     ]) {
-      if (!modelConfig.includes(marker)) {
-        failures.push(`Host 远程模型目录桥接缺少实现 ${marker}。`);
+      if (!remoteCatalog.includes(marker)) {
+        failures.push(`Host 远程模型目录 owner 缺少实现 ${marker}。`);
       }
+    }
+    if (
+      !modelConfig.includes("mod remote_model_catalog;") ||
+      !remoteCatalog.includes("resolve_remote_catalog")
+    ) {
+      failures.push(
+        "Host model projection has no remote model catalog owner or wiring.",
+      );
     }
     if (!workerRuntime.includes("prepare_pi_models_with_remote")) {
       failures.push("Host worker 启动链路没有接入远程模型目录投影。 ");
@@ -1173,6 +1921,7 @@ if (manifest && workerPackage) {
     for (const variable of remoteModelCatalog.environmentVariables ?? []) {
       if (
         !modelConfig.includes(variable) &&
+        !remoteCatalog.includes(variable) &&
         !configExtensions.includes(variable)
       ) {
         failures.push(`远程模型目录环境变量没有同步：${variable}。`);
@@ -1182,104 +1931,58 @@ if (manifest && workerPackage) {
 
   const memoryTools = manifest.hostBridges?.memoryTools;
   if (memoryTools) {
-    for (const tool of memoryTools.tools ?? []) {
-      if (!workerToolGateway.includes(`"${tool}"`)) {
-        failures.push(`Host memory 工具桥接缺少工具 ${tool}。`);
-      }
-    }
-    if (
-      memoryTools.implementation === "host-memory-gateway" &&
-      (!workerToolGateway.includes("memorySearchParameters") ||
-        !workerToolGateway.includes("memoryGetParameters") ||
-        !workerToolGateway.includes("memoryRememberParameters") ||
-        !toolGateway.includes("MEMORY_SEARCH") ||
-        !toolGateway.includes("MEMORY_GET") ||
-        !toolGateway.includes("MEMORY_REMEMBER"))
-    ) {
-      failures.push("Pi memory 工具没有实现清单声明的 Host bridge。 ");
-    }
-    for (const marker of [
-      "resolve_request",
-      "rank_chunks",
-      "initial_injection",
-      "save_session_transcript",
-      "memory_remember",
-      "TextFileStore",
-    ]) {
-      if (!memoryRuntime.includes(marker)) {
-        failures.push(`Host memory bridge 缺少实现 ${marker}。`);
-      }
-    }
-    const persistentIndex = memoryTools.persistentIndex;
-    if (persistentIndex?.implementation === "host-sqlite-lexical") {
-      for (const marker of [
-        "MemoryIndexSummary",
-        "MEMORY_INDEX_SCHEMA_VERSION",
-        "sync_memory_index_path",
-        "memory_index_digest",
-        "pi_memory_chunks",
-        "rebuild_memory_index",
-      ]) {
-        if (!memoryRuntime.includes(marker)) {
-          failures.push(`Host memory lexical index 缺少实现 ${marker}。`);
-        }
-      }
-      if (!configRuntime.includes("rebuild_melody_memory_index")) {
-        failures.push("Host memory lexical index 缺少显式重建命令。");
-      }
-      if (!memoryRuntime.includes("index.sqlite")) {
-        failures.push("Host memory lexical index 没有绑定 index.sqlite 侧车。");
-      }
-    }
-    for (const marker of [
-      "maybe_inject_memory",
-      "observe_memory_event",
-      "flush_memory_transcripts",
-    ]) {
-      if (!workerRuntime.includes(marker)) {
-        failures.push(`Host worker memory 生命周期缺少实现 ${marker}。`);
-      }
-    }
+    failures.push(
+      ...checkPiMemoryToolsCompatibility({
+        policy: memoryTools,
+        sources: {
+          workerToolGateway,
+          hostToolGateway: toolGateway,
+          hostMemoryRuntime: memoryRuntime,
+          hostMemoryStore: memoryStoreRuntime,
+          hostMemorySearchIndex: memoryStoreSearchIndex,
+          hostConfigRuntime: configRuntime,
+          hostWorkerRuntime: workerRuntime,
+          workerMemoryLifecycle,
+        },
+      }),
+    );
   }
 
   const goalSafety = manifest.hostBridges?.goalSafety;
   if (goalSafety) {
     if (
       goalSafety.implementation === "host-manifest-pi-extension" &&
-      (!goalExtension.includes("enforceGoalGuards") ||
-        !goalExtension.includes("startGoalState") ||
+      (!goalGuards.includes("enforceGoalGuards") ||
+        !goalState.includes("startGoalState") ||
+        !goalExtension.includes("createGoalExtension") ||
         !configExtensions.includes("pi_goal_policy"))
     ) {
       failures.push("Pi goal safety 没有实现清单声明的 Host/Pi bridge。");
     }
     if (
       goalSafety.manifestField &&
-      (!adapter.includes(goalSafety.manifestField) ||
-        !adapter.includes("this.goalPolicy = normalizedManifest.goalPolicy"))
+      (!resourcePolicy.includes(`manifest.${goalSafety.manifestField}`) ||
+        !sessionResourceRefresh.includes(
+          "normalizePiResourcePolicySnapshot(",
+        ) ||
+        !sessionResourceRefresh.includes(
+          "applyPolicySnapshot(normalizedManifest)",
+        ) ||
+        !adapter.includes(
+          `this.goalPolicy = snapshot.${goalSafety.manifestField}`,
+        ))
     ) {
       failures.push("Pi goal safety 清单字段没有同步到资源刷新链路。");
     }
     if (
       goalSafety.environmentVariable &&
-      (!adapter.includes(
+      (!resourcePolicy.includes(
         `const PI_GOAL_POLICY_ENV = "${goalSafety.environmentVariable}"`,
       ) ||
-        !workerRuntime.includes(goalSafety.environmentVariable))
+        !workerLaunch.includes(goalSafety.environmentVariable))
     ) {
       failures.push("Pi goal safety 环境变量没有同步到 worker 启动链路。");
     }
-    const numericConstant = (name) => {
-      const match = goalExtension.match(
-        new RegExp(`const ${name} = ([^;]+);`, "u"),
-      );
-      if (!match) return undefined;
-      const terms = match[1]
-        .split("*")
-        .map((term) => Number(term.trim().replaceAll("_", "")));
-      return terms.every(Number.isSafeInteger)
-        ? terms.reduce((total, term) => total * term, 1)
-        : undefined;
-    };
     for (const [name, expected, label] of [
       [
         "MAX_GOAL_TOKEN_BUDGET",
@@ -1292,12 +1995,12 @@ if (manifest && workerPackage) {
         "goal stall timeout 上限",
       ],
     ]) {
-      if (numericConstant(name) !== expected) {
+      if (readNumericSourceConstant(goalState, name) !== expected) {
         failures.push(`worker ${label}没有同步兼容清单。`);
       }
     }
     if (
-      numericConstant("MAX_GOAL_BLOCKED_ATTEMPTS") !==
+      readNumericSourceConstant(goalState, "MAX_GOAL_BLOCKED_ATTEMPTS") !==
       goalSafety.maxBlockedAttempts
     ) {
       failures.push("worker goal blocked-attempt 上限没有同步兼容清单。");
@@ -1310,151 +2013,110 @@ if (manifest && workerPackage) {
   }
 
   const lspBridge = manifest.hostBridges?.lspBridge;
-  if (lspBridge) {
-    for (const tool of lspBridge.tools ?? []) {
-      if (!workerToolGateway.includes(`"${tool}"`)) {
-        failures.push(`Host LSP 工具桥接缺少工具 ${tool}。`);
-      }
-    }
-    if (
-      lspBridge.implementation === "host-lsp-stdio" &&
-      (!workerToolGateway.includes("lspParameters") ||
-        !workerToolGateway.includes("PI_LSP") ||
-        !lspRuntime.includes("lsp_tool_kind"))
-    ) {
-      failures.push("Pi LSP 工具没有实现清单声明的 Host bridge。");
-    }
-    for (const marker of [
-      "list_melody_lsp_servers",
-      "read_config_file",
-      "validate_server",
-      "write_frame",
-      "read_frame",
-      "LSP_TOOL",
-      "MAX_DOCUMENT_BYTES",
-      "MAX_OUTPUT_BYTES",
-    ]) {
-      if (!lspRuntime.includes(marker)) {
-        failures.push(`Host LSP bridge 缺少实现 ${marker}。`);
-      }
-    }
-    if (!workerRuntime.includes("pi_lsp_runtime::resolve_request")) {
-      failures.push("Host worker 启动链路没有接入 LSP bridge。");
-    }
+  failures.push(
+    ...checkPiLspCompatibility(lspBridge, {
+      workerToolGateway,
+      hostLspRuntime: lspRuntime,
+      hostLspConfig: lspConfig,
+      hostLspProjection: lspProjection,
+      workerRuntime,
+      workerToolRouting,
+    }),
+  );
+
+  try {
+    mcpRuntime = readFileSync(mcpRuntimePath, "utf8");
+  } catch (error) {
+    failures.push(`src-tauri/src/pi_mcp_runtime.rs: ${error.message}`);
+  }
+  try {
+    mcpConfig = readFileSync(mcpConfigPath, "utf8");
+  } catch (error) {
+    failures.push(
+      `src-tauri/src/pi_mcp_runtime/mcp_config.rs: ${error.message}`,
+    );
+  }
+  try {
+    mcpStdioTransport = readFileSync(mcpStdioTransportPath, "utf8");
+  } catch (error) {
+    failures.push(
+      `src-tauri/src/pi_mcp_runtime/stdio_transport.rs: ${error.message}`,
+    );
+  }
+  try {
+    mcpRemoteTransport = readFileSync(mcpRemoteTransportPath, "utf8");
+  } catch (error) {
+    failures.push(
+      `src-tauri/src/pi_mcp_runtime/remote_transport.rs: ${error.message}`,
+    );
   }
 
-  const codebaseIndex = manifest.hostBridges?.codebaseIndex;
-  if (codebaseIndex) {
-    const tool = codebaseIndex.tool;
-    if (!tool || !workerToolGateway.includes(`"${tool}"`)) {
-      failures.push("Host 代码库索引桥接缺少 worker 工具映射。");
-    }
-    if (
-      codebaseIndex.implementation === "host-tree-sitter" &&
-      (!workerToolGateway.includes("codebaseNavigationParameters") ||
-        !workerToolGateway.includes("PI_CODEBASE_NAVIGATION") ||
-        !codebaseRuntime.includes("codebase_tool_kind"))
-    ) {
-      failures.push("Pi 代码库索引工具没有实现清单声明的 Host bridge。");
-    }
-    for (const marker of [
-      "parse_source",
-      "language_for_path",
-      "MAX_FILES",
-      "MAX_FILE_BYTES",
-      "MAX_TOTAL_BYTES",
-      "MAX_INDEX_PATTERNS",
-      "MAX_INDEX_PATTERN_BYTES",
-      "codebase_indexing_policy",
-      "glob::Pattern",
-      "fn refresh",
-    ]) {
-      if (!codebaseRuntime.includes(marker)) {
-        failures.push(`Host 代码库索引桥缺少实现 ${marker}。`);
-      }
-    }
-    if (!workerRuntime.includes("pi_codebase_runtime::resolve_request")) {
-      failures.push("Host worker 启动链路没有接入代码库索引桥。");
-    }
-    for (const [constant, field, label] of [
-      ["MAX_INDEX_PATTERNS", "maxPatterns", "代码库索引 glob 数量上限"],
-      [
-        "MAX_INDEX_PATTERN_BYTES",
-        "maxPatternBytes",
-        "代码库索引 glob 长度上限",
-      ],
-      [
-        "MAX_INDEX_WORKSPACES",
-        "maxWorkspaceIndexes",
-        "代码库索引工作区数量上限",
-      ],
-    ]) {
-      const expected = Number(codebaseIndex[field]);
-      if (!Number.isSafeInteger(expected)) continue;
-      const match = codebaseRuntime.match(
-        new RegExp(`const ${constant}[^=]*=\\s*([^;]+);`, "u"),
-      );
-      const actual = match
-        ? match[1]
-            .split("*")
-            .map((term) => Number(term.replaceAll("_", "").trim()))
-            .reduce((total, term) => total * term, 1)
-        : undefined;
-      if (actual !== expected) {
-        failures.push(`Host ${label}没有同步兼容清单。`);
-      }
-    }
-  }
+  failures.push(
+    ...checkPiMcpTransportsCompatibility({
+      transports: manifest?.hostBridges?.mcpTransports,
+      sources: {
+        hostMcpRuntime: mcpRuntime,
+        hostMcpConfig: mcpConfig,
+        hostStdioTransport: mcpStdioTransport,
+        hostRemoteTransport: mcpRemoteTransport,
+      },
+    }),
+  );
 
-  const hooks = manifest.hostBridges?.hooks;
-  if (hooks) {
-    for (const marker of [
-      "list_melody_hooks",
-      "run_tool_hooks",
-      "run_event_hooks",
-      "PreToolUse",
-      "PostToolUseFailure",
-      "env_clear",
-      "MAX_HOOK_INPUT_BYTES",
-      "MAX_HOOK_OUTPUT_BYTES",
-      "MAX_HOOK_TIMEOUT_MS",
-    ]) {
-      if (!hookRuntime.includes(marker)) {
-        failures.push(`Host Hook bridge 缺少实现 ${marker}。`);
-      }
+  const readMcpInventorySource = (relativePath) => {
+    try {
+      return readFileSync(resolve(root, relativePath), "utf8");
+    } catch (error) {
+      failures.push(`Pi Host MCP inventory wiring: ${error.message}`);
+      return "";
     }
-    if (!configRuntime.includes("pi_hook_runtime::list_melody_hooks")) {
-      failures.push("Host 配置层没有接入 Hook 清单预检。");
-    }
-    if (!workerRuntime.includes("run_host_tool_hooks")) {
-      failures.push("Host worker 没有接入 Hook 执行链路。");
-    }
-    const hookConstants = {
-      maxFiles: "MAX_HOOK_FILES",
-      maxHooks: "MAX_HOOKS_TOTAL",
-      maxFileBytes: "MAX_HOOK_FILE_BYTES",
-      maxCommandBytes: "MAX_HOOK_COMMAND_BYTES",
-      maxInputBytes: "MAX_HOOK_INPUT_BYTES",
-      maxOutputBytes: "MAX_HOOK_OUTPUT_BYTES",
-      maxTimeoutMs: "MAX_HOOK_TIMEOUT_MS",
-    };
-    for (const [field, constant] of Object.entries(hookConstants)) {
-      const expected = Number(hooks[field]);
-      if (!Number.isSafeInteger(expected)) continue;
-      const match = hookRuntime.match(
-        new RegExp(`const ${constant}[^=]*=\\s*([^;]+);`, "u"),
-      );
-      const actual = match
-        ? match[1]
-            .split("*")
-            .map((term) => Number(term.replaceAll("_", "").trim()))
-            .reduce((total, term) => total * term, 1)
-        : undefined;
-      if (actual !== expected) {
-        failures.push(`Hook ${field} 上限没有同步兼容清单。`);
-      }
-    }
-  }
+  };
+  failures.push(
+    ...checkPiMcpInventoryCompatibility({
+      inventory: manifest?.hostBridges?.mcpInventory,
+      sources: {
+        hostMcpRuntime: mcpRuntime,
+        hostMcpConfig: mcpConfig,
+        hostConfigRuntime: configRuntime,
+        hostTauriCommands: readMcpInventorySource("src-tauri/src/lib.rs"),
+        tauriPermissions: readMcpInventorySource(
+          "src-tauri/permissions/default.toml",
+        ),
+        rendererBridge: readMcpInventorySource(
+          "src/lib/melody-bridge-config.ts",
+        ),
+        rendererPreflight: readMcpInventorySource(
+          "src/lib/pi-compatibility.ts",
+        ),
+        capabilityReport: readMcpInventorySource(
+          "src/domain/agent/capability-report.ts",
+        ),
+      },
+    }),
+  );
+
+  failures.push(
+    ...checkPiCodebaseIndexCompatibility(manifest.hostBridges?.codebaseIndex, {
+      workerToolGateway,
+      hostCodebaseRuntime: codebaseRuntime,
+      hostCodebaseParser: codebaseParser,
+      hostCodebaseRequest: codebaseRequest,
+      hostCodebaseIndex: codebaseIndex,
+      workerRuntime,
+      workerToolRouting,
+    }),
+  );
+
+  failures.push(
+    ...checkPiHooksCompatibility(manifest.hostBridges?.hooks, {
+      hostHookRuntime: hookRuntime,
+      hostHookConfig: hookConfig,
+      hostHookExecution: hookExecution,
+      hostConfigRuntime: configRuntime,
+      workerRuntime,
+      workerToolRouting,
+    }),
+  );
 }
 
 if (failures.length > 0) {
