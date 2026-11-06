@@ -130,3 +130,23 @@ requirement there, not as an ad-hoc `if` in the worker.
 (`src/session-modes.ts`) with `isAgentSessionModeId`. The wire keeps
 `sessionModeId` as a string because ACP may expose more; Pi is restricted to
 those three.
+
+### Tool names
+
+`src/tool-names.ts` is the declared vocabulary:
+
+- `AGENT_TOOL_NAMES` — the 44 names the worker advertises to the Host.
+- `AGENT_WORKER_OWNED_TOOL_NAMES` — advertised names the worker resolves
+  itself (`task`/`get_task_output`/`wait_tasks`/`kill_task` plus the
+  `todo_write` and `update_goal` extension tools); the Host gateway must not
+  route them.
+- `AGENT_INTERNAL_TOOL_NAMES` — Host-only bridges never advertised to the
+  model.
+
+The worker's `PI_*` constants are typed by these unions, so an undeclared name
+fails `pnpm check:agent-worker`. Rust cannot import this module;
+`scripts/pi-tool-names-compatibility.mjs` compares `request_policy.rs`,
+`pi_codebase_runtime.rs`, `pi_lsp_runtime.rs`, and the manifest's
+`worker.tools` against the table. Adding a tool means editing this table first,
+then the worker constant, then the Rust routing constant — the gate fails
+until all three agree.

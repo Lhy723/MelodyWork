@@ -16,6 +16,7 @@ import { checkPiLspCompatibility } from "./pi-lsp-compatibility.mjs";
 import { checkPiCodebaseIndexCompatibility } from "./pi-codebase-index-compatibility.mjs";
 import { checkPiHooksCompatibility } from "./pi-hooks-compatibility.mjs";
 import { checkPiCompactionCompatibility } from "./pi-compaction-compatibility.mjs";
+import { checkPiToolNamesCompatibility } from "./pi-tool-names-compatibility.mjs";
 import { readNumericSourceConstant } from "./source-numeric-constant.mjs";
 
 const root = process.cwd();
@@ -1448,6 +1449,21 @@ if (manifest && workerPackage) {
       }
     }
 
+    // Rust cannot import the contract table, so compare the Host routing
+    // constants against it here. A renamed Host constant used to pass silently.
+    const contractToolNames = await import(
+      `file://${resolve(root, "packages/agent-contract/src/tool-names.ts")}`
+    );
+    failures.push(
+      ...checkPiToolNamesCompatibility({
+        contract: contractToolNames,
+        requestPolicy,
+        codebaseRuntime,
+        lspRuntime,
+        manifestTools: manifest.worker?.tools ?? [],
+      }),
+    );
+
     if (manifest.worker?.runtimeFallback !== "none") {
       failures.push(
         "Pi 兼容清单必须声明 runtimeFallback=none（Pi 不得回退到 ACP）。",
@@ -1500,12 +1516,10 @@ if (manifest && workerPackage) {
   }
   // The monitor tool is declared by the worker and executed by the Host
   // gateway; a drift on either side would advertise a tool that cannot run.
+  // Name agreement is owned by `pi-tool-names-compatibility.mjs`; this check
+  // only proves the Host actually dispatches the tool.
   if ((manifest.worker?.tools ?? []).includes("monitor")) {
-    if (
-      !workerToolGateway.includes('export const PI_MONITOR = "monitor"') ||
-      !requestPolicy.includes('pub(crate) const MONITOR: &str = "monitor";') ||
-      !toolGateway.includes("MONITOR => ")
-    ) {
+    if (!toolGateway.includes("MONITOR => ")) {
       failures.push("monitor 工具没有在 worker 与 Host 之间同步。");
     }
   }

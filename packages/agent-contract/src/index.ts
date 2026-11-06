@@ -695,6 +695,7 @@ export interface AgentUsage {
 }
 
 export * from "./capabilities.ts";
+export * from "./tool-names.ts";
 export {
   containsControlCharacters,
   withoutControlCharacters,

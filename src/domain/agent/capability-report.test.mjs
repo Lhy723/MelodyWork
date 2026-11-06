@@ -387,9 +387,7 @@ test("keeps validated stdio and remote MCP transports on the Pi bridge", () => {
   assert.deepEqual(remote.diagnostics, []);
 
   const malformedRemote = inspectPiCapabilityReport({
-    mcpServers: [
-      { name: "remote", transport: "websocket", supported: false },
-    ],
+    mcpServers: [{ name: "remote", transport: "websocket", supported: false }],
     configs: [
       config("project", {
         mcp_servers: {

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/agent-contract/index.md", "reason": "Verify the contract table follows existing const-tuple and guard conventions"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check the TS-to-Rust validation seam stays one-directional and testable"}
