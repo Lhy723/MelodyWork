@@ -30,5 +30,10 @@ jobs:
       - run: pnpm check:architecture
       - run: pnpm lint
       - run: pnpm format:check
+      - run: pnpm test:unit
+      - run: pnpm test:agent-worker
+      - run: pnpm test:projection
+      - run: pnpm test:smoke
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - run: pnpm build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

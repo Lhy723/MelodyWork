@@ -10,7 +10,7 @@
     "check": "tsc --noEmit",
     "build": "tsc --noEmit",
     "start": "node --experimental-strip-types src/main.ts",
-    "test": "node --experimental-strip-types --test src/main.test.mjs src/worker-smoke.test.mjs src/transport.test.mjs src/idempotency.test.mjs src/pi/event-mapper.test.mjs src/pi/model-catalog.test.mjs src/pi/tool-gateway.test.mjs src/pi/todo-extension.test.mjs src/pi/goal-extension.test.mjs src/pi/compaction-extension.test.mjs src/pi/instruction-scope-extension.test.mjs src/pi/session-adapter.test.mjs src/pi/session-import.test.mjs"
+    "test": "node --experimental-strip-types --test src/transport.test.mjs src/idempotency.test.mjs src/pi/event-mapper.test.mjs src/pi/model-catalog.test.mjs src/pi/tool-gateway.test.mjs src/pi/todo-extension.test.mjs src/pi/goal-extension.test.mjs src/pi/compaction-extension.test.mjs src/pi/instruction-scope-extension.test.mjs src/pi/subagent-policy.test.mjs src/pi/session-adapter.test.mjs src/pi/session-import.test.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.0.1",

@@ -6,13 +6,13 @@ it.
 
 ## Scope
 
-| Path | Owns |
-|------|------|
-| `src/main.ts` | Process entry: stdin loop, command dispatch, event emission |
-| `src/transport.ts` | JSONL framing, size limits, backpressure |
-| `src/protocol.ts` | Worker-side protocol interfaces (`WorkerCommandHandler`, `WorkerEmitter`) |
-| `src/idempotency.ts` | Duplicate-command protection |
-| `src/pi/**` | Everything that touches the Pi SDK |
+| Path                 | Owns                                                                      |
+| -------------------- | ------------------------------------------------------------------------- |
+| `src/main.ts`        | Process entry: stdin loop, command dispatch, event emission               |
+| `src/transport.ts`   | JSONL framing, size limits, backpressure                                  |
+| `src/protocol.ts`    | Worker-side protocol interfaces (`WorkerCommandHandler`, `WorkerEmitter`) |
+| `src/idempotency.ts` | Duplicate-command protection                                              |
+| `src/pi/**`          | Everything that touches the Pi SDK                                        |
 
 `pnpm --filter @melody/agent-worker start` runs
 `node --experimental-strip-types src/main.ts`.
@@ -34,12 +34,17 @@ it.
 ```bash
 pnpm check:agent-worker     # tsc --noEmit, NodeNext, strict
 pnpm check:architecture     # Pi SDK confinement + runtime cycles
+pnpm test:agent-worker      # 12 pure worker files, ~0.5s
+pnpm test:smoke             # main.test.mjs + worker-smoke.test.mjs, spawns processes
 pnpm check                  # includes check:pi-compatibility
 ```
 
-No test files exist under `packages/` today (ESLint still declares `.mjs`
-handling for type-stripped tests). The Pi compatibility script is the
-regression gate for protocol/adapter drift.
+`test:agent-worker` owns every worker test that does not spawn a process; the
+two that do (`main.test.mjs`, `worker-smoke.test.mjs`) live in the root
+`test:smoke` so fast feedback stays fast. Add a new worker test to
+`packages/agent-worker/package.json`'s `test` script — not to the root
+`test:unit`. The Pi compatibility script remains the regression gate for
+protocol/adapter drift.
 
 ## Runtime Shape
 
@@ -65,7 +70,10 @@ replay checkpoints rely on ordinal + epoch (`src/domain/agent/event-log.ts`).
 `errorFor` preserves a structured error when the adapter attached one:
 
 ```ts
-const errorFor = (error: unknown, scope: AgentError["scope"] = "runtime"): AgentError =>
+const errorFor = (
+  error: unknown,
+  scope: AgentError["scope"] = "runtime",
+): AgentError =>
   (error as { agentError?: AgentError }).agentError ?? {
     code: "pi.worker_error",
     message: error instanceof Error ? error.message : String(error),

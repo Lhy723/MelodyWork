@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Verify the documented suite split matches the actual scripts"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check the change reuses existing scripts instead of adding new runners"}

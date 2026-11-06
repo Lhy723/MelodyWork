@@ -30,8 +30,9 @@
     "preview": "vite preview",
     "tauri": "node scripts/tauri-cli.mjs",
     "test:agent-worker": "pnpm --filter @melody/agent-worker test",
+    "test:smoke": "node --experimental-strip-types --test packages/agent-worker/src/main.test.mjs packages/agent-worker/src/worker-smoke.test.mjs",
     "test:pi-worker-smoke": "node --experimental-strip-types --test packages/agent-worker/src/worker-smoke.test.mjs",
-    "test:unit": "node --experimental-strip-types --test src/domain/*.test.mjs src/domain/agent/*.test.mjs src/features/files/*.test.mjs src/features/research/*.test.mjs packages/agent-contract/src/*.test.mjs packages/agent-worker/src/main.test.mjs packages/agent-worker/src/worker-smoke.test.mjs packages/agent-worker/src/transport.test.mjs packages/agent-worker/src/idempotency.test.mjs packages/agent-worker/src/pi/event-mapper.test.mjs packages/agent-worker/src/pi/model-catalog.test.mjs packages/agent-worker/src/pi/tool-gateway.test.mjs packages/agent-worker/src/pi/todo-extension.test.mjs packages/agent-worker/src/pi/subagent-policy.test.mjs packages/agent-worker/src/pi/goal-extension.test.mjs packages/agent-worker/src/pi/compaction-extension.test.mjs packages/agent-worker/src/pi/session-adapter.test.mjs packages/agent-worker/src/pi/session-import.test.mjs",
+    "test:unit": "node --experimental-strip-types --experimental-test-module-mocks --import ./scripts/test-register.mjs --test src/domain/*.test.mjs src/domain/agent/*.test.mjs src/features/files/*.test.mjs src/features/research/*.test.mjs packages/agent-contract/src/*.test.mjs src/stores/*.test.mjs",
     "test:projection": "node --experimental-strip-types --test src/domain/session-projection.test.mjs"
   },
   "dependencies": {

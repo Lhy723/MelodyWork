@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Renderer verification gates and suite ownership conventions"}
+{"file": ".trellis/spec/agent-worker/index.md", "reason": "Worker test-suite ownership and Node flag requirements"}

@@ -174,3 +174,38 @@ pnpm format:check
 The architecture script is also unit-testable through its exports
 (`domainBoundaryViolations`, `workerBoundaryViolations`,
 `findRuntimeModuleCycles`) but no runner is configured.
+
+## Store Tests
+
+`src/stores` is covered by `node --test` like `src/domain`. Three pieces make
+that work:
+
+- `scripts/test-alias-hooks.mjs` resolves `@/…` and extensionless relative
+  imports; `scripts/test-register.mjs` registers it.
+- `test:unit` runs with `--experimental-test-module-mocks` and
+  `--import ./scripts/test-register.mjs`.
+- A test stubs a bridge module once at module scope:
+
+  ```js
+  const impl = { listProjects: async () => [] };
+  mock.module("@/lib/melody-bridge.ts", {
+    namedExports: Object.fromEntries(
+      Object.keys(impl).map((name) => [name, (...args) => impl[name](...args)]),
+    ),
+  });
+  const { useWorkspaceStore } = await import("@/stores/workspace-store.ts");
+  ```
+
+  `mock.module` copies bindings at registration and may be called only once
+  per specifier, so the wrappers delegate to a mutable `impl` that each test
+  replaces. Mutating the stubbed object directly does nothing.
+
+`agent-store-session` takes an `AgentStoreAccess` object, so its tests build
+`{ get, set }` by hand rather than importing the Zustand singleton. Use
+`useStore.setState(partial)` (merge, not replace) to reset a singleton —
+replacing drops the action functions.
+
+Modules on these import chains must not touch `window` unguarded; use
+`typeof window === "undefined"` (see `armSetupTimeout`) or `globalThis.setTimeout`.
+A bare `window.setTimeout` in a module that self-schedules will keep the Node
+test process alive forever.

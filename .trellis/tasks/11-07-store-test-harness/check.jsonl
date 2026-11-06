@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Verify tests assert public store state and reuse the existing latest-request pattern"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check the harness reuses node:test conventions instead of adding a second runner"}

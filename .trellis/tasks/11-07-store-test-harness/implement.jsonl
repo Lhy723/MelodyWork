@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Store slice signatures, RequestGate usage, and error normalization the tests must assert"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Renderer verification gates and the no-DOM test-runner reality"}

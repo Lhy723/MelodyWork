@@ -13,7 +13,7 @@ const previewAcpStderrListeners = new Set<(line: string) => void>();
 let previewSequence = 0;
 
 const emitPreviewAcp = (message: AcpEnvelope, delay = 0) => {
-  window.setTimeout(() => {
+  globalThis.setTimeout(() => {
     for (const listener of previewAcpListeners) {
       listener(message);
     }

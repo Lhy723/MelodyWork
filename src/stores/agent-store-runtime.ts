@@ -21,6 +21,9 @@ export const armSetupTimeout = (
   >,
   setState: (state: Partial<AgentStore>) => void,
 ) => {
+  // Store tests import this module without a DOM; the timeout has no meaning
+  // there, so skip arming instead of touching `window` directly.
+  if (typeof window === "undefined") return;
   window.setTimeout(() => {
     const state = getState();
     if (

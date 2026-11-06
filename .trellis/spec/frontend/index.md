@@ -5,16 +5,16 @@ today. Extend these patterns; do not start a second convention beside them.
 
 ## Scope
 
-| Area | Path |
-|------|------|
-| Product surfaces | `src/features/<area>/` (`chat`, `files`, `git`, `research`, `sessions`, `settings`, `terminal`, `workspace`) |
-| Shared primitives | `src/components/ui/` |
-| App chrome components | `src/components/interior/` |
-| Agent-UI components | `src/components/ai-elements/` |
-| Zustand stores | `src/stores/` |
-| Tauri bridge / clients | `src/lib/` |
-| Framework-free logic | `src/domain/` |
-| Reusable hooks | `src/hooks/` |
+| Area                   | Path                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Product surfaces       | `src/features/<area>/` (`chat`, `files`, `git`, `research`, `sessions`, `settings`, `terminal`, `workspace`) |
+| Shared primitives      | `src/components/ui/`                                                                                         |
+| App chrome components  | `src/components/interior/`                                                                                   |
+| Agent-UI components    | `src/components/ai-elements/`                                                                                |
+| Zustand stores         | `src/stores/`                                                                                                |
+| Tauri bridge / clients | `src/lib/`                                                                                                   |
+| Framework-free logic   | `src/domain/`                                                                                                |
+| Reusable hooks         | `src/hooks/`                                                                                                 |
 
 Not covered here: `packages/agent-contract` (see `../agent-contract/index.md`)
 and `packages/agent-worker` (see `../agent-worker/index.md`).
@@ -38,20 +38,26 @@ and `packages/agent-worker` (see `../agent-worker/index.md`).
 Run before yielding:
 
 ```bash
+pnpm test:unit            # src/** + agent-contract, ~0.3s
 pnpm check                # tsc --noEmit + contract/worker/packaging + Pi compatibility
 pnpm check:architecture   # domain boundary, Pi SDK boundary, runtime import cycles
 pnpm lint
 pnpm format:check
 ```
 
-`pnpm check:architecture` is not part of `pnpm check`; CI runs both, plus
-`pnpm build` (`.github/workflows/check.yml`). The repository has no TypeScript
-test runner: verification for renderer work is the type-check, architecture
-guard, lint, format, and a real run (`pnpm dev` / `pnpm tauri dev`).
+`pnpm check:architecture` is not part of `pnpm check`; CI runs every gate plus
+all test suites (`.github/workflows/check.yml`).
+
+Suite ownership: `test:unit` owns `src/**/*.test.mjs` and
+`packages/agent-contract/src/*.test.mjs`; `test:agent-worker` owns pure worker
+tests; `test:smoke` owns the two process-spawning worker files. A file belongs
+to exactly one suite — do not add a worker path back to `test:unit`. Renderer
+work still needs a real run (`pnpm dev` / `pnpm tauri dev`) for visual changes;
+the suites cover domain and store logic, not components.
 
 ## Files
 
-| File | Owns |
-|------|------|
+| File                               | Owns                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [conventions.md](./conventions.md) | Layer/import boundaries, Zustand slicing, async + latest-request rule, error normalization, Tauri access |
-| [ui.md](./ui.md) | Component layers, naming/export style, `cva`/`cn`/`data-slot`, icons, design tokens |
+| [ui.md](./ui.md)                   | Component layers, naming/export style, `cva`/`cn`/`data-slot`, icons, design tokens                      |
