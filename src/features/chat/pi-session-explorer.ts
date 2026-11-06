@@ -1,4 +1,7 @@
-import { appendExplorerSessionReferenceToDraft } from "../../domain/agent/explorer-branch.ts";
+import {
+  appendExplorerConclusionToDraft,
+  appendExplorerSessionReferenceToDraft,
+} from "../../domain/agent/explorer-branch.ts";
 import type { TimelineEntry } from "../../domain/acp";
 import type { PiSessionFork } from "../../domain/agent/pi-session-fork";
 import type {
@@ -249,14 +252,23 @@ export const createPiSessionExplorer = (
       return;
     }
 
-    const nextDraft = appendExplorerSessionReferenceToDraft(
+    // The branch conclusion is the content the user asked to bring back; the
+    // session reference below is only a pointer to where it came from.
+    const withConclusion = appendExplorerConclusionToDraft(
       dependencies.readComposerDraft(source.id),
+      entry.content,
       {
         sourceSessionId: source.id,
         branchSessionId: branch.id,
         anchorNativeEntryId: fork.anchorNativeEntryId,
       },
     );
+    if (!withConclusion) return;
+    const nextDraft = appendExplorerSessionReferenceToDraft(withConclusion, {
+      sourceSessionId: source.id,
+      branchSessionId: branch.id,
+      anchorNativeEntryId: fork.anchorNativeEntryId,
+    });
     if (!nextDraft) return;
     if (!dependencies.writeComposerDraft(source.id, nextDraft)) {
       dependencies.workspace.setState({

@@ -511,7 +511,8 @@ export const readWorkspaceBinaryFile = async (
   path: string,
 ): Promise<ArrayBuffer> => {
   if (!isTauriRuntime()) {
-    return new TextEncoder().encode(`Browser preview: ${root}/${path}`).buffer;
+    const bytes = new TextEncoder().encode(`Browser preview: ${root}/${path}`);
+    return bytes.buffer as ArrayBuffer;
   }
   return invoke<ArrayBuffer>("read_workspace_binary_file", { root, path });
 };

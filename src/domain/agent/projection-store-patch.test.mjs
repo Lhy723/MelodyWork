@@ -48,8 +48,8 @@ test("routes current-session text, status, cursor and context into one patch", (
 
   const patch = projectAgentEventToStorePatch(snapshot(), result);
 
-  assert.equal(patch.acpCursor, "context");
-  assert.equal(patch.acpPhase, undefined);
+  assert.equal(patch.eventCursor, "context");
+  assert.equal(patch.runtimePhase, undefined);
   assert.deepEqual(patch.contextUsage, { usedTokens: 20, maxTokens: 1000 });
   assert.equal(patch.timeline, result.projection.timeline);
 });
@@ -84,7 +84,7 @@ test("marks an opened or imported Pi session ready", () => {
       result,
     );
     assert.equal(patch.chatStatus, "ready");
-    assert.equal(patch.acpPhase, "ready");
+    assert.equal(patch.runtimePhase, "ready");
     assert.equal(patch.selectedSessionModeId, "plan");
     assert.equal(patch.permissionMode, "auto");
     assert.equal(patch.selectedModelId, "pi/fast");
@@ -122,7 +122,7 @@ test("keeps background projections out of the visible timeline", () => {
   const patch = projectAgentEventToStorePatch(snapshot(), result);
 
   assert.equal(patch.timeline, undefined);
-  assert.equal(patch.acpCursor, undefined);
+  assert.equal(patch.eventCursor, undefined);
   assert.equal(patch.backgroundCursors["session-2"], "background-finish");
   assert.equal(patch.backgroundTimelines["session-2"].at(-1).streaming, false);
 });
@@ -214,7 +214,7 @@ test("applies a model catalog while preserving a selected available model", () =
   assert.deepEqual(patch.modelRefreshErrors, {});
   assert.equal(patch.selectedModelId, "pi/fast");
   assert.equal(patch.timeline, undefined);
-  assert.equal(patch.acpCursor, undefined);
+  assert.equal(patch.eventCursor, undefined);
 });
 
 test("clears a selected model when a refresh removes every available entry", () => {
@@ -294,7 +294,7 @@ test("projects Pi capabilities and diagnostics without touching the current time
   assert.deepEqual(patch.capabilities, capabilities);
   assert.deepEqual(patch.capabilityDiagnostics, diagnostics);
   assert.equal(patch.timeline, undefined);
-  assert.equal(patch.acpCursor, undefined);
+  assert.equal(patch.eventCursor, undefined);
 });
 
 test("projects session configuration revisions and authoritative settings", () => {

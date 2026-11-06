@@ -15,3 +15,11 @@ pub use workspace_terminal::{
 };
 
 pub(crate) use workspace_files::is_ignored_directory;
+
+#[cfg(test)]
+pub(crate) use workspace_files::{collect_tree, read_workspace_binary_bytes};
+#[cfg(test)]
+pub(crate) use workspace_terminal::{terminal_command, wait_for_terminal_exit};
+
+#[path = "workspace_runtime_tests.rs"]
+mod tests;

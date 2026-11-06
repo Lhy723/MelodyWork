@@ -22,6 +22,11 @@ export {
   assertPiCancelTarget,
   validateTurnConfigSnapshot,
 } from "./turn-policy.ts";
+export { applyModelPolicyOverrides } from "./model-policy.ts";
+export {
+  loadPiModelPolicies,
+  settingsOverridesForModel,
+} from "./model-policy.ts";
 export {
   assertPiInteractiveChildTarget,
   assertPiResumeIdentity,
@@ -37,6 +42,12 @@ import {
 } from "./resource-policy-snapshot.ts";
 export { piSessionFileFor } from "./session-persistence-policy.ts";
 export { assertPiForkTargetMatches } from "./session-fork-runtime.ts";
+export {
+  parsePersistedPiSubagentRecord,
+  piSubagentRecordFileFor,
+} from "./subagent-records.ts";
+export { piSkillPathsFor } from "./skill-discovery.ts";
+export { piPromptPathsFor } from "./prompt-discovery.ts";
 import { createPiSessionResourceBinding } from "./session-resource-loader.ts";
 export {
   assertModelSupportsAttachments,

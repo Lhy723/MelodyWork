@@ -52,7 +52,7 @@ test("keeps a projector per product session and routes a complete turn", () => {
 
   assert.equal(adapter.size(), 1);
   assert.equal(finished.patch.chatStatus, "ready");
-  assert.equal(finished.patch.acpPhase, "ready");
+  assert.equal(finished.patch.runtimePhase, "ready");
   assert.equal(finished.patch.timeline.at(-1).streaming, false);
 });
 

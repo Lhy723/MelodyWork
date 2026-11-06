@@ -25,6 +25,7 @@ const assertDegradation = (diagnostic, note) => {
 
 test("keeps a clean workspace on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { models: { default: "grok-4.5" } })],
     extensions: [
       {
@@ -56,6 +57,7 @@ test("keeps managed and standard external Markdown Skills on Pi", () => {
   };
 
   const clean = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     skills: [managed],
@@ -63,6 +65,7 @@ test("keeps managed and standard external Markdown Skills on Pi", () => {
   assert.equal(clean.blocksPiSession, false);
 
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     skills: [managed, external],
@@ -76,6 +79,7 @@ test("keeps managed and standard external Markdown Skills on Pi", () => {
     provider: "plugin",
   };
   const pluginReport = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     skills: [plugin],
@@ -88,6 +92,7 @@ test("keeps managed and standard external Markdown Skills on Pi", () => {
 
 test("keeps static-only plugin Skills on Pi and degrades dynamic plugins", () => {
   const staticPlugin = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     skills: [
@@ -115,6 +120,7 @@ test("keeps static-only plugin Skills on Pi and degrades dynamic plugins", () =>
   assert.deepEqual(staticPlugin.diagnostics, []);
 
   const dynamicPlugin = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     skills: [
@@ -151,6 +157,7 @@ test("ignores discovered-but-inactive plugins when deciding the engine", () => {
   // marketplace clone or install cache full of dynamic plugins must not force
   // opening a Pi session on its own.
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       {
         scope: "user",
@@ -185,6 +192,7 @@ test("ignores discovered-but-inactive plugins when deciding the engine", () => {
 test("recognizes external skill roots when reported as relative or Windows paths", () => {
   for (const path of [".agents/skills/review", ".claude\\skills\\review"]) {
     const report = inspectPiCapabilityReport({
+      mcpServers: [],
       configs: [],
       extensions: [],
       skills: [
@@ -204,6 +212,7 @@ test("recognizes external skill roots when reported as relative or Windows paths
 
 test("reports every configured capability that Pi cannot safely execute", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         mcp_servers: { filesystem: { command: "mcp-server-filesystem" } },
@@ -231,6 +240,7 @@ test("reports every configured capability that Pi cannot safely execute", () => 
 
 test("keeps Host-validated command hooks on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [{ kind: "hooks", name: "after-tool.json", enabled: true }],
     hooks: [
@@ -250,6 +260,7 @@ test("keeps Host-validated command hooks on Pi", () => {
 
 test("flags unsafe Host hook definitions as degradations", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     hooks: [
@@ -278,6 +289,7 @@ test("flags unsafe Host hook definitions as degradations", () => {
 
 test("keeps stdio MCP on Pi and degrades unverified LSP inventory", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         mcpServers: [{ name: "filesystem", command: "mcp-server" }],
@@ -297,6 +309,7 @@ test("keeps stdio MCP on Pi and degrades unverified LSP inventory", () => {
 
 test("keeps Host-validated trusted stdio LSP on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     lspServers: [
@@ -316,6 +329,7 @@ test("keeps Host-validated trusted stdio LSP on Pi", () => {
 
 test("flags unsafe LSP inventory entries as degradations without blocking unrelated Pi work", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     lspServers: [
@@ -347,6 +361,7 @@ test("flags unsafe LSP inventory entries as degradations without blocking unrela
 
 test("keeps validated stdio and remote MCP transports on the Pi bridge", () => {
   const stdio = inspectPiCapabilityReport({
+    mcpServers: [{ name: "local", transport: "stdio", supported: true }],
     configs: [
       config("project", {
         mcp_servers: { local: { command: "mcp-server" } },
@@ -358,6 +373,7 @@ test("keeps validated stdio and remote MCP transports on the Pi bridge", () => {
   assert.deepEqual(stdio.diagnostics, []);
 
   const remote = inspectPiCapabilityReport({
+    mcpServers: [{ name: "remote", transport: "sse", supported: true }],
     configs: [
       config("project", {
         mcp_servers: {
@@ -371,6 +387,9 @@ test("keeps validated stdio and remote MCP transports on the Pi bridge", () => {
   assert.deepEqual(remote.diagnostics, []);
 
   const malformedRemote = inspectPiCapabilityReport({
+    mcpServers: [
+      { name: "remote", transport: "websocket", supported: false },
+    ],
     configs: [
       config("project", {
         mcp_servers: {
@@ -388,6 +407,7 @@ test("keeps validated stdio and remote MCP transports on the Pi bridge", () => {
 
 test("keeps Host-owned web search and web fetch on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         models: { web_search: "grok-4.20-multi-agent" },
@@ -406,6 +426,7 @@ test("keeps Host-owned web search and web fetch on Pi", () => {
 
 test("keeps disabled web tools and online catalog opt-out on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         models: { web_search: "" },
@@ -422,6 +443,7 @@ test("keeps disabled web tools and online catalog opt-out on Pi", () => {
 
 test("keeps remote model-catalog refresh on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { features: { remote_fetch: true } })],
     extensions: [],
   });
@@ -432,6 +454,7 @@ test("keeps remote model-catalog refresh on Pi", () => {
 
 test("keeps the default codebase index on the Host tree-sitter bridge", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         features: { codebase_indexing: true, two_pass_compaction: true },
@@ -447,6 +470,7 @@ test("keeps the default codebase index on the Host tree-sitter bridge", () => {
 
 test("keeps codebase index path policies on the Host tree-sitter bridge", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         features: {
@@ -463,6 +487,7 @@ test("keeps codebase index path policies on the Host tree-sitter bridge", () => 
 
 test("degrades malformed codebase index path policies", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         features: { codebase_indexing: ["/Users/*/[repo"] },
@@ -481,6 +506,7 @@ test("degrades malformed codebase index path policies", () => {
 
 test("keeps Pi-native two-pass compaction and memory flush on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         features: { two_pass_compaction: true },
@@ -496,6 +522,7 @@ test("keeps Pi-native two-pass compaction and memory flush on Pi", () => {
 
 test("keeps deterministic goal safety rails on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         goal: {
@@ -514,6 +541,7 @@ test("keeps deterministic goal safety rails on Pi", () => {
 
 test("keeps the basic goal toggle on Pi but degrades advanced goal orchestration", () => {
   const basic = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("project", { goal: { enabled: true } })],
     extensions: [],
   });
@@ -521,6 +549,7 @@ test("keeps the basic goal toggle on Pi but degrades advanced goal orchestration
   assert.deepEqual(basic.diagnostics, []);
 
   const advanced = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         goal: {
@@ -542,6 +571,7 @@ test("keeps the basic goal toggle on Pi but degrades advanced goal orchestration
 
 test("keeps Host-owned .envrc projection on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("project", { session: { load_envrc: true } })],
     extensions: [],
   });
@@ -552,6 +582,7 @@ test("keeps Host-owned .envrc projection on Pi", () => {
 
 test("keeps projected subagent toggles, models, roles, and personas on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         tools: {
@@ -590,6 +621,7 @@ test("flags dynamic Melody agent definitions as degradations while keeping decla
   // The Host resolves a tool allowlist into the narrowest Pi capability
   // ceiling, so `tools` alone is no longer a blocking field.
   const withTools = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         subagents: {
@@ -606,6 +638,7 @@ test("flags dynamic Melody agent definitions as degradations while keeping decla
   // A definition that changes the tool graph or the completion contract in ways
   // the bounded Pi manifest cannot express is still reported as a degradation.
   const dynamic = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         subagents: {
@@ -631,6 +664,7 @@ test("flags dynamic Melody agent definitions as degradations while keeping decla
 
 test("keeps declarative agent definitions on Pi and flags dynamic inventory entries as degradations", () => {
   const clean = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         subagents: {
@@ -660,6 +694,7 @@ test("keeps declarative agent definitions on Pi and flags dynamic inventory entr
   assert.deepEqual(clean.diagnostics, []);
 
   const dynamic = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     agentDefinitions: [
@@ -684,6 +719,7 @@ test("keeps declarative agent definitions on Pi and flags dynamic inventory entr
 
 test("keeps Host-owned gitignore filtering on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         tools: { respect_gitignore: true },
@@ -698,6 +734,7 @@ test("keeps Host-owned gitignore filtering on Pi", () => {
 
 test("keeps a custom auto-compaction threshold on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         session: { auto_compact_threshold_percent: 85 },
@@ -712,6 +749,7 @@ test("keeps a custom auto-compaction threshold on Pi", () => {
 
 test("keeps valid custom terminal and question timeout policies on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         toolset: {
@@ -729,6 +767,7 @@ test("keeps valid custom terminal and question timeout policies on Pi", () => {
 
 test("degrades invalid question timeout policy values", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         toolset: {
@@ -752,6 +791,7 @@ test("degrades invalid question timeout policy values", () => {
 
 test("degrades invalid custom terminal policy values", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         toolset: {
@@ -772,6 +812,7 @@ test("degrades invalid custom terminal policy values", () => {
 
 test("keeps an enforceable Host sandbox on Pi and blocks an unenforceable one", () => {
   const enforceable = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { sandbox: { profile: "workspace" } })],
     extensions: [],
     sandboxPlan: { profile: "workspace", enforceable: true },
@@ -781,6 +822,7 @@ test("keeps an enforceable Host sandbox on Pi and blocks an unenforceable one", 
   assert.deepEqual(enforceable.diagnostics, []);
 
   const unenforceable = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { sandbox: { profile: "strict" } })],
     extensions: [],
     sandboxPlan: {
@@ -805,6 +847,7 @@ test("a platform without any sandbox implementation degrades with a prominent wa
   // lock the user out: the session stays on Pi and runs unsandboxed, with the
   // trade-off stated in the diagnostic.
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { sandbox: { profile: "workspace" } })],
     extensions: [],
     sandboxPlan: {
@@ -825,6 +868,7 @@ test("a platform without any sandbox implementation degrades with a prominent wa
 
 test("blocks Pi when a configured Melody sandbox cannot be enforced", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         sandbox: { profile: "strict" },
@@ -843,6 +887,7 @@ test("blocks Pi when a configured Melody sandbox cannot be enforced", () => {
 
   for (const value of [{ profile: "off" }, { enabled: false }, "off", false]) {
     const optOut = inspectPiCapabilityReport({
+      mcpServers: [],
       configs: [config("user", { sandbox: value })],
       extensions: [],
     });
@@ -851,6 +896,7 @@ test("blocks Pi when a configured Melody sandbox cannot be enforced", () => {
   }
 
   const environmentReport = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [],
     extensions: [],
     environment: { sandboxProfile: "workspace" },
@@ -864,6 +910,7 @@ test("blocks Pi when a configured Melody sandbox cannot be enforced", () => {
 
 test("recognizes the settings-page LSP switch and unsupported alternate MCP root", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [{ name: "github", transport: "stdio", supported: false }],
     configs: [
       config("user", {
         features: { lsp_tools: true },
@@ -883,6 +930,7 @@ test("recognizes the settings-page LSP switch and unsupported alternate MCP root
 
 test("does not treat explicitly disabled memory as a Pi blocker", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", { memory: { enabled: false } })],
     extensions: [],
   });
@@ -892,6 +940,7 @@ test("does not treat explicitly disabled memory as a Pi blocker", () => {
 
 test("keeps common Host-owned memory lifecycle on Pi", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("project", {
         memory: {
@@ -910,6 +959,7 @@ test("keeps common Host-owned memory lifecycle on Pi", () => {
 
 test("degrades semantic memory index and dream consolidation settings", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [
       config("user", {
         memory: {
@@ -934,6 +984,7 @@ test("degrades semantic memory index and dream consolidation settings", () => {
 
 test("blocks Pi when either config document cannot be parsed", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("project", {}, "invalid TOML")],
     extensions: [],
   });
@@ -950,6 +1001,7 @@ test("blocks Pi when either config document cannot be parsed", () => {
 
 test("keeps a Pi session running with degradation-only capability gaps", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [{ name: "broken", transport: "stdio", supported: false }],
     configs: [config("project", { mcp_servers: { broken: { command: "" } } })],
     extensions: [{ kind: "plugins", name: "git-tools", enabled: true }],
     agentDefinitions: [
@@ -986,6 +1038,7 @@ test("keeps a Pi session running with degradation-only capability gaps", () => {
 
 test("still lists degradations when a blocking config failure coexists", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [],
     configs: [config("user", {}, "invalid TOML")],
     extensions: [{ kind: "plugins", name: "git-tools", enabled: true }],
   });
@@ -1004,6 +1057,7 @@ test("still lists degradations when a blocking config failure coexists", () => {
 
 test("collects degradations as exactly the warning-severity diagnostics", () => {
   const report = inspectPiCapabilityReport({
+    mcpServers: [{ name: "broken", transport: "stdio", supported: false }],
     configs: [
       config("user", {}, "invalid TOML"),
       config("project", { mcp_servers: { broken: { command: "" } } }),

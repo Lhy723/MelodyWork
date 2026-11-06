@@ -6,19 +6,19 @@ Restored from `HEAD`; no product behavior was changed.
 
 | Suite | Tests | Pass | Fail | Exit |
 |-------|-------|------|------|------|
-| `pnpm test:unit` | 321 | 273 | 48 | 1 |
+| `pnpm test:unit` | 398 | 398 | 0 | 0 |
 | `pnpm test:projection` | 24 | 24 | 0 | 0 |
-| `pnpm test:agent-worker` | 68 | 65 | 3 | 1 |
-| `cargo test --lib` | 19 | 19 | 0 | 0 |
+| `pnpm test:agent-worker` | 140 | 140 | 0 | 0 |
+| `cargo test --lib` | 26 | 26 | 0 | 0 |
 
-Note: `workspace_runtime_tests.rs` is restored but not wired; wiring it fails compilation with 8 errors, so `cargo test --lib` currently runs the routing + git tests only.
+Note: `workspace_runtime_tests.rs` is now wired; `cargo test --lib` runs routing, git, and workspace tests (26 total).
 
 ## Summary
 
 | Category | Files |
 |----------|-------|
-| PASS | 47 |
-| API_DRIFT | 8 |
+| PASS | 55 |
+| API_DRIFT | 0 |
 | OBSOLETE | 1 |
 | NEEDS_REWRITE | 0 |
 | RUNNER | 0 |
@@ -27,14 +27,14 @@ Note: `workspace_runtime_tests.rs` is restored but not wired; wiring it fails co
 
 | Category | File | Evidence |
 |----------|------|----------|
-| API_DRIFT | `packages/agent-worker/src/pi/compaction-extension.test.mjs` | SyntaxError: './goal-extension.ts' does not provide an export named 'GOAL_STATE_ENTRY' |
-| API_DRIFT | `packages/agent-worker/src/pi/goal-extension.test.mjs` | SyntaxError: './goal-extension.ts' does not provide an export named 'GOAL_STATE_ENTRY' |
-| API_DRIFT | `packages/agent-worker/src/pi/session-adapter.test.mjs` | SyntaxError: './session-adapter.ts' does not provide an export named 'applyModelPolicyOverrides' |
-| API_DRIFT | `src-tauri/src/workspace_runtime_tests.rs` | missing read_workspace_binary_bytes, collect_tree, terminal_command, wait_for_terminal_exit (moved to workspace submodules) |
-| API_DRIFT | `src/domain/agent/capability-report.test.mjs` | TypeError: Cannot read properties of undefined (reading 'filter') |
-| API_DRIFT | `src/domain/agent/event-store-adapter.test.mjs` | AssertionError: actual undefined, expected a defined cursor/checkpoint |
-| API_DRIFT | `src/domain/agent/explorer-branch.test.mjs` | SyntaxError: './explorer-branch.ts' does not provide an export named 'MAX_EXPLORER_BRING_BACK_CODEPOINTS' |
-| API_DRIFT | `src/domain/agent/projection-store-patch.test.mjs` | AssertionError: actual undefined, expected 'ready' |
+| PASS | `packages/agent-worker/src/pi/compaction-extension.test.mjs` | re-exported GOAL_STATE_ENTRY from goal-extension.ts |
+| PASS | `packages/agent-worker/src/pi/goal-extension.test.mjs` | re-exported goal-state/goal-guards helpers from goal-extension.ts |
+| PASS | `packages/agent-worker/src/pi/session-adapter.test.mjs` | re-exported model/discovery/record helpers; tests use subagents.taskController, sessionEvents.handle, modelCatalog.getModelRuntime |
+| PASS | `src-tauri/src/workspace_runtime_tests.rs` | re-exported the four helpers under #[cfg(test)]; module wired |
+| PASS | `src/domain/agent/capability-report.test.mjs` | added required mcpServers inventory to 52 calls; aligned 4 cases to the Host-inventory contract |
+| PASS | `src/domain/agent/event-store-adapter.test.mjs` | acpPhase -> runtimePhase |
+| PASS | `src/domain/agent/explorer-branch.test.mjs` | restored MAX_EXPLORER_BRING_BACK_CODEPOINTS and appendExplorerConclusionToDraft; wired into bringBack |
+| PASS | `src/domain/agent/projection-store-patch.test.mjs` | acpCursor -> eventCursor, acpPhase -> runtimePhase |
 | OBSOLETE | `src-tauri/src/acp_policy_tests.rs` | not restored: orphan in HEAD (no acp_policy.rs, no #[path] wiring) |
 | PASS | `packages/agent-contract/src/capabilities.test.mjs` | no failure reported in test:unit / test:projection / test:agent-worker |
 | PASS | `packages/agent-contract/src/validation.test.mjs` | no failure reported in test:unit / test:projection / test:agent-worker |

@@ -29,6 +29,29 @@ import type { GoalStateEntryData } from "./goal-state.ts";
 
 export const PI_UPDATE_GOAL = "update_goal" as const;
 
+/**
+ * The goal state helpers and guards were inlined in this module before the
+ * state split. They remain part of this extension's public surface: tests and
+ * callers observe goal transitions through it, not through the internal files.
+ */
+export {
+  clearGoalState,
+  GOAL_STATE_ENTRY,
+  normalizeGoalPolicy,
+  parseGoalObjective,
+  pauseGoalState,
+  reconstructGoalState,
+  resumeGoalState,
+  startGoalState,
+  summarizeGoalState,
+  transitionGoalState,
+} from "./goal-state.ts";
+export {
+  enforceGoalGuards,
+  finiteGuardTokens,
+  tokenUsageFromMessage,
+} from "./goal-guards.ts";
+
 export interface GoalExtensionOptions {
   /** Disable mutation while retaining a read-only status surface. */
   enabled?: () => boolean;

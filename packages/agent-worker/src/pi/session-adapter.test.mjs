@@ -994,7 +994,7 @@ test("synchronizes Host-projected model credentials before reloading Pi", async 
   const adapter = new PiSessionAdapter(async (event) => {
     events.push(event);
   });
-  adapter.getModelRuntime = async () => ({
+  adapter.modelCatalog.getModelRuntime = async () => ({
     removeRuntimeApiKey: async (providerId) => {
       removedProviders.push(providerId);
     },
@@ -1215,7 +1215,7 @@ test("validates the complete session configuration before mutating Pi", async ()
   // JS private slots), which lets this test exercise the transaction boundary
   // with a small fake Pi session instead of opening a provider connection.
   adapter.sessions.set("session-1", handle);
-  adapter.getModelRuntime = async () => ({
+  adapter.modelCatalog.getModelRuntime = async () => ({
     getModels: () => [model],
   });
 
@@ -1301,13 +1301,13 @@ test("closeAll reaps orphaned child tasks", async () => {
       return { output: "" };
     }),
   };
-  adapter.tasks.set("orphan-task", task);
+  adapter.subagents.tasks.set("orphan-task", task);
 
   await adapter.closeAll();
 
   assert.equal(cancelled, true);
   assert.equal(settled, true);
-  assert.equal(adapter.tasks.size, 0);
+  assert.equal(adapter.subagents.tasks.size, 0);
 });
 
 test("does not acknowledge a steer that becomes stale while Pi is awaiting it", async () => {
@@ -1534,9 +1534,9 @@ test("background task controls enforce session ownership and wait semantics", as
       release();
     },
   };
-  adapter.tasks.set(task.taskId, task);
+  adapter.subagents.tasks.set(task.taskId, task);
 
-  const immediate = await adapter.waitTasksForSession({
+  const immediate = await adapter.subagents.taskController.wait({
     taskIds: [task.taskId],
     mode: "wait_any",
     timeoutMs: 0,
@@ -1545,7 +1545,7 @@ test("background task controls enforce session ownership and wait semantics", as
   assert.equal(immediate[0].status, "running");
   assert.equal(immediate[0].output, "partial");
 
-  const waiting = adapter.waitTasksForSession({
+  const waiting = adapter.subagents.taskController.wait({
     taskIds: [task.taskId],
     mode: "wait_all",
     timeoutMs: 500,
@@ -1559,14 +1559,14 @@ test("background task controls enforce session ownership and wait semantics", as
   // snapshot without manufacturing a terminal state.
   assert.equal(completed[0].output, "partial");
 
-  await adapter.cancelTaskForSession({
+  await adapter.subagents.taskController.cancel({
     taskId: task.taskId,
     parentSessionId: "session-1",
   });
   assert.equal(task.status, "cancelled");
 
   await assert.rejects(
-    adapter.waitTasksForSession({
+    adapter.subagents.taskController.wait({
       taskIds: [task.taskId],
       mode: "wait_any",
       timeoutMs: 0,
@@ -1691,7 +1691,7 @@ test("finishes a Pi run as failed when its settled assistant response errored", 
     '429: {"message":"inference exceeds tpm/rpm limit","type":"rate_limit_error","code":"RateLimitExceeded.EndpointTPMExceeded"}';
   const providerMessageWithSecret = `${providerMessage} Authorization: Bearer sk-test-secret-token api_key=sk-another-test-secret`;
 
-  await adapter.onPiEvent("session-1", {
+  await adapter.sessionEvents.handle("session-1", {
     type: "message_end",
     message: {
       role: "assistant",
@@ -1703,7 +1703,7 @@ test("finishes a Pi run as failed when its settled assistant response errored", 
       usage: { input: 0, output: 0, totalTokens: 0 },
     },
   });
-  await adapter.onPiEvent("session-1", { type: "agent_settled" });
+  await adapter.sessionEvents.handle("session-1", { type: "agent_settled" });
 
   const terminal = events.at(-1);
   assert.equal(terminal.event.type, "run.finished");
@@ -1746,7 +1746,7 @@ test("a successful Pi response clears an earlier transient assistant error", asy
   };
   adapter.sessions.set("session-1", handle);
 
-  await adapter.onPiEvent("session-1", {
+  await adapter.sessionEvents.handle("session-1", {
     type: "message_end",
     message: {
       role: "assistant",
@@ -1754,7 +1754,7 @@ test("a successful Pi response clears an earlier transient assistant error", asy
       errorMessage: "temporary provider failure",
     },
   });
-  await adapter.onPiEvent("session-1", {
+  await adapter.sessionEvents.handle("session-1", {
     type: "message_end",
     message: {
       role: "assistant",
@@ -1762,7 +1762,7 @@ test("a successful Pi response clears an earlier transient assistant error", asy
       content: [{ type: "text", text: "Recovered" }],
     },
   });
-  await adapter.onPiEvent("session-1", { type: "agent_settled" });
+  await adapter.sessionEvents.handle("session-1", { type: "agent_settled" });
 
   const terminal = events.at(-1);
   assert.equal(terminal.event.type, "run.finished");

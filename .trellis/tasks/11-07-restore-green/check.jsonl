@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Verify the type fix stays at the bridge boundary and adds no cast escape hatch"}
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Verify Rust test wiring follows the module test convention"}
