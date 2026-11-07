@@ -17,8 +17,6 @@ import {
   listStoredSessions,
   pickWorkspaceDirectory,
   restoreProject as restoreStoredProject,
-  stopAgent,
-  isTauriRuntime,
   upsertProject,
 } from "@/lib/melody-bridge";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
@@ -313,17 +311,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
       if (isIndependentProject(project)) {
         return { deleted: false, error: "独立任务不能删除。" };
       }
-      // Browser preview owns its agent in the renderer. Desktop deletion is
-      // cleaned up by the Host using session bindings and workspace-scoped Pi
-      // lifecycle before it removes project/session rows.
-      if (get().activeProject?.id === project.id && !isTauriRuntime()) {
-        try {
-          await stopAgent();
-        } catch {
-          // Deleting the local project record remains possible if the agent has
-          // already exited or the stop notification is unavailable.
-        }
-      }
+      // Desktop deletion is cleaned up by the Host using session bindings and
+      // workspace-scoped Pi lifecycle before it removes project/session rows.
       const operationToken = beginWorkspaceAction();
       set({ error: undefined });
       try {

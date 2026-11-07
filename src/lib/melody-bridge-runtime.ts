@@ -290,35 +290,6 @@ export const fetchResearchResource = async (
   return response.body;
 };
 
-export const getAgentStatus = async (): Promise<AgentStatus> => {
-  if (!isTauriRuntime()) {
-    return {
-      phase: "stopped",
-      message: "浏览器预览",
-    };
-  }
-  return invoke<AgentStatus>("agent_status");
-};
-
-export const startAgent = async (cwd: string): Promise<AgentStatus> => {
-  if (!isTauriRuntime()) {
-    return {
-      phase: "stopped",
-      message: "浏览器预览",
-    };
-  }
-  return invoke<AgentStatus>("start_agent", {
-    request: { cwd },
-  });
-};
-
-export const stopAgent = async (): Promise<AgentStatus> => {
-  if (!isTauriRuntime()) {
-    return { phase: "stopped", message: "浏览器预览" };
-  }
-  return invoke<AgentStatus>("stop_agent");
-};
-
 /**
  * Pi worker bridge used by Desktop Agent sessions. Browser preview reports a
  * stopped worker and uses its local ACP fixture through a separate adapter.

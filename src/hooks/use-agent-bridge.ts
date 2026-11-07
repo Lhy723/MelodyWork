@@ -1,13 +1,12 @@
 import { useEffect, useRef } from "react";
 
 import { toUserMessage } from "@/domain/app-error";
+import type { AgentStatus } from "@/domain/acp";
 import {
-  getAgentStatus,
   getPiAgentSessionBinding,
   getPiWorkerStatus,
   isTauriRuntime,
   readStoredSessionTimeline,
-  startAgent,
   startPiWorker,
   stopPiWorker,
   subscribeToAcp,
@@ -17,6 +16,15 @@ import { getPiCapabilityReport } from "@/lib/pi-compatibility";
 import { isLegacyArchiveSession } from "@/domain/agent/session-archive";
 import type { SessionRecord } from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
+
+/**
+ * Browser preview has no host process: the legacy `agent_status`/`start_agent`
+ * commands are gone, so the renderer reports the same stopped fixture locally.
+ */
+const previewAgentStatus = (): AgentStatus => ({
+  phase: "stopped",
+  message: "浏览器预览",
+});
 
 export const useAgentBridge = (
   session?: SessionRecord,
@@ -279,9 +287,9 @@ export const useAgentBridge = (
           return;
         }
 
-        const current: Awaited<ReturnType<typeof getAgentStatus>> = usePi
+        const current: AgentStatus = usePi
           ? await getPiWorkerStatus()
-          : await getAgentStatus();
+          : previewAgentStatus();
         if (disposed) {
           return;
         }
@@ -290,14 +298,12 @@ export const useAgentBridge = (
         // be replaced when the user opens a session from another project.
         // Call the idempotent start command for every Pi connection so the
         // Host can compare the canonical cwd and restart with the right
-        // model and skill catalog. The legacy start path only supports the
-        // browser preview; Desktop ACP bridge calls fail closed.
+        // model and skill catalog. The browser preview has no host to start,
+        // so it keeps reporting the local fixture.
         const shouldInitialize = current.phase === "stopped" || usePi;
         let running = current;
         if (usePi || current.phase === "stopped") {
-          running = usePi
-            ? await startPiWorker(sessionCwd)
-            : await startAgent(sessionCwd);
+          running = usePi ? await startPiWorker(sessionCwd) : current;
         }
         if (disposed) {
           return;

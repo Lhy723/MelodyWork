@@ -39,7 +39,6 @@ const defaults = () => ({
   deleteProject: async () => ({ ok: true }),
   pickWorkspaceDirectory: async () => undefined,
   restoreProject: async (id) => project(id),
-  stopAgent: async () => {},
   upsertProject: async (path) => project("picked", { path }),
 });
 
