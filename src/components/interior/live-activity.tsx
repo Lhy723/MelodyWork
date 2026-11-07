@@ -12,6 +12,8 @@ import {
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
+import { activityAnnouncement } from "./live-activity-announcement";
+
 const SURFACE = {
   type: "spring",
   stiffness: 420,
@@ -241,13 +243,7 @@ export function LiveActivity({
     if (said.current.has(key)) return;
     if (said.current.size > 64) said.current.clear();
     said.current.add(key);
-    setSpoken(
-      activity.phase === "running"
-        ? `${activity.title}已开始。`
-        : activity.phase === "success"
-          ? `${activity.title}已完成。`
-          : `${activity.title}失败。`,
-    );
+    setSpoken(activityAnnouncement(activity.title, activity.phase));
   }, [activity]);
 
   const enter = () => {
