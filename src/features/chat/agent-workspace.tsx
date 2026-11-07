@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import type { AgentPromptAttachment } from "@/domain/acp";
+import { backgroundTaskRows } from "@/domain/agent/background-task-list";
 import { pendingInteractionsBySession } from "@/domain/agent/pending-interaction";
 import { isComposerReadOnly } from "@/domain/agent/session-archive";
 import { toUserMessage } from "@/domain/app-error";
@@ -14,6 +15,7 @@ import type { WorkspaceTab } from "@/features/workspace/workspace-side-panel";
 import { isIndependentProject } from "@/domain/workspace";
 import { useAgentBridge } from "@/hooks/use-agent-bridge";
 import { useAgentMonitors } from "@/hooks/use-agent-monitors";
+import { useBackgroundTerminalTasks } from "@/hooks/use-background-terminal-tasks";
 import { useAgentNotifications } from "@/hooks/use-agent-notifications";
 import { useAppearanceSettings } from "@/hooks/use-appearance-settings";
 import { useGitChanges } from "@/hooks/use-git-changes";
@@ -279,6 +281,16 @@ export function AgentWorkspace() {
     (state) => state.monitorNotifications,
   );
   const { monitors, cancelMonitor } = useAgentMonitors(cwd);
+  const {
+    tasks: backgroundTerminalTasks,
+    errors: backgroundTerminalTaskErrors,
+    stoppingTaskIds: stoppingBackgroundTerminalTaskIds,
+    cancelTask: cancelBackgroundTerminalTask,
+  } = useBackgroundTerminalTasks(activeSession?.id);
+  const backgroundTerminalRows = useMemo(
+    () => backgroundTaskRows(backgroundTerminalTasks),
+    [backgroundTerminalTasks],
+  );
   const sessionIsActive =
     status.phase === "starting" ||
     status.phase === "running" ||
@@ -637,6 +649,12 @@ export function AgentWorkspace() {
       visibleSubagents={visibleSubagents}
       monitorNotifications={monitorNotifications}
       monitors={monitors}
+      backgroundTerminalTasks={backgroundTerminalRows}
+      backgroundTerminalTaskErrors={backgroundTerminalTaskErrors}
+      stoppingBackgroundTerminalTaskIds={stoppingBackgroundTerminalTaskIds}
+      onCancelBackgroundTerminalTask={(taskId) =>
+        void cancelBackgroundTerminalTask(taskId)
+      }
       onCancelMonitor={cancelMonitor}
       workspaceLoading={workspaceLoading}
       workspaceMode={workspaceMode}

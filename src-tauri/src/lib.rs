@@ -1,5 +1,6 @@
 mod agent_runtime;
 mod agent_session_lifecycle;
+mod background_task_runtime;
 mod capability_lifecycle;
 mod config_core;
 mod config_io;
@@ -150,6 +151,8 @@ pub fn run() {
             database::delete_agent_schedule,
             database::get_usage_statistics,
             workspace_sandbox::read_workspace_sandbox_plan,
+            background_task_runtime::list_background_terminal_tasks,
+            background_task_runtime::cancel_background_terminal_task,
             pi_monitor_runtime::start_agent_monitor,
             pi_monitor_runtime::list_agent_monitors,
             pi_monitor_runtime::cancel_agent_monitor,

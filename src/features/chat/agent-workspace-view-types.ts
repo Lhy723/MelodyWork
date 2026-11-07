@@ -1,3 +1,4 @@
+import type { BackgroundTaskRow } from "@/domain/agent/background-task-list";
 import type { PendingInteractionKind } from "@/domain/agent/pending-interaction";
 import type { AgentMonitorNotification } from "@/domain/agent/event-to-session-update";
 import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
@@ -174,6 +175,12 @@ export interface AgentWorkspaceViewProps {
   monitorNotifications: AgentMonitorNotification[];
   /** Running/finished monitors owned by this workspace, newest state first. */
   monitors: AgentMonitorSnapshot[];
+  /** Background terminal tasks owned by the active session, running first. */
+  backgroundTerminalTasks: BackgroundTaskRow[];
+  /** Product task id → the row-level stop failure for that task. */
+  backgroundTerminalTaskErrors: Readonly<Record<string, string>>;
+  stoppingBackgroundTerminalTaskIds: ReadonlySet<string>;
+  onCancelBackgroundTerminalTask: (taskId: string) => void;
   onCancelMonitor: (taskId: string) => void;
   timeline: TimelineEntry[];
   updateSidebarWidth: (nextWidth: number) => void;

@@ -23,6 +23,7 @@ import {
   sessionStatusLabel,
 } from "./agent-workspace-utils";
 import { AgentTimeline } from "./agent-timeline";
+import { BackgroundTaskList } from "./background-task-list";
 import { SessionStatsLine } from "./session-stats-line";
 import { MonitorFeed } from "./monitor-feed";
 import { SubagentTray } from "./subagent-tray";
@@ -85,6 +86,10 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
     visibleSubagents,
     monitorNotifications,
     monitors,
+    backgroundTerminalTasks,
+    backgroundTerminalTaskErrors,
+    stoppingBackgroundTerminalTaskIds,
+    onCancelBackgroundTerminalTask,
     onCancelMonitor,
     workspacePanelOpen,
     workspacePanelResize,
@@ -436,6 +441,16 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                       onCancelMonitor={onCancelMonitor}
                     />
                   </section>
+                  {backgroundTerminalTasks.length > 0 ? (
+                    <section className="harness-session-info-section">
+                      <BackgroundTaskList
+                        errors={backgroundTerminalTaskErrors}
+                        onCancel={onCancelBackgroundTerminalTask}
+                        rows={backgroundTerminalTasks}
+                        stoppingTaskIds={stoppingBackgroundTerminalTaskIds}
+                      />
+                    </section>
+                  ) : null}
                   <section className="harness-session-info-section">
                     <SessionStatsLine
                       contextUsage={contextUsage}

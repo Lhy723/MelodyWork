@@ -72,6 +72,12 @@ struct BackgroundTerminalTask {
     task_id: String,
     owner_session_id: String,
     root: PathBuf,
+    /// The exact shell command, kept so the session panel can label the task
+    /// without re-reading model history.
+    command: String,
+    /// Unix milliseconds. The panel uses it to order finished tasks so it can
+    /// keep the most recent ones without inventing a second registry.
+    started_at: u64,
     cancel: AtomicBool,
     state: Mutex<BackgroundTaskState>,
     changed: Condvar,
@@ -91,9 +97,34 @@ fn background_task_snapshot(task: &BackgroundTerminalTask) -> Value {
         .expect("background task state must not be poisoned");
     json!({
         "task_id": task.task_id,
+        "command": task.command,
         "status": state.status.as_str(),
         "output": bound_task_output(&state.output),
     })
+}
+
+/// The lightweight shape the session panel reads: no captured output, so a
+/// four-second poll of the whole registry stays small. Output remains available
+/// to the model through `get_command_or_subagent_output`.
+fn background_task_entry(task: &BackgroundTerminalTask) -> Value {
+    let status = task
+        .state
+        .lock()
+        .map(|state| state.status.as_str())
+        .unwrap_or("unknown");
+    json!({
+        "task_id": task.task_id,
+        "command": task.command,
+        "status": status,
+        "started_at": task.started_at,
+    })
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn bound_task_output(value: &str) -> String {
@@ -427,6 +458,8 @@ fn start_background_terminal(
         task_id: task_id.clone(),
         owner_session_id: owner_session_id.to_string(),
         root: root.to_path_buf(),
+        command: command.to_string(),
+        started_at: unix_millis(),
         cancel: AtomicBool::new(false),
         state: Mutex::new(BackgroundTaskState {
             status: BackgroundTaskStatus::Running,
@@ -528,15 +561,60 @@ fn authorize_background_task(
         .get(task_id)
         .cloned()
         .ok_or_else(|| format!("Background task not found: {task_id}"))?;
+    if !owns(&task, root, owner_session_id) {
+        return Err("Background task does not belong to this session workspace".to_string());
+    }
+    Ok(task)
+}
+
+/// The one ownership rule for Host terminal tasks: the caller's product session
+/// must be the recorded owner and its workspace must be the task's root.
+fn owns(task: &BackgroundTerminalTask, root: &Path, owner_session_id: &str) -> bool {
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let task_root = task
         .root
         .canonicalize()
         .unwrap_or_else(|_| task.root.clone());
-    if task.owner_session_id != owner_session_id || task_root != canonical_root {
-        return Err("Background task does not belong to this session workspace".to_string());
+    task.owner_session_id == owner_session_id && task_root == canonical_root
+}
+
+/// List this session's terminal tasks as lightweight entries. Ownership uses the
+/// same rule as cancellation; finished tasks stay listed until the bounded
+/// registry prunes them, so the panel can show a final state.
+pub(super) fn list_background_tasks(root: &Path, owner_session_id: &str) -> Vec<Value> {
+    let Ok(tasks) = background_terminal_tasks().lock() else {
+        return Vec::new();
+    };
+    let mut entries = tasks
+        .values()
+        .filter(|task| owns(task, root, owner_session_id))
+        .map(|task| background_task_entry(task))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left["task_id"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["task_id"].as_str().unwrap_or_default())
+    });
+    entries
+}
+
+/// Cancel one of this session's terminal tasks and return its resulting entry.
+/// A task that already finished is not an error: the entry reports its terminal
+/// status so the caller can render "already ended" instead of a failure.
+pub(super) fn cancel_background_task(
+    root: &Path,
+    owner_session_id: &str,
+    task_id: &str,
+) -> Result<Value, String> {
+    let task_id = task_id.trim();
+    if !task_id.starts_with(PI_BACKGROUND_TERMINAL_TASK_PREFIX) {
+        return Err("task_id is not a Host-owned background terminal task".to_string());
     }
-    Ok(task)
+    let task = authorize_background_task(root, owner_session_id, task_id)?;
+    task.cancel.store(true, Ordering::Release);
+    wait_background_task(&task, 2_000);
+    Ok(background_task_entry(&task))
 }
 
 fn wait_background_task(task: &BackgroundTerminalTask, timeout_ms: u64) {
@@ -653,5 +731,150 @@ pub(super) fn cancel_background_tasks_for_workspace(root: &Path) {
         if task_root == canonical_root {
             task.cancel.store(true, Ordering::Release);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_task(
+        id: &str,
+        owner: &str,
+        root: &Path,
+        command: &str,
+        status: BackgroundTaskStatus,
+        output: &str,
+    ) -> BackgroundTerminalTask {
+        BackgroundTerminalTask {
+            task_id: id.to_string(),
+            owner_session_id: owner.to_string(),
+            root: root.to_path_buf(),
+            command: command.to_string(),
+            started_at: 1_700_000_000_000,
+            cancel: AtomicBool::new(false),
+            state: Mutex::new(BackgroundTaskState {
+                status,
+                output: output.to_string(),
+            }),
+            changed: Condvar::new(),
+        }
+    }
+
+    #[test]
+    fn owns_accepts_the_recorded_owner_in_the_same_workspace() {
+        let root = std::env::temp_dir();
+        let task = test_task(
+            "pi-terminal-task:a",
+            "session-a",
+            &root,
+            "sleep 300",
+            BackgroundTaskStatus::Running,
+            "",
+        );
+        assert!(owns(&task, &root, "session-a"));
+    }
+
+    #[test]
+    fn owns_rejects_a_foreign_session_or_workspace() {
+        let root = std::env::temp_dir();
+        let task = test_task(
+            "pi-terminal-task:a",
+            "session-a",
+            &root,
+            "sleep 300",
+            BackgroundTaskStatus::Running,
+            "",
+        );
+        assert!(!owns(&task, &root, "session-b"));
+        assert!(!owns(&task, &root.join("other-workspace"), "session-a"));
+    }
+
+    #[test]
+    fn entry_reports_identity_status_and_command_without_output() {
+        let root = std::env::temp_dir();
+        let task = test_task(
+            "pi-terminal-task:a",
+            "session-a",
+            &root,
+            "sleep 300",
+            BackgroundTaskStatus::Cancelled,
+            "noise",
+        );
+        let entry = background_task_entry(&task);
+        assert_eq!(entry["task_id"].as_str(), Some("pi-terminal-task:a"));
+        assert_eq!(entry["command"].as_str(), Some("sleep 300"));
+        assert_eq!(entry["status"].as_str(), Some("cancelled"));
+        assert_eq!(entry["started_at"].as_u64(), Some(1_700_000_000_000));
+        assert!(entry.get("output").is_none());
+    }
+
+    #[test]
+    fn model_snapshot_carries_the_command_and_bounded_output() {
+        let root = std::env::temp_dir();
+        let task = test_task(
+            "pi-terminal-task:a",
+            "session-a",
+            &root,
+            "sleep 300",
+            BackgroundTaskStatus::Running,
+            "line",
+        );
+        let snapshot = background_task_snapshot(&task);
+        assert_eq!(snapshot["command"].as_str(), Some("sleep 300"));
+        assert_eq!(snapshot["output"].as_str(), Some("line"));
+        assert_eq!(snapshot["status"].as_str(), Some("running"));
+    }
+
+    #[test]
+    fn owner_lists_and_cancels_a_real_background_task() {
+        let root =
+            std::env::temp_dir().join(format!("melody-bg-task-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).expect("scratch workspace");
+        let mut arguments = Map::new();
+        arguments.insert("command".into(), json!("sleep 30"));
+        arguments.insert("background".into(), json!(true));
+        let started: Value = serde_json::from_str(
+            &start_background_terminal(&root, &arguments, None, "session-owner")
+                .expect("background task starts"),
+        )
+        .expect("start result is JSON");
+        let task_id = started["task_id"]
+            .as_str()
+            .expect("start result carries a task id")
+            .to_string();
+
+        let listed = list_background_tasks(&root, "session-owner");
+        assert!(listed.iter().any(|entry| {
+            entry["task_id"].as_str() == Some(task_id.as_str())
+                && entry["command"].as_str() == Some("sleep 30")
+                && entry["status"].as_str() == Some("running")
+        }));
+        assert!(list_background_tasks(&root, "session-other").is_empty());
+        assert!(list_background_tasks(&root.join("elsewhere"), "session-owner").is_empty());
+
+        let cancelled = cancel_background_task(&root, "session-owner", &task_id)
+            .expect("the owner may cancel its task");
+        assert_eq!(cancelled["status"].as_str(), Some("cancelled"));
+        assert!(cancelled.get("output").is_none());
+        // A cancelled status is only reported after the collector reaped the
+        // child, so this also proves the process is gone.
+        let listed_after = list_background_tasks(&root, "session-owner");
+        assert!(
+            listed_after
+                .iter()
+                .any(|entry| entry["task_id"].as_str() == Some(task_id.as_str())
+                    && entry["status"].as_str() == Some("cancelled"))
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cancel_rejects_ids_that_are_not_host_terminal_tasks() {
+        let root = std::env::temp_dir();
+        let error = cancel_background_task(&root, "session-a", "session:task:1")
+            .expect_err("a worker task id must not reach the terminal registry");
+        assert!(error.contains("not a Host-owned background terminal task"));
     }
 }

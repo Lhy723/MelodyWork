@@ -82,6 +82,8 @@ commands.allow = [
   "get_melody_skill_details",
   "uninstall_melody_plugin",
   "delete_melody_skill",
+  "list_background_terminal_tasks",
+  "cancel_background_terminal_task",
   "list_agent_monitors",
   "start_agent_monitor",
   "cancel_agent_monitor",

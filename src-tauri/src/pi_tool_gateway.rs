@@ -151,6 +151,24 @@ pub(crate) fn cancel_background_tasks_for_workspace(root: &Path) {
     terminal_tasks::cancel_background_tasks_for_workspace(root);
 }
 
+/// Lightweight snapshots of the Host terminal tasks owned by one product
+/// session. The session panel polls this; captured output stays with the model
+/// tools so the payload remains small.
+pub(crate) fn list_background_terminal_tasks(root: &Path, owner_session_id: &str) -> Vec<Value> {
+    terminal_tasks::list_background_tasks(root, owner_session_id)
+}
+
+/// Cancel one Host terminal task owned by this session and return its resulting
+/// lightweight snapshot. An already-finished task yields its terminal status
+/// instead of an error.
+pub(crate) fn cancel_background_terminal_task(
+    root: &Path,
+    owner_session_id: &str,
+    task_id: &str,
+) -> Result<Value, String> {
+    terminal_tasks::cancel_background_task(root, owner_session_id, task_id)
+}
+
 /// Resolve a Host-owned background terminal control request. The worker only
 /// receives the resulting `tool.resolve` command; it never gets access to the
 /// registry or a process handle.
