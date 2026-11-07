@@ -2,6 +2,7 @@ import {
   BotIcon,
   FileCode2Icon,
   FilesIcon,
+  GitCommitHorizontalIcon,
   GitCompareArrowsIcon,
   GlobeIcon,
   LibraryIcon,
@@ -50,6 +51,11 @@ const FileWorkspace = lazy(() =>
     default: FileWorkspace,
   })),
 );
+const GitWorkspace = lazy(() =>
+  import("@/features/git/git-workspace").then(({ GitWorkspace }) => ({
+    default: GitWorkspace,
+  })),
+);
 const ChangeReview = lazy(() =>
   import("@/features/git/change-review").then(({ ChangeReview }) => ({
     default: ChangeReview,
@@ -79,6 +85,7 @@ const SubagentConversation = lazy(() =>
 export type WorkspaceTab =
   | { id: string; kind: "files"; label: string }
   | { id: string; kind: "terminal"; label: string }
+  | { id: string; kind: "git"; label: string }
   | { id: string; kind: "review"; label: string }
   | { id: string; kind: "browser"; label: string; sessionId?: string }
   | {
@@ -109,7 +116,7 @@ interface WorkspaceSidePanelProps {
   gitLoading: boolean;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onNewTab: (kind: "files" | "terminal" | "review" | "browser") => void;
+  onNewTab: (kind: "files" | "terminal" | "git" | "review" | "browser") => void;
   onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   onResizeBy: (delta: number) => void;
@@ -134,6 +141,9 @@ const tabIcon = (
   }
   if (tab.kind === "terminal") {
     return <TerminalSquareIcon />;
+  }
+  if (tab.kind === "git") {
+    return <GitCommitHorizontalIcon />;
   }
   if (tab.kind === "review") {
     return <GitCompareArrowsIcon />;
@@ -336,6 +346,10 @@ export function WorkspaceSidePanel({
               <GitCompareArrowsIcon />
               新建审阅
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onNewTab("git")}>
+              <GitCommitHorizontalIcon />
+              新建 Git
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewTab("browser")}>
               <GlobeIcon />
               新建浏览器
@@ -367,6 +381,14 @@ export function WorkspaceSidePanel({
                 >
                   <GitCompareArrowsIcon />
                   审阅
+                </Button>
+                <Button
+                  className="justify-start"
+                  onClick={() => onNewTab("git")}
+                  variant="outline"
+                >
+                  <GitCommitHorizontalIcon />
+                  Git
                 </Button>
                 <Button
                   className="justify-start"
@@ -424,6 +446,14 @@ export function WorkspaceSidePanel({
                   <FileWorkspace embedded onOpenFile={onOpenFile} root={root} />
                 ) : tab.kind === "terminal" ? (
                   <TerminalPanel cwd={cwd} embedded />
+                ) : tab.kind === "git" ? (
+                  <GitWorkspace
+                    changes={changes}
+                    cwd={cwd}
+                    error={gitError}
+                    loading={gitLoading}
+                    onRefreshChanges={onRefreshGit}
+                  />
                 ) : tab.kind === "review" ? (
                   <ChangeReview
                     changes={changes}

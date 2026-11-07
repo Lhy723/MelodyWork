@@ -20,7 +20,7 @@ interface WorkspacePanelLayerProps {
   loading: boolean;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onNewTab: (kind: "files" | "terminal" | "review" | "browser") => void;
+  onNewTab: (kind: "files" | "terminal" | "git" | "review" | "browser") => void;
   onOpenFile: (path: string) => void;
   onOpenProjectReference: (reference: ProjectReference) => void;
   onRefreshGit: () => void | Promise<void>;

@@ -115,7 +115,7 @@ export interface AgentWorkspaceViewProps {
   onDeleteSession: (session: SessionRecord) => void;
   onModeChange: (mode: WorkspaceMode) => void;
   onNewWorkspaceToolTab: (
-    kind: "files" | "terminal" | "review" | "browser",
+    kind: "files" | "terminal" | "git" | "review" | "browser",
   ) => void;
   onOpenSettings: (page?: SettingsPage) => void;
   onRestoreProject: (project: ProjectRecord) => void;

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Layer map, quality gates, and test-suite ownership: determines where the restored surface, hook state, and gates belong"}
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "RequestGate latest-request rule, Zustand selector rules, bridge/invoke boundary, toUserMessage error normalization used by the refresh hook and tab"}
+{"file": ".trellis/spec/frontend/ui.md", "reason": "Component-layer, naming, styling, and embedded-panel conventions for restoring a feature surface inside a workspace tab"}
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Command registration/allowlist and typed bridge-wrapper contract that the restored UI must keep consuming unchanged"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Governs reusing the recovered component and existing helpers instead of writing a second git UI"}
+{"file": ".trellis/tasks/11-07-git-workspace-surface/research/git-surface-history.md", "reason": "Recovered component contract, section-to-helper-to-command map, orphan commit evidence, and the refresh gap"}

@@ -168,7 +168,7 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
   );
 
   const openGit = useCallback(
-    () => openWorkspaceTab({ id: "review", kind: "review", label: "审阅" }),
+    () => openWorkspaceTab({ id: "git", kind: "git", label: "Git" }),
     [openWorkspaceTab],
   );
 
@@ -223,10 +223,11 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
   );
 
   const newWorkspaceToolTab = useCallback(
-    (kind: "files" | "terminal" | "review" | "browser") => {
+    (kind: "files" | "terminal" | "git" | "review" | "browser") => {
       const baseLabel = {
         files: "文件",
         terminal: "终端",
+        git: "Git",
         review: "审阅",
         browser: "浏览器",
       }[kind];
@@ -242,9 +243,11 @@ export function useAgentWorkspaceActions(options: WorkspaceActionsOptions) {
           ? { id, kind: "files", label }
           : kind === "terminal"
             ? { id, kind: "terminal", label }
-            : kind === "review"
-              ? { id, kind: "review", label }
-              : { id, kind: "browser", label, sessionId: activeSessionId };
+            : kind === "git"
+              ? { id, kind: "git", label }
+              : kind === "review"
+                ? { id, kind: "review", label }
+                : { id, kind: "browser", label, sessionId: activeSessionId };
       openWorkspaceTab(tab);
     },
     [activeSessionId, openWorkspaceTab, workspaceTabSequence, workspaceTabs],

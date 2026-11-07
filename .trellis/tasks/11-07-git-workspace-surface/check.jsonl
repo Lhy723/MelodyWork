@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality-check commands and suite ownership the check pass must run without adding out-of-suite tests"}
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Boundary and latest-request rules to audit the restored tab, hook revision, and error handling"}
+{"file": ".trellis/spec/frontend/ui.md", "reason": "UI conventions to audit embedded layout, tokens, and component-layer usage"}
+{"file": ".trellis/tasks/11-07-git-workspace-surface/research/git-surface-history.md", "reason": "Baseline of what the recovered component did, so the check can confirm nothing required was dropped"}

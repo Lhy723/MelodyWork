@@ -248,7 +248,22 @@ export function AgentWorkspace() {
     setWorkspacePanelOpen,
     setSidebarCollapsed,
   });
-  const git = useGitChanges(cwd);
+  // A turn that settles can leave files behind; refresh the shared change list
+  // once it ends instead of waiting for the user to press 刷新.
+  const [gitRefreshRevision, setGitRefreshRevision] = useState(0);
+  const previousChatStatus = useRef(chatStatus);
+
+  useEffect(() => {
+    const wasRunning =
+      previousChatStatus.current === "submitted" ||
+      previousChatStatus.current === "streaming";
+    previousChatStatus.current = chatStatus;
+    if (wasRunning && (chatStatus === "ready" || chatStatus === "error")) {
+      setGitRefreshRevision((current) => current + 1);
+    }
+  }, [chatStatus]);
+
+  const git = useGitChanges(cwd, { revision: gitRefreshRevision });
   const agentError =
     runtimePhase === "error" ||
     status.phase === "missing" ||
