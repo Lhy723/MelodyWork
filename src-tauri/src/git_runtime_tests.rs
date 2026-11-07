@@ -74,3 +74,96 @@ async fn preserves_unicode_and_space_paths_from_porcelain_status() {
 
     fs::remove_dir_all(root).expect("remove temporary git repository");
 }
+
+fn create_committed_repo() -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("melody-git-branches-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).expect("create temporary git repository");
+    let run = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?} should succeed");
+    };
+    run(&["init", "--quiet", "-b", "main"]);
+    fs::write(root.join("notes.txt"), "one\n").expect("write committed file");
+    run(&["add", "notes.txt"]);
+    run(&[
+        "-c",
+        "user.name=qa",
+        "-c",
+        "user.email=qa@example.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "init",
+    ]);
+    root
+}
+
+#[tokio::test]
+async fn rejects_invalid_branch_names_with_product_copy() {
+    let root = create_committed_repo();
+
+    let error = create_branch_at(&root, "bad name")
+        .await
+        .expect_err("invalid branch name should be rejected");
+
+    assert!(error.contains("分支名"), "unexpected message: {error}");
+    assert!(!error.contains("fatal:"), "raw git error leaked: {error}");
+
+    fs::remove_dir_all(root).expect("remove temporary git repository");
+}
+
+#[tokio::test]
+async fn rejects_branch_names_that_look_like_options() {
+    let root = create_committed_repo();
+
+    let error = checkout_branch_at(&root, "-f")
+        .await
+        .expect_err("option-like branch name should be rejected");
+
+    assert!(error.contains("分支名"), "unexpected message: {error}");
+
+    fs::remove_dir_all(root).expect("remove temporary git repository");
+}
+
+#[tokio::test]
+async fn checkout_switches_head_to_an_existing_branch() {
+    let root = create_committed_repo();
+    create_branch_at(&root, "feature-check")
+        .await
+        .expect("create branch");
+
+    checkout_branch_at(&root, "main")
+        .await
+        .expect("checkout main");
+
+    let head = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&root)
+        .output()
+        .expect("read HEAD");
+    assert!(head.status.success(), "git rev-parse should succeed");
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+
+    fs::remove_dir_all(root).expect("remove temporary git repository");
+}
+
+#[tokio::test]
+async fn checkout_missing_branch_returns_not_found_copy() {
+    let root = create_committed_repo();
+
+    let error = checkout_branch_at(&root, "missing-branch")
+        .await
+        .expect_err("missing branch should be rejected");
+
+    assert!(error.contains("不存在"), "unexpected message: {error}");
+    assert!(
+        error.contains("missing-branch"),
+        "unexpected message: {error}"
+    );
+
+    fs::remove_dir_all(root).expect("remove temporary git repository");
+}

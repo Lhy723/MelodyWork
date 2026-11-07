@@ -51,11 +51,16 @@ pub async fn git_create_worktree(
     create_branch: bool,
 ) -> Result<(), String> {
     let cwd = registry.authorize(&cwd)?;
-    if path.trim().is_empty() || branch.trim().is_empty() {
-        return Err("Worktree path and branch cannot be empty".to_string());
+    if path.trim().is_empty() {
+        return Err("Worktree path cannot be empty".to_string());
     }
-    if create_branch {
-        validate_branch_name(&cwd, &branch).await?;
+    let branch = if create_branch {
+        validate_branch_name(&cwd, &branch).await?
+    } else {
+        branch.trim().to_string()
+    };
+    if branch.is_empty() {
+        return Err("Worktree branch cannot be empty".to_string());
     }
     let mut args = vec!["worktree".to_string(), "add".to_string()];
     if create_branch {

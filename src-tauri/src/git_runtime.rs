@@ -384,10 +384,7 @@ pub async fn git_checkout_branch(
     branch: String,
 ) -> Result<(), String> {
     let cwd = registry.authorize(&cwd)?;
-    validate_branch_name(&cwd, &branch).await?;
-    run_git_dynamic(&cwd, &["checkout".to_string(), "--".to_string(), branch])
-        .await
-        .map(|_| ())
+    checkout_branch_at(&cwd, &branch).await
 }
 
 #[tauri::command]
@@ -397,31 +394,92 @@ pub async fn git_create_branch(
     branch: String,
 ) -> Result<(), String> {
     let cwd = registry.authorize(&cwd)?;
-    let branch = branch.trim();
-    if branch.is_empty() {
-        return Err("Branch name cannot be empty".to_string());
-    }
-    run_git_dynamic(
-        &cwd,
+    create_branch_at(&cwd, &branch).await
+}
+
+pub(crate) async fn checkout_branch_at(cwd: &Path, branch: &str) -> Result<(), String> {
+    let branch = validate_branch_name(cwd, branch).await?;
+    let reference = format!("refs/heads/{branch}");
+    let exists = run_git_dynamic(
+        cwd,
         &[
-            "check-ref-format".to_string(),
-            "--branch".to_string(),
-            branch.to_string(),
+            "rev-parse".to_string(),
+            "--verify".to_string(),
+            "--quiet".to_string(),
+            reference,
         ],
     )
-    .await?;
+    .await
+    .is_ok();
+    if !exists {
+        return Err(format!("分支「{}」不存在。", branch_label(&branch)));
+    }
+    run_git_dynamic(cwd, &["checkout".to_string(), branch.clone()])
+        .await
+        .map(|_| ())
+        .map_err(|reason| {
+            format!(
+                "无法切换到分支「{}」：{}",
+                branch_label(&branch),
+                first_line(&reason)
+            )
+        })
+}
+
+pub(crate) async fn create_branch_at(cwd: &Path, branch: &str) -> Result<(), String> {
+    let branch = validate_branch_name(cwd, branch).await?;
     run_git_dynamic(
-        &cwd,
-        &["checkout".to_string(), "-b".to_string(), branch.to_string()],
+        cwd,
+        &["checkout".to_string(), "-b".to_string(), branch.clone()],
     )
     .await
     .map(|_| ())
+    .map_err(|reason| {
+        format!(
+            "无法创建分支「{}」：{}",
+            branch_label(&branch),
+            first_line(&reason)
+        )
+    })
 }
 
-async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<(), String> {
+const INVALID_BRANCH_HINT: &str = "请避免空格、~ ^ : ? * [ \\ 等字符，且不要以 - 或 / 开头或结尾。";
+const BRANCH_LABEL_LIMIT: usize = 64;
+
+fn branch_label(branch: &str) -> String {
+    let trimmed = branch.trim();
+    let mut label: String = trimmed.chars().take(BRANCH_LABEL_LIMIT).collect();
+    if trimmed.chars().count() > BRANCH_LABEL_LIMIT {
+        label.push('…');
+    }
+    label
+}
+
+fn invalid_branch_error(branch: &str) -> String {
+    format!(
+        "分支名「{}」不合法。{INVALID_BRANCH_HINT}",
+        branch_label(branch)
+    )
+}
+
+fn first_line(message: &str) -> String {
+    message
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(message)
+        .trim()
+        .to_string()
+}
+
+/// Returns the trimmed branch name so callers never re-trim or build args from
+/// the raw renderer string.
+pub(crate) async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<String, String> {
     let branch = branch.trim();
     if branch.is_empty() {
-        return Err("Branch name cannot be empty".to_string());
+        return Err("分支名不能为空。".to_string());
+    }
+    if branch.starts_with('-') {
+        return Err(invalid_branch_error(branch));
     }
     run_git_dynamic(
         cwd,
@@ -432,7 +490,8 @@ async fn validate_branch_name(cwd: &Path, branch: &str) -> Result<(), String> {
         ],
     )
     .await
-    .map(|_| ())
+    .map_err(|_| invalid_branch_error(branch))?;
+    Ok(branch.to_string())
 }
 
 #[path = "git_runtime_tests.rs"]
