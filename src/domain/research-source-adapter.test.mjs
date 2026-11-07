@@ -73,6 +73,7 @@ test("does not retry malformed responses", async () => {
 test("reserves per-source request slots for concurrent lookups", async () => {
   const sleeps = [];
   const client = new ResearchSourceClient({
+    now: () => 0,
     sleep: async (milliseconds) => sleeps.push(milliseconds),
     policies: {
       Crossref: { ...policy, minIntervalMs: 25 },

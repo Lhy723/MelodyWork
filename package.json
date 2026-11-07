@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "check": "tsc --noEmit && pnpm check:agent-contract && pnpm check:agent-worker && pnpm check:agent-packaging && pnpm check:pi-compatibility && pnpm check:format-coverage",
+    "check": "tsc --noEmit && pnpm check:agent-contract && pnpm check:agent-worker && pnpm check:agent-packaging && pnpm check:pi-compatibility && pnpm check:format-coverage && pnpm check:test-coverage",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -19,6 +19,7 @@
     "check:updater-key": "node scripts/validate-updater-key.mjs",
     "check:architecture": "prettier --check scripts/check-architecture.mjs && node scripts/check-architecture.mjs",
     "check:format-coverage": "node scripts/check-format-coverage.mjs",
+    "check:test-coverage": "node scripts/check-test-suite-coverage.mjs",
     "check:pi-compatibility": "prettier --check scripts/tauri-command-permission-check.mjs scripts/pi-resource-compatibility.mjs scripts/source-numeric-constant.mjs scripts/pi-agent-schedule-compatibility.mjs scripts/pi-model-policy-compatibility.mjs scripts/pi-subagent-policy-compatibility.mjs scripts/pi-terminal-compatibility.mjs scripts/pi-question-timeout-compatibility.mjs scripts/pi-web-tools-compatibility.mjs scripts/pi-memory-tools-compatibility.mjs scripts/pi-lsp-compatibility.mjs scripts/pi-codebase-index-compatibility.mjs scripts/pi-mcp-transports-compatibility.mjs scripts/pi-mcp-inventory-compatibility.mjs scripts/pi-compaction-compatibility.mjs scripts/pi-hooks-compatibility.mjs scripts/pi-tool-names-compatibility.mjs scripts/check-pi-compatibility.mjs && node scripts/check-pi-compatibility.mjs",
     "check:agent-packaging": "node scripts/check-agent-packaging.mjs",
     "prepare:agent-worker": "node scripts/prepare-agent-worker.mjs --required",
