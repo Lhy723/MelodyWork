@@ -26,11 +26,17 @@ mock.module("@/lib/agent-client.ts", {
 });
 mock.module("@/lib/melody-bridge.ts", {
   namedExports: Object.fromEntries(
-    Object.keys(bridge).map((name) => [name, (...args) => bridge[name](...args)]),
+    Object.keys(bridge).map((name) => [
+      name,
+      (...args) => bridge[name](...args),
+    ]),
   ),
 });
 mock.module("@/stores/agent-store-pi.ts", {
-  namedExports: { resetPiEventProjection: () => {}, receiveAgentEvent: () => {} },
+  namedExports: {
+    resetPiEventProjection: () => {},
+    receiveAgentEvent: () => {},
+  },
 });
 
 const { beginAgentSession } = await import("@/stores/agent-store-session.ts");
@@ -156,8 +162,5 @@ test("a failed activation reports through the normalized message", async () => {
   const state = store.get();
   assert.equal(state.runtimePhase, "error");
   assert.equal(state.chatStatus, "error");
-  assert.equal(
-    state.status.message,
-    "网络请求失败，请检查网络连接后重试。",
-  );
+  assert.equal(state.status.message, "网络请求失败，请检查网络连接后重试。");
 });

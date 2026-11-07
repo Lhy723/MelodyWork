@@ -32,7 +32,8 @@ const defaults = () => ({
   isTauriRuntime: () => false,
   listProjects: async () => [],
   listStoredSessions: async () => [],
-  createStoredSession: async (projectId) => session(`new-${projectId}`, projectId),
+  createStoredSession: async (projectId) =>
+    session(`new-${projectId}`, projectId),
   deleteStoredSession: async () => {},
   archiveProject: async (id) => project(id, { archived: true }),
   deleteProject: async () => ({ ok: true }),
