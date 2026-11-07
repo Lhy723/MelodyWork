@@ -78,6 +78,53 @@ Use the updater form for derived state:
 set((state) => ({ stderr: [...state.stderr.slice(-49), line] }));
 ```
 
+### Cross-session derived state
+
+When one surface needs state for *many* sessions (sidebar badges,
+notifications), do not subscribe per node and do not compute in the leaf. Read
+the raw facts once, then derive with a pure `src/domain` function:
+
+```ts
+// src/features/chat/agent-workspace.tsx
+const {
+  backgroundTimelines,
+  localSessionId: agentLocalSessionId,
+  runningSessions,
+  timeline,
+} = useAgentStore(
+  useShallow((state) => ({
+    backgroundTimelines: state.backgroundTimelines,
+    localSessionId: state.localSessionId,
+    runningSessions: state.runningSessions,
+    timeline: state.timeline,
+  })),
+);
+const waitingSessions = useMemo(
+  () =>
+    pendingInteractionsBySession({
+      localSessionId: agentLocalSessionId,
+      timeline,
+      backgroundTimelines,
+      sessions: Object.values(sessionsByProject).flat(),
+    }),
+  [agentLocalSessionId, backgroundTimelines, sessionsByProject, timeline],
+);
+```
+
+- The domain function owns precedence, dedupe keys, and identity resolution —
+  see `src/domain/agent/pending-interaction.ts`.
+- Pass the result down as a prop (`waitingSessions` flows
+  `AgentWorkspaceView` → `AppSidebar` → `SidebarProjectsNavigation`). A tree
+  leaf must not call `useAgentStore` itself.
+- `backgroundTimelines` is keyed by the event identity
+  (`streamSessionId ?? sessionId`), not by product session id. Resolve keys
+  with `productSessionIdForRuntimeKey`; drop keys that resolve to nothing
+  instead of attributing them to another session.
+
+Reading multiple fields in one `useShallow` selector is the exception to the
+one-selector-per-field rule above: it keeps two derived indicators from
+observing inconsistent frames.
+
 ## Async Work And Stale Results
 
 Two existing tools; pick by scope.
