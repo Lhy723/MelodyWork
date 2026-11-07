@@ -44,6 +44,16 @@ pattern (21 import `cn`, 22 use `data-slot`). Match it for a new primitive.
   `ring-ring`) rather than literal colors. Token values live in
   `src/styles/base.css` and are documented in `DESIGN.md` (oklch palette,
   Geist typography, radii).
+- Never put `backdrop-filter` on a surface that spans the window or a large
+  dock (app shell, composer, turn headers). Compose those from opaque layer
+  tokens (`--harness-bg-layer-*`) instead.
+- Blur is only acceptable on transient, small overlays (dialog/drawer/modal
+  scrims, popovers) that are unmounted at idle.
+- Why: three full-window/dock blurs cost ~17.5 GPU points on a 4K@160Hz
+  display (paired interleaved) while app CPU stayed ~0 — WindowServer pays for
+  it. Removed in `0b5fa19b`.
+- Check: `grep -rn "backdrop-filter\|backdrop-blur" src/styles src/components`
+  should only return overlay-scoped rules and the reduced-transparency reset.
 - Long app-shell styles live in the layered files under `src/styles/`
   (`harness-layout.css`, `harness-chat.css`, `harness-trajectory.css`, ...).
   Add shell-level rules there; keep feature markup on utilities.
