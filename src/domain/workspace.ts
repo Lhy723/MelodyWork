@@ -18,6 +18,14 @@ export interface ProjectDeleteResult {
 export const isIndependentProject = (project?: ProjectRecord) =>
   project?.isIndependent === true || project?.id === INDEPENDENT_PROJECT_ID;
 
+/** Titles a session carries before the user gives it one. */
+export const UNTITLED_SESSION_TITLES = ["New session", "新会话"] as const;
+
+export const isUntitledSessionTitle = (title: string) => {
+  const trimmed = title.trim();
+  return trimmed === "" || UNTITLED_SESSION_TITLES.some((t) => t === trimmed);
+};
+
 export interface SessionRecord {
   id: string;
   projectId: string;

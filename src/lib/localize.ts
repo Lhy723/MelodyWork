@@ -1,2 +1,4 @@
+import { isUntitledSessionTitle } from "@/domain/workspace";
+
 export const localizedSessionTitle = (title: string) =>
-  title === "New session" ? "新会话" : title;
+  isUntitledSessionTitle(title) ? "新会话" : title;

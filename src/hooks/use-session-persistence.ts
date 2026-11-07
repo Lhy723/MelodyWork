@@ -3,7 +3,10 @@ import { useEffect, useRef } from "react";
 import { prepareTimelineSnapshot } from "@/domain/session-snapshot";
 import { timelineProjectionVersion } from "@/domain/session-projection";
 import { updateStoredSession } from "@/lib/melody-bridge";
-import type { TimelineArchiveEntry } from "@/domain/workspace";
+import {
+  isUntitledSessionTitle,
+  type TimelineArchiveEntry,
+} from "@/domain/workspace";
 import { useAgentStore } from "@/stores/agent-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -13,11 +16,7 @@ const deriveTitle = (
   currentTitle: string | undefined,
   timeline: ReturnType<typeof useAgentStore.getState>["timeline"],
 ) => {
-  if (
-    currentTitle &&
-    currentTitle !== "New session" &&
-    currentTitle !== "新会话"
-  ) {
+  if (currentTitle && !isUntitledSessionTitle(currentTitle)) {
     return currentTitle;
   }
   const firstPrompt = timeline.find(
