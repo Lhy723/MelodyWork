@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "Audit that both commands have handler + lib.rs registration + permissions entry + typed bridge, validate the renderer-supplied session id against SQLite, and return Result instead of panicking"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality-check command list and suite ownership the check pass must run without adding an out-of-suite test"}
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Boundary rules to audit: no leaf store subscription, RequestGate on session switches, polling cleanup, error copy normalization"}
+{"file": ".trellis/spec/frontend/ui.md", "reason": "Audit the new section and row control against component-layer, naming, truncation, and a11y conventions"}
+{"file": ".trellis/tasks/11-07-background-task-control/research/task-control-evidence.md", "reason": "Behavioral baseline: expected snapshot shape, ownership semantics, finished-task no-error guarantee, and why no worker/protocol change is allowed"}

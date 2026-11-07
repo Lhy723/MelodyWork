@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/tauri-host/index.md", "reason": "New-command four-piece rule (handler, lib.rs registration, permissions/default.toml allowlist, typed bridge), Result<T, String> contract, and the cargo/pnpm gates this task must run"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Layer map: bridge in src/lib, polling hook in src/hooks, pure derivation in src/domain, panel component in src/features/chat"}
+{"file": ".trellis/spec/frontend/conventions.md", "reason": "Derived-state rule (one read + pure domain function + prop drilling, no leaf subscription), RequestGate latest-request rule, and error normalization for the list/stop state machine"}
+{"file": ".trellis/spec/frontend/ui.md", "reason": "Component-layer, naming, and a11y conventions for the new panel section and its row stop button"}
+{"file": ".trellis/tasks/11-07-background-task-control/research/task-control-evidence.md", "reason": "Verified terminal-task surfaces: creation path, registry shape (no command field, finished tasks retained), ownership rule, kill/wait path, absence of any command or renderer exposure, and the protocol trade-off evidence in §10"}
