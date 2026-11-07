@@ -218,14 +218,13 @@
   align-items: center;
   gap: 8px;
   border: 0;
-  background: color-mix(in srgb, var(--harness-bg-layer-2) 84%, transparent);
+  background: var(--harness-bg-layer-2);
   padding: 0 max(16px, calc((100% - 880px) / 2));
   color: var(--harness-label-primary);
   cursor: pointer;
   font-size: var(--type-size-label);
   line-height: var(--type-leading-label);
   text-align: left;
-  backdrop-filter: blur(8px);
 }
 
 .harness-trajectory-turn-header > span {

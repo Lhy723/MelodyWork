@@ -252,8 +252,6 @@ body {
 
 .app-native-vibrancy-window #root {
   background: var(--app-native-window-material) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
-  backdrop-filter: blur(18px) saturate(135%);
 }
 
 .app-native-vibrancy-window .workspace-stage[data-settings-open="false"] {
