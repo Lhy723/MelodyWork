@@ -28,10 +28,6 @@ export const WORKSPACE_MODE_STORAGE_KEY = "melodywork.workspace-mode";
 export const DEFAULT_CHAT_DOCK_SPACE = 168;
 export const SESSION_INFO_MOTION_MS = 220;
 
-export const isMacOS =
-  typeof navigator !== "undefined" &&
-  /Macintosh|Mac OS X/.test(navigator.userAgent);
-
 const isAbsoluteWorkspacePath = (path: string) =>
   path.startsWith("/") || /^\\\\/u.test(path) || /^[A-Za-z]:[\\/]/u.test(path);
 

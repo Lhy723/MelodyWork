@@ -25,6 +25,7 @@ import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   checkAppUpdate,
+  isMacOSRuntime,
   isTauriRuntime,
   type AppUpdateProgress,
   type AppUpdateStatus,
@@ -37,7 +38,6 @@ import { AgentWorkspaceView } from "./agent-workspace-view";
 import { usePiSessionExplorer } from "./use-pi-session-explorer";
 import {
   DEFAULT_CHAT_DOCK_SPACE,
-  isMacOS,
   storedSidebarCollapsed,
   storedSidebarWidth,
   storedWorkspaceMode,
@@ -486,7 +486,7 @@ export function AgentWorkspace() {
         ? "research"
         : "conversation";
   const nativeVibrancyEnabled =
-    isMacOS && isTauriRuntime() && translucentSidebar;
+    isMacOSRuntime() && isTauriRuntime() && translucentSidebar;
 
   return (
     <AgentWorkspaceView
@@ -512,7 +512,7 @@ export function AgentWorkspace() {
       handleSessionTabKeyDown={handleSessionTabKeyDown}
       installingUpdate={installingUpdate}
       installAppUpdate={installAppUpdate}
-      isMacOS={isMacOS}
+      isMacOS={isMacOSRuntime()}
       nativeVibrancyEnabled={nativeVibrancyEnabled}
       newTaskOpen={newTaskOpen}
       newTaskProject={newTaskProject}
