@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  sessionModeIdFromUpdate,
-  sessionModeState,
-} from "./session-mode.ts";
+import { sessionModeIdFromUpdate, sessionModeState } from "./session-mode.ts";
 
 test("parses ACP session mode state from session open responses", () => {
   assert.deepEqual(

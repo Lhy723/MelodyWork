@@ -19,14 +19,14 @@ _调研日期：2026-09-02；范围：官方 OpenAI 文档与 [`openai/codex`](h
 
 ## Codex 提供了什么可定制面
 
-| 维度 | 可直接利用的能力 | 对 MelodyWork 的含义 |
-| --- | --- | --- |
-| 配置与项目规则 | `~/.codex/config.toml`、受信任项目的 `.codex/config.toml`、profiles、`AGENTS.md`、hooks、子 Agent 配置与权限 profiles。项目配置不能覆盖 provider/auth 等机器级项。 | 可以继续保留“应用/当前项目”两级设置，但需要把现有 `.melody/config.toml` 映射/迁移为 Codex 配置，并明确哪些只能在用户级设置。[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) |
-| 沙箱与审批 | `read-only`、`workspace-write`、`danger-full-access`；可配置额外可写根、网络、细粒度审批。App server 的 turn 可覆写 `cwd`、审批和沙箱；外部宿主已沙箱化时可声明 `externalSandbox`。 | 能覆盖当前的 ask/auto/always-approve 概念，但原生授权 UI 和持久化 allow-rule 逻辑要改为处理 Codex 的 approval 请求。[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)；[app-server 协议](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) |
-| MCP 与插件 | 支持 stdio / Streamable HTTP MCP、OAuth、逐 server / tool allowlist 和审批；plugins 可打包 skills、MCP 与 assets。 | 比现有 MelodyWork 的 MCP / Marketplace 更接近上游生态；可以逐步改为展示与管理 Codex 的配置，不需要重造 server lifecycle。[MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) |
-| Skills | 复用 `SKILL.md` 格式；会扫描 repo 的 `.agents/skills` 与用户 `$HOME/.agents/skills`，支持插件化分发和按需载入。 | 现有本仓库及用户的 `.agents/skills` 有很高复用度，不必迁移格式。[Skills 文档](https://learn.chatgpt.com/docs/build-skills) |
-| 供 UI 嵌入的接口 | `codex app-server` 是官方 VS Code 扩展使用的接口，双向 JSON-RPC；stdio/JSONL 是推荐的本地传输；可生成与运行版本精确匹配的 TS / JSON schema。 | 这是 MelodyWork 应接的目标，而不是 CLI TUI，也不是 ACP。可以用 schema 生成 + contract tests 管住升级风险。[app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) |
-| CLI / 自动化 | `codex exec`、`mcp`、`plugin`、`review`、`sandbox` 等是 stable；`app-server` 被官方标为 experimental；旧 `codex mcp-server` 已 deprecated。 | 适合将 headless / CI 能力交给 `codex exec`，但桌面嵌入仍应以 app-server 为准，不能把 MCP server 当成 UI 运行时的替代品。[CLI 参考](https://learn.chatgpt.com/docs/developer-commands?surface=cli) |
+| 维度             | 可直接利用的能力                                                                                                                                                                    | 对 MelodyWork 的含义                                                                                                                                                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 配置与项目规则   | `~/.codex/config.toml`、受信任项目的 `.codex/config.toml`、profiles、`AGENTS.md`、hooks、子 Agent 配置与权限 profiles。项目配置不能覆盖 provider/auth 等机器级项。                  | 可以继续保留“应用/当前项目”两级设置，但需要把现有 `.melody/config.toml` 映射/迁移为 Codex 配置，并明确哪些只能在用户级设置。[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)                                                                                     |
+| 沙箱与审批       | `read-only`、`workspace-write`、`danger-full-access`；可配置额外可写根、网络、细粒度审批。App server 的 turn 可覆写 `cwd`、审批和沙箱；外部宿主已沙箱化时可声明 `externalSandbox`。 | 能覆盖当前的 ask/auto/always-approve 概念，但原生授权 UI 和持久化 allow-rule 逻辑要改为处理 Codex 的 approval 请求。[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)；[app-server 协议](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) |
+| MCP 与插件       | 支持 stdio / Streamable HTTP MCP、OAuth、逐 server / tool allowlist 和审批；plugins 可打包 skills、MCP 与 assets。                                                                  | 比现有 MelodyWork 的 MCP / Marketplace 更接近上游生态；可以逐步改为展示与管理 Codex 的配置，不需要重造 server lifecycle。[MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)                                                                                                  |
+| Skills           | 复用 `SKILL.md` 格式；会扫描 repo 的 `.agents/skills` 与用户 `$HOME/.agents/skills`，支持插件化分发和按需载入。                                                                     | 现有本仓库及用户的 `.agents/skills` 有很高复用度，不必迁移格式。[Skills 文档](https://learn.chatgpt.com/docs/build-skills)                                                                                                                                                                  |
+| 供 UI 嵌入的接口 | `codex app-server` 是官方 VS Code 扩展使用的接口，双向 JSON-RPC；stdio/JSONL 是推荐的本地传输；可生成与运行版本精确匹配的 TS / JSON schema。                                        | 这是 MelodyWork 应接的目标，而不是 CLI TUI，也不是 ACP。可以用 schema 生成 + contract tests 管住升级风险。[app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)                                                                                      |
+| CLI / 自动化     | `codex exec`、`mcp`、`plugin`、`review`、`sandbox` 等是 stable；`app-server` 被官方标为 experimental；旧 `codex mcp-server` 已 deprecated。                                         | 适合将 headless / CI 能力交给 `codex exec`，但桌面嵌入仍应以 app-server 为准，不能把 MCP server 当成 UI 运行时的替代品。[CLI 参考](https://learn.chatgpt.com/docs/developer-commands?surface=cli)                                                                                           |
 
 ## 维护收益与边界
 
@@ -46,14 +46,14 @@ _调研日期：2026-09-02；范围：官方 OpenAI 文档与 [`openai/codex`](h
 
 ## 与当前 MelodyWork 的具体差异
 
-| 当前实现 | Codex 迁移后的对应物 | 风险/工作量 |
-| --- | --- | --- |
-| [`src-tauri/src/agent_runtime.rs`](../../src-tauri/src/agent_runtime.rs) 固定启动 `melody-pager agent --no-leader stdio` | 启动 `codex app-server --stdio` | 中等：子进程管理可复用，协议层要重写。 |
-| ACP JSON-RPC + `x.ai/*` 扩展 | Codex app-server JSON-RPC thread/turn/item/approval | 高：没有 ACP 兼容层。 |
-| `~/.melody/config.toml` / `.melody/config.toml` | `~/.codex/config.toml` / 信任后的 `.codex/config.toml` | 中等：配置语义与 scope 不同。 |
-| 多后端模型（Responses、Messages、Chat Completions） | 自定义 provider，但仅 Responses wire protocol | 高：可能是产品路线的决定性约束。 |
-| 原生 Tauri 确认框和 session allow rule | app-server 反向 approval 请求 + 现有原生 UI | 中等：可以复用 UI 与数据库概念，但要重新映射。 |
-| Melody Build 作为固定 Git submodule / 随应用编译 sidecar | 上游 Codex 固定 release 二进制或已安装 CLI | 中等：构建成本下降，但增加版本兼容测试和多平台分发检查。 |
+| 当前实现                                                                                                                 | Codex 迁移后的对应物                                   | 风险/工作量                                              |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------------- |
+| [`src-tauri/src/agent_runtime.rs`](../../src-tauri/src/agent_runtime.rs) 固定启动 `melody-pager agent --no-leader stdio` | 启动 `codex app-server --stdio`                        | 中等：子进程管理可复用，协议层要重写。                   |
+| ACP JSON-RPC + `x.ai/*` 扩展                                                                                             | Codex app-server JSON-RPC thread/turn/item/approval    | 高：没有 ACP 兼容层。                                    |
+| `~/.melody/config.toml` / `.melody/config.toml`                                                                          | `~/.codex/config.toml` / 信任后的 `.codex/config.toml` | 中等：配置语义与 scope 不同。                            |
+| 多后端模型（Responses、Messages、Chat Completions）                                                                      | 自定义 provider，但仅 Responses wire protocol          | 高：可能是产品路线的决定性约束。                         |
+| 原生 Tauri 确认框和 session allow rule                                                                                   | app-server 反向 approval 请求 + 现有原生 UI            | 中等：可以复用 UI 与数据库概念，但要重新映射。           |
+| Melody Build 作为固定 Git submodule / 随应用编译 sidecar                                                                 | 上游 Codex 固定 release 二进制或已安装 CLI             | 中等：构建成本下降，但增加版本兼容测试和多平台分发检查。 |
 
 ## 更新节奏与兼容性判断
 

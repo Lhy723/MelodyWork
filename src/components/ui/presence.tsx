@@ -8,11 +8,7 @@ interface PresenceProps {
   present: boolean;
 }
 
-function Presence({
-  children,
-  exitDuration = 220,
-  present,
-}: PresenceProps) {
+function Presence({ children, exitDuration = 220, present }: PresenceProps) {
   const [mounted, setMounted] = useState(present);
   const [visible, setVisible] = useState(false);
   const exitTimer = useRef<number | undefined>(undefined);

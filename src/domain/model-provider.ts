@@ -94,9 +94,7 @@ export const modelProvider = (
   const provider = providerRules.find((rule) =>
     rule.tokens.some((token) => searchable.includes(token)),
   );
-  return provider
-    ? { id: provider.id, name: provider.name }
-    : fallbackProvider;
+  return provider ? { id: provider.id, name: provider.name } : fallbackProvider;
 };
 
 export const groupModelsByProvider = (models: AgentModelOption[]) => {

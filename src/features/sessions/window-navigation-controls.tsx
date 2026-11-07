@@ -1,8 +1,4 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  PanelLeftIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, PanelLeftIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -45,9 +41,7 @@ export function WindowNavigationControls({
         title={collapsed ? "展开侧边栏" : "收起侧边栏"}
         variant="ghost"
       >
-        <span
-          className="flex size-5 items-center justify-center"
-        >
+        <span className="flex size-5 items-center justify-center">
           <PanelLeftIcon className="size-5" />
         </span>
       </Button>
@@ -60,9 +54,7 @@ export function WindowNavigationControls({
         title="返回"
         variant="ghost"
       >
-        <span
-          className="flex size-5 items-center justify-center"
-        >
+        <span className="flex size-5 items-center justify-center">
           <ArrowLeftIcon className="size-5" />
         </span>
       </Button>
@@ -75,16 +67,11 @@ export function WindowNavigationControls({
         title="前进"
         variant="ghost"
       >
-        <span
-          className="flex size-5 items-center justify-center"
-        >
+        <span className="flex size-5 items-center justify-center">
           <ArrowRightIcon className="size-5" />
         </span>
       </Button>
-      <div
-        className="h-full min-w-3 flex-1"
-        data-tauri-drag-region
-      />
+      <div className="h-full min-w-3 flex-1" data-tauri-drag-region />
     </div>
   );
 }

@@ -15,16 +15,16 @@ Install frontend dependencies with `pnpm install` after cloning. The retired `ve
 
 ## Common Commands
 
-| Command                                           | Purpose                                                     |
-| ------------------------------------------------- | ----------------------------------------------------------- |
-| `pnpm dev`                                        | Run the Vite frontend development server.                   |
-| `pnpm tauri dev`                                  | Prepare the Pi worker, then launch the desktop application. |
-| `pnpm tauri:clean`                                | Remove the Rust build target used by Tauri.                 |
-| `pnpm check`                                      | Run the TypeScript type check.                              |
+| Command                                           | Purpose                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev`                                        | Run the Vite frontend development server.                           |
+| `pnpm tauri dev`                                  | Prepare the Pi worker, then launch the desktop application.         |
+| `pnpm tauri:clean`                                | Remove the Rust build target used by Tauri.                         |
+| `pnpm check`                                      | Run the TypeScript type check.                                      |
 | `pnpm check:ui-font`                              | Check for UI font overrides that bypass the configured font preset. |
-| `pnpm test:unit`                                  | Run frontend and domain unit tests.                         |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests.                                             |
-| `pnpm build`                                      | Produce a production frontend build.                        |
+| `pnpm test:unit`                                  | Run frontend and domain unit tests.                                 |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | Run Rust tests.                                                     |
+| `pnpm build`                                      | Produce a production frontend build.                                |
 
 ## Runtime and Build Notes
 

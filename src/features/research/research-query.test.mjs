@@ -8,7 +8,10 @@ test("creates an inspectable query draft from a natural-language prompt", () => 
     "How does multimodal RAG improve reproducible research?",
   );
 
-  assert.equal(plan.original, "How does multimodal RAG improve reproducible research");
+  assert.equal(
+    plan.original,
+    "How does multimodal RAG improve reproducible research",
+  );
   assert.ok(plan.terms.includes("multimodal"));
   assert.ok(plan.terms.includes("RAG"));
   assert.ok(!plan.query.toLocaleLowerCase().includes("how"));

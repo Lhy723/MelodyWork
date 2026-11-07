@@ -1,8 +1,4 @@
-import type {
-  AgentPlanStatus,
-  JsonRpcId,
-  TimelineEntry,
-} from "@/domain/acp";
+import type { AgentPlanStatus, JsonRpcId, TimelineEntry } from "@/domain/acp";
 
 export interface PlanApprovalRequest {
   content: string;
@@ -17,8 +13,8 @@ export const upsertPlanApproval = (
   const id = `plan-${request.toolCallId}`;
   const nextTimeline = timeline.map((entry): TimelineEntry =>
     entry.kind === "plan" &&
-      entry.status === "awaiting-approval" &&
-      entry.id !== id
+    entry.status === "awaiting-approval" &&
+    entry.id !== id
       ? { ...entry, requestId: undefined, status: "superseded" }
       : entry,
   );

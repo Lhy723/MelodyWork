@@ -22,12 +22,16 @@ test("Research capability state can enable and disable skills", () => {
   assert.equal(store.enabledSkillIds.length, 6);
   store.setSkillEnabled("paper-review", false);
   assert.equal(
-    useResearchCapabilityStore.getState().enabledSkillIds.includes("paper-review"),
+    useResearchCapabilityStore
+      .getState()
+      .enabledSkillIds.includes("paper-review"),
     false,
   );
   store.setSkillEnabled("paper-review", true);
   assert.equal(
-    useResearchCapabilityStore.getState().enabledSkillIds.includes("paper-review"),
+    useResearchCapabilityStore
+      .getState()
+      .enabledSkillIds.includes("paper-review"),
     true,
   );
   store.reset();
@@ -56,4 +60,3 @@ test("Research tools produce conservative BibTeX and traceable matrix rows", () 
   assert.match(matrix[0].identity, /10\.1234\/example/);
   assert.equal(matrix[0].design, "待从摘要或全文提取");
 });
-

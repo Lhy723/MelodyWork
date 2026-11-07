@@ -165,9 +165,7 @@ export const ContextContentHeader = ({
             </span>
           </div>
           <Progress value={usedPercent * PERCENT_MAX} />
-          <p className="text-muted-foreground text-xs">
-            {displayPercent} used
-          </p>
+          <p className="text-muted-foreground text-xs">{displayPercent} used</p>
         </>
       )}
     </div>
@@ -185,10 +183,7 @@ export const ContextContentBody = ({
   const remainingTokens = Math.max(0, maxTokens - usedTokens);
 
   return (
-    <div
-      className={cn("w-full space-y-2 p-3 text-xs", className)}
-      {...props}
-    >
+    <div className={cn("w-full space-y-2 p-3 text-xs", className)} {...props}>
       {children ?? (
         <>
           <div className="flex items-center justify-between">

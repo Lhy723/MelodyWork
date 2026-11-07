@@ -70,14 +70,15 @@ export const InlineCitationCardTrigger = ({
       variant="secondary"
       {...props}
     >
-      {label ?? (sources[0] ? (
-        <>
-          {new URL(sources[0]).hostname}{" "}
-          {sources.length > 1 && `+${sources.length - 1}`}
-        </>
-      ) : (
-        "unknown"
-      ))}
+      {label ??
+        (sources[0] ? (
+          <>
+            {new URL(sources[0]).hostname}{" "}
+            {sources.length > 1 && `+${sources.length - 1}`}
+          </>
+        ) : (
+          "unknown"
+        ))}
     </Badge>
   </HoverCardTrigger>
 );
@@ -119,7 +120,7 @@ export const InlineCitationCarousel = ({
 export type InlineCitationCarouselContentProps = ComponentProps<"div">;
 
 export const InlineCitationCarouselContent = (
-  props: InlineCitationCarouselContentProps
+  props: InlineCitationCarouselContentProps,
 ) => <CarouselContent {...props} />;
 
 export type InlineCitationCarouselItemProps = ComponentProps<"div">;
@@ -143,7 +144,7 @@ export const InlineCitationCarouselHeader = ({
   <div
     className={cn(
       "flex items-center justify-between gap-2 rounded-t-md bg-secondary p-2",
-      className
+      className,
     )}
     {...props}
   />
@@ -186,7 +187,7 @@ export const InlineCitationCarouselIndex = ({
     <div
       className={cn(
         "flex flex-1 items-center justify-end px-3 py-1 text-muted-foreground text-xs",
-        className
+        className,
       )}
       {...props}
     >
@@ -289,7 +290,7 @@ export const InlineCitationQuote = ({
   <blockquote
     className={cn(
       "border-muted border-l-2 pl-3 text-muted-foreground text-sm italic",
-      className
+      className,
     )}
     {...props}
   >

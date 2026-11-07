@@ -18,8 +18,9 @@ interface ChainOfThoughtContextValue {
   setIsOpen: (open: boolean) => void;
 }
 
-const ChainOfThoughtContext =
-  createContext<ChainOfThoughtContextValue | null>(null);
+const ChainOfThoughtContext = createContext<ChainOfThoughtContextValue | null>(
+  null,
+);
 
 const useChainOfThought = () => {
   const context = useContext(ChainOfThoughtContext);
@@ -51,10 +52,7 @@ export const ChainOfThought = memo(
       onChange: onOpenChange,
       prop: open,
     });
-    const value = useMemo(
-      () => ({ isOpen, setIsOpen }),
-      [isOpen, setIsOpen],
-    );
+    const value = useMemo(() => ({ isOpen, setIsOpen }), [isOpen, setIsOpen]);
 
     return (
       <ChainOfThoughtContext.Provider value={value}>
@@ -84,9 +82,7 @@ export const ChainOfThoughtHeader = memo(
           {...props}
         >
           <BrainIcon className="size-4" />
-          <span className="flex-1 text-left">
-            {children ?? "思考过程"}
-          </span>
+          <span className="flex-1 text-left">{children ?? "思考过程"}</span>
           <ChevronDownIcon
             className={cn(
               "size-4 transition-transform",

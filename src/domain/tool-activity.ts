@@ -17,9 +17,7 @@ const stringValue = (value: unknown): string | undefined =>
 
 const toolInput = (tool: JsonObject): JsonObject | undefined => {
   const input = objectValue(tool.rawInput);
-  return input?.gateway === "melody"
-    ? objectValue(input.arguments)
-    : input;
+  return input?.gateway === "melody" ? objectValue(input.arguments) : input;
 };
 
 const numberValue = (value: unknown): number | undefined =>

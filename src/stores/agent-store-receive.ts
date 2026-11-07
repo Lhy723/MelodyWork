@@ -137,7 +137,10 @@ export const receiveAgentAcp = async (
       }
       markPromptActivity(request.sessionId);
       const currentRuntimeSessionId = get().runtimeSessionId;
-      if (currentRuntimeSessionId && request.sessionId !== currentRuntimeSessionId) {
+      if (
+        currentRuntimeSessionId &&
+        request.sessionId !== currentRuntimeSessionId
+      ) {
         set((state) => ({
           backgroundTimelines: {
             ...state.backgroundTimelines,
@@ -361,7 +364,9 @@ export const receiveAgentAcp = async (
       ...(result.streaming ? { chatStatus: "streaming" as const } : {}),
       ...(result.completed
         ? {
-            runtimePhase: result.error ? ("error" as const) : ("ready" as const),
+            runtimePhase: result.error
+              ? ("error" as const)
+              : ("ready" as const),
             chatStatus: result.error ? ("error" as const) : ("ready" as const),
             runningSessions: state.localSessionId
               ? { ...state.runningSessions, [state.localSessionId]: false }

@@ -21,13 +21,7 @@ export const audioExtensions = new Set([
   "wav",
 ]);
 
-export const videoExtensions = new Set([
-  "m4v",
-  "mov",
-  "mp4",
-  "ogv",
-  "webm",
-]);
+export const videoExtensions = new Set(["m4v", "mov", "mp4", "ogv", "webm"]);
 
 export const legacyOfficeExtensions = new Set(["doc", "xls", "ppt"]);
 

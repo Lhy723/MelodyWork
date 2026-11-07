@@ -1,9 +1,5 @@
 export type ResearchSource =
-  | "arXiv"
-  | "Crossref"
-  | "OpenAlex"
-  | "PubMed"
-  | "Semantic Scholar";
+  "arXiv" | "Crossref" | "OpenAlex" | "PubMed" | "Semantic Scholar";
 
 export interface ResearchVerificationEvidence {
   source: ResearchSource;

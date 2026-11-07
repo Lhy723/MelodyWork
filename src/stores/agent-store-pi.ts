@@ -134,7 +134,9 @@ export const receiveAgentEvent = (
       ...(patch.backgroundTimelines !== undefined
         ? { backgroundTimelines: patch.backgroundTimelines }
         : {}),
-      ...(patch.eventCursor !== undefined ? { eventCursor: patch.eventCursor } : {}),
+      ...(patch.eventCursor !== undefined
+        ? { eventCursor: patch.eventCursor }
+        : {}),
       ...(patch.backgroundCursors !== undefined
         ? { backgroundCursors: patch.backgroundCursors }
         : {}),
@@ -191,7 +193,9 @@ export const receiveAgentEvent = (
       ...(patch.chatStatus !== undefined
         ? { chatStatus: patch.chatStatus }
         : {}),
-      ...(patch.runtimePhase !== undefined ? { runtimePhase: patch.runtimePhase } : {}),
+      ...(patch.runtimePhase !== undefined
+        ? { runtimePhase: patch.runtimePhase }
+        : {}),
       ...(patch.statusMessage !== undefined
         ? { status: { ...state.status, message: patch.statusMessage } }
         : {}),

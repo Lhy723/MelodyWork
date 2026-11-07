@@ -13,8 +13,7 @@ const MARKDOWN_LINK =
   /(?<!!)\[([^\]]+)\]\((https?:\/\/[^\s)]+)(?:\s+["'][^"']*["'])?\)/giu;
 const MARKDOWN_IMAGE =
   /!\[[^\]]*\]\((https?:\/\/[^\s)]+)(?:\s+["'][^"']*["'])?\)/giu;
-const BARE_URL =
-  /\bhttps?:\/\/[^\s<>{}\[\]()"',;!?，。；：！？、]+/giu;
+const BARE_URL = /\bhttps?:\/\/[^\s<>{}\[\]()"',;!?，。；：！？、]+/giu;
 const TRAILING_PUNCTUATION = /[),.;:!?，。；：！？]+$/u;
 const MARKDOWN_DECORATION = /[*_`~]/gu;
 const FILE_NAME =
@@ -34,9 +33,7 @@ const normalizeUrl = (candidate: string): string | undefined => {
 };
 
 const citationTitle = (label: string | undefined, url: string) => {
-  const normalizedLabel = label
-    ?.replace(MARKDOWN_DECORATION, "")
-    .trim();
+  const normalizedLabel = label?.replace(MARKDOWN_DECORATION, "").trim();
   if (normalizedLabel) {
     return normalizedLabel;
   }
@@ -98,13 +95,9 @@ export const resolveProjectReference = (
   }
 
   const relativePath =
-    absolutePath === root
-      ? "."
-      : absolutePath.slice(root.length + 1);
+    absolutePath === root ? "." : absolutePath.slice(root.length + 1);
   const kind =
-    candidate.endsWith("/") || !FILE_NAME.test(candidate)
-      ? "folder"
-      : "file";
+    candidate.endsWith("/") || !FILE_NAME.test(candidate) ? "folder" : "file";
 
   return {
     absolutePath,
@@ -139,11 +132,7 @@ export const extractMessageCitations = (
       return;
     }
     const url = normalizeUrl(candidate);
-    if (
-      !url ||
-      citations.has(url) ||
-      (excludeImages && imageUrls.has(url))
-    ) {
+    if (!url || citations.has(url) || (excludeImages && imageUrls.has(url))) {
       return;
     }
     citations.set(url, {

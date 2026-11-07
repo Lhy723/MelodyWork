@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  settlePlanApproval,
-  upsertPlanApproval,
-} from "./plan-approval.ts";
+import { settlePlanApproval, upsertPlanApproval } from "./plan-approval.ts";
 
 test("adds and settles a plan approval request", () => {
   const awaiting = upsertPlanApproval([], {
@@ -16,11 +13,7 @@ test("adds and settles a plan approval request", () => {
   assert.equal(awaiting[0].status, "awaiting-approval");
   assert.equal(awaiting[0].requestId, 41);
 
-  const approved = settlePlanApproval(
-    awaiting,
-    "plan-exit-plan-1",
-    "approved",
-  );
+  const approved = settlePlanApproval(awaiting, "plan-exit-plan-1", "approved");
   assert.equal(approved[0].status, "approved");
   assert.equal(approved[0].requestId, undefined);
 });

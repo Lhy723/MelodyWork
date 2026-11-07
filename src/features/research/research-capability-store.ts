@@ -27,7 +27,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "发现",
     description: "把白话研究问题拆成可复现的多源检索计划。",
     trigger: "自然语言检索、入门探索、综述准备",
-    guidance: "先拆解研究问题、范围和同义词，再输出可复现检索式；记录实际数据源和失败来源。",
+    guidance:
+      "先拆解研究问题、范围和同义词，再输出可复现检索式；记录实际数据源和失败来源。",
   },
   {
     id: "paper-review",
@@ -36,7 +37,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "阅读",
     description: "按问题—方法—证据—限制结构化阅读单篇论文。",
     trigger: "打开论文、论文总结、批判性阅读",
-    guidance: "先确认论文身份，再把主张和证据绑定；区分原文事实、模型推断与未核验陈述。",
+    guidance:
+      "先确认论文身份，再把主张和证据绑定；区分原文事实、模型推断与未核验陈述。",
   },
   {
     id: "citation-audit",
@@ -45,7 +47,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "可信度",
     description: "核对 DOI、作者、来源和关键结论的可追溯性。",
     trigger: "收藏论文、写综述、引用核验",
-    guidance: "优先用两个独立来源匹配元信息；论文存在不等于论文支持某个主张，冲突必须显式标注。",
+    guidance:
+      "优先用两个独立来源匹配元信息；论文存在不等于论文支持某个主张，冲突必须显式标注。",
   },
   {
     id: "systematic-review",
@@ -54,7 +57,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "综合",
     description: "把检索结果整理成可追溯的纳入记录和证据矩阵。",
     trigger: "综述、开题、证据地图、科研追踪",
-    guidance: "保留检索批次、纳入排除标准和论文 ID；分开证据摘要、作者解释、共识和证据空白。",
+    guidance:
+      "保留检索批次、纳入排除标准和论文 ID；分开证据摘要、作者解释、共识和证据空白。",
   },
   {
     id: "experiment-design",
@@ -63,7 +67,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "验证",
     description: "把论文主张或知识资产转成可证伪、可复现的实验计划。",
     trigger: "验证主张、消融、基准测试、研究方案",
-    guidance: "预先定义假设、变量、基线、指标、统计方法、失败条件、随机种子和复现产物。",
+    guidance:
+      "预先定义假设、变量、基线、指标、统计方法、失败条件、随机种子和复现产物。",
   },
   {
     id: "scientific-writing",
@@ -72,7 +77,8 @@ export const RESEARCH_SKILLS: ResearchSkillDefinition[] = [
     category: "表达",
     description: "用清晰、克制的结构改写摘要、导读、综述和讨论。",
     trigger: "摘要、综述、结果、讨论、审稿回复",
-    guidance: "按主张—证据—边界组织文本；保留效果量和不确定性，不把借鉴的期刊风格冒充官方规范。",
+    guidance:
+      "按主张—证据—边界组织文本；保留效果量和不确定性，不把借鉴的期刊风格冒充官方规范。",
   },
 ];
 
@@ -132,7 +138,8 @@ export const RESEARCH_TOOLS: ResearchToolDefinition[] = [
 export const RESEARCH_MCP = {
   id: "melody-research",
   title: "Melody Research MCP",
-  description: "通过本地 stdio MCP 暴露检索、引用核验、BibTeX、资源和研究提示。",
+  description:
+    "通过本地 stdio MCP 暴露检索、引用核验、BibTeX、资源和研究提示。",
   tools: ["search_literature", "verify_citation", "format_bibtex"],
   sources: ["Crossref", "OpenAlex", "arXiv", "Semantic Scholar", "PubMed"],
   resources: ["research://protocol"],
@@ -209,7 +216,8 @@ export const useResearchCapabilityStore = create<ResearchCapabilityState>()(
 );
 
 export const buildResearchSkillContext = () => {
-  const { enabledSkillIds, enabledToolIds } = useResearchCapabilityStore.getState();
+  const { enabledSkillIds, enabledToolIds } =
+    useResearchCapabilityStore.getState();
   const enabled = RESEARCH_SKILLS.filter((skill) =>
     enabledSkillIds.includes(skill.id),
   );
@@ -230,11 +238,12 @@ export const formatResearchBibtex = (paper: {
   title: string;
   year?: number;
 }) => {
-  const key = (paper.doi || paper.title)
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase()
-    .slice(0, 80) || "paper";
+  const key =
+    (paper.doi || paper.title)
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()
+      .slice(0, 80) || "paper";
   const lines = [
     `@article{${key},`,
     `  title = {${paper.title}},`,
@@ -262,9 +271,11 @@ export const buildResearchEvidenceMatrix = (
 ) =>
   papers.map((paper) => ({
     id: paper.id,
-    identity: [paper.title, paper.doi || "无 DOI", paper.year || "年份未知"].join(
-      " · ",
-    ),
+    identity: [
+      paper.title,
+      paper.doi || "无 DOI",
+      paper.year || "年份未知",
+    ].join(" · "),
     design: "待从摘要或全文提取",
     outcome: "待从摘要或全文提取",
     limitations: "待人工核对原文",

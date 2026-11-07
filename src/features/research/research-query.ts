@@ -65,7 +65,9 @@ export const buildResearchQueryPlan = (input: string): ResearchQueryPlan => {
     ),
   ).slice(0, 12);
   const removedTerms = unique(
-    phraseTerms.filter((term) => QUERY_STOP_WORDS.has(term.toLocaleLowerCase())),
+    phraseTerms.filter((term) =>
+      QUERY_STOP_WORDS.has(term.toLocaleLowerCase()),
+    ),
   );
 
   return {

@@ -26,7 +26,8 @@ export const configurationUserSections: SettingSection[] = [
       {
         path: ["models", "web_search"],
         label: "联网搜索模型",
-        description: "联网搜索工具使用的模型；Pi 会话通过 Host 受控 web_search 桥接执行，凭据只在 worker 进程内短暂使用。",
+        description:
+          "联网搜索工具使用的模型；Pi 会话通过 Host 受控 web_search 桥接执行，凭据只在 worker 进程内短暂使用。",
         kind: "string",
         placeholder: "例如 grok-4.20-multi-agent",
       },
@@ -222,7 +223,8 @@ export const configurationUserSections: SettingSection[] = [
       {
         path: ["features", "codebase_indexing"],
         label: "代码库索引",
-        description: "为项目建立代码图索引以改进检索；Pi 目前仅支持受控文本搜索。",
+        description:
+          "为项目建立代码图索引以改进检索；Pi 目前仅支持受控文本搜索。",
         kind: "boolean",
         defaultValue: true,
       },
@@ -236,14 +238,16 @@ export const configurationUserSections: SettingSection[] = [
       {
         path: ["features", "remote_fetch"],
         label: "在线模型目录同步",
-        description: "允许同步在线模型目录和认证设置；Pi 原生签名目录与 Melody 自定义目录均由 Host 受控刷新并缓存，关闭可用于离线或受限网络。",
+        description:
+          "允许同步在线模型目录和认证设置；Pi 原生签名目录与 Melody 自定义目录均由 Host 受控刷新并缓存，关闭可用于离线或受限网络。",
         kind: "boolean",
         defaultValue: true,
       },
       {
         path: ["features", "web_fetch"],
         label: "网页读取工具",
-        description: "允许代理读取远程网页；Pi 通过 Host 受控 web_fetch 桥接执行，并应用域名、大小和本地地址策略。",
+        description:
+          "允许代理读取远程网页；Pi 通过 Host 受控 web_fetch 桥接执行，并应用域名、大小和本地地址策略。",
         kind: "boolean",
         defaultValue: false,
       },
@@ -335,7 +339,8 @@ export const configurationUserSections: SettingSection[] = [
       {
         path: ["session", "load_envrc"],
         label: "加载 .envrc",
-        description: "进入项目后由 Host 通过 direnv export json 加载受限 .envrc 环境；不会继承任意 shell 环境。",
+        description:
+          "进入项目后由 Host 通过 direnv export json 加载受限 .envrc 环境；不会继承任意 shell 环境。",
         kind: "boolean",
         defaultValue: true,
       },

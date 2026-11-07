@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  groupModelsByProvider,
-  modelProvider,
-} from "./model-provider.ts";
+import { groupModelsByProvider, modelProvider } from "./model-provider.ts";
 
 const model = (id, name) => ({
   id,
