@@ -33,16 +33,20 @@ worker.
 
 ## Quality Check
 
+**Prerequisite:** the agent-worker sidecar is gitignored. Run
+`pnpm prepare:agent-worker` once (requires Bun 1.3+) before any cargo command,
+or the build script fails with `resource path ... doesn't exist`.
+
 ```bash
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml --lib
 pnpm check:pi-compatibility
 ```
 
-CI runs only `cargo fmt --check` for Rust (`.github/workflows/check.yml`);
-`cargo test` is not a CI gate yet. Rust tests are inline `#[cfg(test)] mod
-tests` in the module that owns the behavior; the first one is
-`pi_worker_runtime/host_tool_routing.rs` (pure decision tests, no
+CI runs both `cargo test --lib` and `cargo fmt --check` for Rust
+(`.github/workflows/check.yml`), after `pnpm prepare:agent-worker`. Rust tests
+are inline `#[cfg(test)] mod tests` in the module that owns the behavior; the
+first one is `pi_worker_runtime/host_tool_routing.rs` (pure decision tests, no
 `tauri::test`). `tauri` is already a dev-dependency with the `test` feature
 enabled, so a test that needs an `AppHandle` can use `tauri::test`; add
 `tempfile` to `[dev-dependencies]` only when a test needs a scratch directory.

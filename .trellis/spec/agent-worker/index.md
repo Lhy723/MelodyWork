@@ -46,6 +46,13 @@ two that do (`main.test.mjs`, `worker-smoke.test.mjs`) live in the root
 `test:unit`. The Pi compatibility script remains the regression gate for
 protocol/adapter drift.
 
+`pnpm prepare:agent-worker` (`scripts/prepare-agent-worker.mjs`) compiles
+`src/main.ts` with Bun 1.3+ into
+`src-tauri/binaries/melody-agent-worker-<rust-target>`. That binary is
+gitignored and is the `bundle.externalBin` entry `tauri_build::build()`
+validates. CI builds it before `cargo test`; locally, run it before any cargo
+command.
+
 ## Runtime Shape
 
 ### Entry and emission

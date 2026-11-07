@@ -48,12 +48,15 @@ pnpm format:check
 `pnpm check:architecture` is not part of `pnpm check`; CI runs every gate plus
 all test suites (`.github/workflows/check.yml`).
 
-Suite ownership: `test:unit` owns `src/**/*.test.mjs` and
-`packages/agent-contract/src/*.test.mjs`; `test:agent-worker` owns pure worker
-tests; `test:smoke` owns the two process-spawning worker files. A file belongs
-to exactly one suite — do not add a worker path back to `test:unit`. Renderer
-work still needs a real run (`pnpm dev` / `pnpm tauri dev`) for visual changes;
-the suites cover domain and store logic, not components.
+Suite ownership: `test:unit` owns only explicit globs under `src/domain/`,
+`src/domain/agent/`, `src/features/files/`, `src/features/research/`,
+`src/stores/` plus `packages/agent-contract/src/*.test.mjs` — a test file
+outside those directories never runs. `test:agent-worker` owns pure worker tests
+and `test:smoke` owns the two process-spawning worker files. `pnpm
+check:test-coverage` fails when a `*.test.mjs` file belongs to no suite or to
+more than one. Renderer work still needs a real run (`pnpm dev` /
+`pnpm tauri dev`) for visual changes; the suites cover domain and store logic,
+not components.
 
 ## Files
 
