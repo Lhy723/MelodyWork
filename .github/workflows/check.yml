@@ -12,10 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # `xcap` (screen capture) pulls in pipewire and gbm on Linux:
+      # - `libspa-sys`'s build script probes the pkg-config module `libpipewire-0.3`,
+      #   which only `libpipewire-0.3-dev` ships (it pulls `libspa-0.2-dev` along).
+      # - `gbm-sys` declares `#[link(name = "gbm")]`, so the linker needs the
+      #   unversioned `libgbm.so` that only `libgbm-dev` ships (`libgbm1` has only
+      #   the versioned `libgbm.so.1`).
+      # The runtime packages arrive transitively; the -dev ones do not.
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libpipewire-0.3-dev libgbm-dev
       - uses: pnpm/action-setup@v4.4.0
       - uses: actions/setup-node@v6
         with:
