@@ -7,6 +7,7 @@ import {
 import {
   Conversation,
   ConversationContent,
+  ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import {
@@ -15,6 +16,7 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { CornerUpLeft, GitBranchPlus, LoaderCircle } from "lucide-react";
 import type {
   AgentPlanDecision,
@@ -97,6 +99,7 @@ function AssistantMessageText({
 }
 
 interface AgentTimelineProps {
+  archived?: boolean;
   cwd: string;
   entries: TimelineEntry[];
   onPermission: (entryId: string, optionId: string) => void;
@@ -119,6 +122,7 @@ interface AgentTimelineProps {
 }
 
 export function AgentTimeline({
+  archived = false,
   cwd,
   entries,
   onPermission,
@@ -284,9 +288,25 @@ export function AgentTimeline({
   return (
     <Conversation className="harness-chat-scroll min-h-0">
       <ConversationContent
-        className="harness-chat-content mx-auto w-full max-w-3xl gap-5 px-4 py-8 sm:px-6"
+        className={cn(
+          "harness-chat-content mx-auto w-full max-w-3xl gap-5 px-4 py-8 sm:px-6",
+          // The scroll viewport already reserves the floating composer's
+          // height, so filling it keeps the empty state centered above it.
+          renderEntries.length === 0 && "min-h-full",
+        )}
         scrollClassName="harness-chat-scroll-viewport"
       >
+        {renderEntries.length === 0 ? (
+          <ConversationEmptyState
+            className="flex-1"
+            description={
+              archived
+                ? "该会话由旧引擎创建，只能查看；新工作请新建会话。"
+                : "在下方输入框描述你的任务，回复会显示在这里。"
+            }
+            title={archived ? "这个归档会话没有历史记录" : "这个会话还没有消息"}
+          />
+        ) : null}
         {renderEntries.map((entry, index) => {
           const motionStyle = {
             animationDelay: `${Math.min(index, 6) * 24}ms`,

@@ -376,6 +376,7 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
             >
               {conversationView === "chat" ? (
                 <AgentTimeline
+                  archived={archivedReadOnly}
                   cwd={cwd}
                   entries={timeline}
                   onPermission={resolvePermission}
