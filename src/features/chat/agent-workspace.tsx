@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import type { AgentPromptAttachment } from "@/domain/acp";
+import { pendingInteractionsBySession } from "@/domain/agent/pending-interaction";
 import { isComposerReadOnly } from "@/domain/agent/session-archive";
 import { toUserMessage } from "@/domain/app-error";
 import { TaskLauncher } from "@/domain/task-launch";
@@ -79,10 +81,8 @@ export function AgentWorkspace() {
   const status = useAgentStore((state) => state.status);
   const runtimePhase = useAgentStore((state) => state.runtimePhase);
   const runtimeSessionId = useAgentStore((state) => state.runtimeSessionId);
-  const timeline = useAgentStore((state) => state.timeline);
   const chatStatus = useAgentStore((state) => state.chatStatus);
   const archivedReadOnly = useAgentStore((state) => state.archivedReadOnly);
-  const agentLocalSessionId = useAgentStore((state) => state.localSessionId);
   const contextUsage = useAgentStore((state) => state.contextUsage);
   const availableModels = useAgentStore((state) => state.availableModels);
   const autoCheckForUpdates = useAppSettingsStore(
@@ -116,7 +116,32 @@ export function AgentWorkspace() {
     (state) => state.pendingSessionModeId,
   );
   const permissionMode = useAgentStore((state) => state.permissionMode);
-  const runningSessions = useAgentStore((state) => state.runningSessions);
+  // Running and waiting are derived from one store read so the sidebar can
+  // never observe a frame where a session spins while its pending gate is
+  // already visible (or the reverse).
+  const {
+    backgroundTimelines,
+    localSessionId: agentLocalSessionId,
+    runningSessions,
+    timeline,
+  } = useAgentStore(
+    useShallow((state) => ({
+      backgroundTimelines: state.backgroundTimelines,
+      localSessionId: state.localSessionId,
+      runningSessions: state.runningSessions,
+      timeline: state.timeline,
+    })),
+  );
+  const waitingSessions = useMemo(
+    () =>
+      pendingInteractionsBySession({
+        localSessionId: agentLocalSessionId,
+        timeline,
+        backgroundTimelines,
+        sessions: Object.values(sessionsByProject).flat(),
+      }),
+    [agentLocalSessionId, backgroundTimelines, sessionsByProject, timeline],
+  );
   const subagents = useAgentStore((state) => state.subagents);
   const cancelPrompt = useAgentStore((state) => state.cancelPrompt);
   const submitPrompt = useAgentStore((state) => state.submitPrompt);
@@ -561,6 +586,7 @@ export function AgentWorkspace() {
       }}
       onSubmitPrompt={submitPrompt}
       runningSessions={runningSessions}
+      waitingSessions={waitingSessions}
       sessionsByProject={sessionsByProject}
       settingsOpen={settingsOpen}
       settingsPage={settingsPage}

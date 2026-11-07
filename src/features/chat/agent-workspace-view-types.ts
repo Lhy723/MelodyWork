@@ -1,3 +1,4 @@
+import type { PendingInteractionKind } from "@/domain/agent/pending-interaction";
 import type { AgentMonitorNotification } from "@/domain/agent/event-to-session-update";
 import type { PiSessionFork } from "@/domain/agent/pi-session-fork";
 import type { AgentMonitorSnapshot } from "@/lib/melody-bridge-monitors";
@@ -126,6 +127,8 @@ export interface AgentWorkspaceViewProps {
   ) => void | Promise<void>;
   runningSessions: Record<string, boolean>;
   sessionsByProject: Record<string, SessionRecord[]>;
+  /** Product session id → the decision that session is blocked on. */
+  waitingSessions: Record<string, PendingInteractionKind>;
   settingsOpen: boolean;
   settingsPage: SettingsPage;
   sidebarResize?: { startWidth: number; startX: number };

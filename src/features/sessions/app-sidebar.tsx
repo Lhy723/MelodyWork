@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type PointerEventHandler } from "react";
 
+import type { PendingInteractionKind } from "@/domain/agent/pending-interaction";
 import { Button } from "@/components/ui/button";
 import { ExpandingSearch } from "@/components/interior/expanding-search";
 import {
@@ -53,6 +54,8 @@ interface AppSidebarProps {
   runningSessions: Record<string, boolean>;
   sessionsByProject: Record<string, SessionRecord[]>;
   sidebarWidth: number;
+  /** Product session id → the decision that session is blocked on. */
+  waitingSessions: Record<string, PendingInteractionKind>;
   onResizeBy: (delta: number) => void;
   onResizeStart: PointerEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
@@ -81,6 +84,7 @@ export function AppSidebar({
   runningSessions,
   sessionsByProject,
   sidebarWidth,
+  waitingSessions,
   onResizeBy,
   onResizeStart,
   onResetWidth,
@@ -404,6 +408,7 @@ export function AppSidebar({
           projectsExpanded={projectsExpanded}
           runningSessions={runningSessions}
           tasksExpanded={tasksExpanded}
+          waitingSessions={waitingSessions}
           visibleProjects={visibleProjects}
           visibleTask={visibleTask}
           workspaceMode={workspaceMode}

@@ -1,4 +1,8 @@
 import type { AgentSessionPhase, AgentSubagent } from "@/domain/acp";
+import {
+  PENDING_INTERACTION_LABELS,
+  type PendingInteractionKind,
+} from "@/domain/agent/pending-interaction";
 
 import type { WorkspaceMode } from "@/features/sessions/sidebar-types";
 
@@ -125,9 +129,15 @@ export const subagentsForSession = (
 export const sessionStatusLabel = (
   agentPhase: keyof typeof statusLabel,
   sessionPhase: AgentSessionPhase,
+  pendingInteraction?: PendingInteractionKind,
 ) => {
   if (agentPhase !== "running") {
     return statusLabel[agentPhase];
+  }
+  // A blocked prompt is not progress. A stopped, failed, or missing engine
+  // returned above, so only a live session is ever described as waiting.
+  if (pendingInteraction) {
+    return PENDING_INTERACTION_LABELS[pendingInteraction];
   }
   if (
     sessionPhase === "initializing" ||

@@ -13,6 +13,7 @@ import {
 import { LoadingButton } from "@/components/interior/loading-button";
 import { Button } from "@/components/ui/button";
 import { Presence } from "@/components/ui/presence";
+import { pendingInteractionKind } from "@/domain/agent/pending-interaction";
 import { ARCHIVE_STATUS_NOTICE } from "@/domain/agent/session-archive";
 import { localizedSessionTitle } from "@/lib/localize";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,8 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
   } = props;
 
   const archivedReadOnly = useAgentStore((state) => state.archivedReadOnly);
+  // Visible timeline only: this label describes the session on screen.
+  const pendingInteraction = pendingInteractionKind(timeline);
   const relatedExplorerSessions = [
     ...(activePiFork
       ? [
@@ -141,7 +144,11 @@ export function SessionWorkspaceContent(props: AgentWorkspaceViewProps) {
                   data-active={sessionIsActive ? "true" : undefined}
                   data-tauri-drag-region
                 />
-                {sessionStatusLabel(status.phase, runtimePhase)}
+                {sessionStatusLabel(
+                  status.phase,
+                  runtimePhase,
+                  pendingInteraction,
+                )}
               </div>
             </div>
             <div className="harness-session-actions">

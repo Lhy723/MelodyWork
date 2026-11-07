@@ -55,6 +55,7 @@ export function AgentWorkspaceView(props: AgentWorkspaceViewProps) {
     researchSection,
     runningSessions,
     sessionsByProject,
+    waitingSessions,
     setNewTaskOpen,
     setNewTaskProjectId,
     setResearchMainOpen,
@@ -146,6 +147,7 @@ export function AgentWorkspaceView(props: AgentWorkspaceViewProps) {
           runningSessions={runningSessions}
           settingsActive={settingsOpen}
           sessionsByProject={sessionsByProject}
+          waitingSessions={waitingSessions}
           sidebarWidth={sidebarWidth}
           workspaceMode={workspaceMode}
         />

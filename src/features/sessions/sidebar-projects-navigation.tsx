@@ -2,6 +2,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
   FolderOpenIcon,
   MessageCircleIcon,
   MoreHorizontalIcon,
@@ -25,6 +26,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  PENDING_INTERACTION_LABELS,
+  type PendingInteractionKind,
+} from "@/domain/agent/pending-interaction";
 import {
   isIndependentProject,
   type ProjectRecord,
@@ -56,6 +61,7 @@ interface SidebarProjectsNavigationProps {
   projectsExpanded: boolean;
   runningSessions: Record<string, boolean>;
   tasksExpanded: boolean;
+  waitingSessions: Record<string, PendingInteractionKind>;
   visibleProjects: SidebarProjectEntry[];
   archivedProjects: SidebarProjectEntry[];
   visibleTask?: SidebarProjectEntry;
@@ -283,6 +289,7 @@ function SidebarTreeNodeContent({
   onSelectProject,
   runningSessions,
   selected,
+  waitingSessions,
   workspaceMode,
 }: {
   activeProject?: ProjectRecord;
@@ -296,6 +303,7 @@ function SidebarTreeNodeContent({
   onSelectProject: (project: ProjectRecord) => void;
   runningSessions: Record<string, boolean>;
   selected: boolean;
+  waitingSessions: Record<string, PendingInteractionKind>;
   workspaceMode: WorkspaceMode;
 }) {
   const { bindings, fadeDuration, ripples } = useRipple({ max: 2 });
@@ -313,6 +321,7 @@ function SidebarTreeNodeContent({
     const session = node.session;
     const title = localizedSessionTitle(session.title);
     const running = runningSessions[session.id] === true;
+    const waiting = waitingSessions[session.id];
 
     return (
       <div className="group/session flex min-w-0 flex-1 items-center rounded-md text-sm">
@@ -331,7 +340,18 @@ function SidebarTreeNodeContent({
           <RippleLayer fadeDuration={fadeDuration} ripples={ripples} />
           <span className="relative z-10 block truncate">{title}</span>
         </span>
-        {running ? (
+        {waiting ? (
+          // Waiting is more actionable than running, so it wins when both are
+          // true. Shape, color, and label all differ from the running spinner.
+          <span
+            aria-label={PENDING_INTERACTION_LABELS[waiting]}
+            className="relative z-10 mr-1 flex size-3.5 shrink-0 items-center justify-center rounded-full bg-[var(--harness-amber-soft)] text-[var(--harness-amber)]"
+            role="status"
+            title={PENDING_INTERACTION_LABELS[waiting]}
+          >
+            <CircleAlertIcon aria-hidden="true" className="size-3" />
+          </span>
+        ) : running ? (
           <span
             aria-label="任务正在运行"
             className="relative z-10 mr-1 size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-foreground"
@@ -528,6 +548,7 @@ export function SidebarProjectsNavigation({
   projectsExpanded,
   runningSessions,
   tasksExpanded,
+  waitingSessions,
   visibleProjects,
   archivedProjects,
   visibleTask,
@@ -602,6 +623,7 @@ export function SidebarProjectsNavigation({
         onSelectProject={onSelectProject}
         runningSessions={runningSessions}
         selected={selectedNodeId === node.id}
+        waitingSessions={waitingSessions}
         workspaceMode={workspaceMode}
       />
     ),
@@ -616,6 +638,7 @@ export function SidebarProjectsNavigation({
       onSelectProject,
       runningSessions,
       selectedNodeId,
+      waitingSessions,
       workspaceMode,
     ],
   );
