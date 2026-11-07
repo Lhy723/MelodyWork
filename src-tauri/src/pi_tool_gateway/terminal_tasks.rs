@@ -62,6 +62,21 @@ impl BackgroundTaskStatus {
 struct BackgroundTaskState {
     status: BackgroundTaskStatus,
     output: String,
+    /// Set once the collector published the final status and output. Waiters use
+    /// it instead of `status` because a cancel publishes `cancelled` before the
+    /// child is reaped, and the reaping must still be observable.
+    finished: bool,
+}
+
+/// The two flags the collector and the cancel path share.
+///
+/// `reaped` is published by the collector the moment `try_wait`/`wait` yields an
+/// exit status, so a cancel that arrives afterwards can tell the difference
+/// between "still running" and "already finished, pipes draining".
+#[derive(Debug, Default)]
+struct BackgroundTaskControl {
+    cancel: AtomicBool,
+    reaped: AtomicBool,
 }
 
 /// A Host-owned terminal process. The child is deliberately kept inside the
@@ -78,7 +93,7 @@ struct BackgroundTerminalTask {
     /// Unix milliseconds. The panel uses it to order finished tasks so it can
     /// keep the most recent ones without inventing a second registry.
     started_at: u64,
-    cancel: AtomicBool,
+    control: BackgroundTaskControl,
     state: Mutex<BackgroundTaskState>,
     changed: Condvar,
 }
@@ -159,7 +174,7 @@ fn prune_background_terminal_tasks(
         .iter()
         .filter_map(|(id, task)| {
             let state = task.state.lock().ok()?;
-            (state.status != BackgroundTaskStatus::Running).then(|| id.clone())
+            state.finished.then(|| id.clone())
         })
         .collect::<Vec<_>>();
     for id in completed {
@@ -224,7 +239,7 @@ fn collect_terminal_output_controlled(
     child: &mut std::process::Child,
     timeout_ms: Option<u64>,
     policy: Option<PiTerminalPolicy>,
-    cancel: Option<&AtomicBool>,
+    control: Option<&BackgroundTaskControl>,
 ) -> Result<(std::process::ExitStatus, String, bool), String> {
     let stdout = child
         .stdout
@@ -249,13 +264,12 @@ fn collect_terminal_output_controlled(
 
     while finished_readers < 2 {
         if status.is_none() {
-            if let Some(child_status) = child
-                .try_wait()
-                .map_err(|error| format!("Failed to poll terminal command: {error}"))?
-            {
-                status = Some(child_status);
-                drain_deadline = Some(Instant::now() + Duration::from_secs(1));
-            } else if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
+            // A cancel request wins over a concurrent exit: the caller asked for
+            // this task to stop while it was running, so the task must report
+            // `cancelled` even if the kill and the child's own exit land in the
+            // same poll. Only a child that was already reaped before the request
+            // (the `status.is_none()` guard) keeps its natural outcome.
+            if control.is_some_and(|control| control.cancel.load(Ordering::Acquire)) {
                 cancelled = true;
                 let _ = child.kill();
                 status = Some(child.wait().map_err(|error| {
@@ -264,6 +278,12 @@ fn collect_terminal_output_controlled(
                 // A command can leave a grandchild holding the pipe open;
                 // keep a short drain window, then detach the reader threads.
                 drain_deadline = Some(Instant::now() + Duration::from_millis(250));
+            } else if let Some(child_status) = child
+                .try_wait()
+                .map_err(|error| format!("Failed to poll terminal command: {error}"))?
+            {
+                status = Some(child_status);
+                drain_deadline = Some(Instant::now() + Duration::from_secs(1));
             } else if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 timed_out = true;
                 let _ = child.kill();
@@ -273,6 +293,11 @@ fn collect_terminal_output_controlled(
                 // A command can leave a grandchild holding the pipe open;
                 // keep a short drain window, then detach the reader threads.
                 drain_deadline = Some(Instant::now() + Duration::from_millis(250));
+            }
+            if status.is_some() {
+                if let Some(control) = control {
+                    control.reaped.store(true, Ordering::Release);
+                }
             }
         }
 
@@ -460,10 +485,11 @@ fn start_background_terminal(
         root: root.to_path_buf(),
         command: command.to_string(),
         started_at: unix_millis(),
-        cancel: AtomicBool::new(false),
+        control: BackgroundTaskControl::default(),
         state: Mutex::new(BackgroundTaskState {
             status: BackgroundTaskStatus::Running,
             output: String::new(),
+            finished: false,
         }),
         changed: Condvar::new(),
     });
@@ -492,11 +518,11 @@ fn start_background_terminal(
             &mut child,
             timeout_ms,
             policy,
-            Some(&worker_task.cancel),
+            Some(&worker_task.control),
         );
         let (status, output) = match result {
             Ok((exit_status, output, cancelled)) => {
-                if cancelled || worker_task.cancel.load(Ordering::Acquire) {
+                if cancelled {
                     (BackgroundTaskStatus::Cancelled, output)
                 } else if exit_status.success() {
                     (BackgroundTaskStatus::Completed, output)
@@ -508,7 +534,7 @@ fn start_background_terminal(
                 }
             }
             Err(error) => {
-                let cancelled = worker_task.cancel.load(Ordering::Acquire);
+                let cancelled = worker_task.control.cancel.load(Ordering::Acquire);
                 (
                     if cancelled {
                         BackgroundTaskStatus::Cancelled
@@ -520,8 +546,13 @@ fn start_background_terminal(
             }
         };
         if let Ok(mut state) = worker_task.state.lock() {
-            state.status = status;
+            // A cancel request published `cancelled` while the child was still
+            // running; the collector's own outcome must not downgrade it.
+            if state.status != BackgroundTaskStatus::Cancelled {
+                state.status = status;
+            }
             state.output = output;
+            state.finished = true;
             worker_task.changed.notify_all();
         }
     });
@@ -612,21 +643,54 @@ pub(super) fn cancel_background_task(
         return Err("task_id is not a Host-owned background terminal task".to_string());
     }
     let task = authorize_background_task(root, owner_session_id, task_id)?;
-    task.cancel.store(true, Ordering::Release);
+    request_cancel(&task);
     wait_background_task(&task, 2_000);
     Ok(background_task_entry(&task))
 }
 
+/// Claim a still-running task for cancellation and return whether it was claimed.
+///
+/// The status is published here, under the state lock, instead of being derived
+/// later from the child's exit: `SIGTERM` makes a killed child look like a normal
+/// exit to the collector, so classifying on `try_wait` alone reported a stopped
+/// task as completed. Publishing first also means the entry returned to the panel
+/// and every later poll already read `cancelled`.
+///
+/// A task that already settled keeps its terminal status; a cancel racing a
+/// natural exit is not allowed to relabel finished work.
+fn request_cancel(task: &BackgroundTerminalTask) -> bool {
+    let Ok(mut state) = task.state.lock() else {
+        return false;
+    };
+    if state.finished {
+        return false;
+    }
+    // Reaped but not yet published: the child already exited on its own, and the
+    // collector is only draining pipes. Claiming it here would relabel finished
+    // work as stopped; `wait_background_task` waits for the real outcome instead.
+    if task.control.reaped.load(Ordering::Acquire) {
+        return false;
+    }
+    if state.status != BackgroundTaskStatus::Cancelled {
+        state.status = BackgroundTaskStatus::Cancelled;
+    }
+    task.control.cancel.store(true, Ordering::Release);
+    task.changed.notify_all();
+    true
+}
+
+/// Wait for the collector to publish the final status, not for a status change:
+/// a cancelled task already reads `cancelled` while its child is still dying.
 fn wait_background_task(task: &BackgroundTerminalTask, timeout_ms: u64) {
     let mut state = match task.state.lock() {
         Ok(state) => state,
         Err(_) => return,
     };
-    if state.status != BackgroundTaskStatus::Running || timeout_ms == 0 {
+    if state.finished || timeout_ms == 0 {
         return;
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    while state.status == BackgroundTaskStatus::Running {
+    while !state.finished {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
@@ -658,7 +722,7 @@ pub(super) fn resolve_control(
         KILL_COMMAND_OR_SUBAGENT => {
             let task_id = task_id_argument(arguments)?;
             let task = authorize_background_task(root, owner_session_id, task_id)?;
-            task.cancel.store(true, Ordering::Release);
+            request_cancel(&task);
             wait_background_task(&task, 5_000);
             Ok(background_task_snapshot(&task).to_string())
         }
@@ -692,7 +756,7 @@ pub(super) fn resolve_control(
                 let completed = tasks.iter().filter(|task| {
                     task.state
                         .lock()
-                        .map(|state| state.status != BackgroundTaskStatus::Running)
+                        .map(|state| state.finished)
                         .unwrap_or(true)
                 });
                 let should_return = match mode {
@@ -729,7 +793,7 @@ pub(super) fn cancel_background_tasks_for_workspace(root: &Path) {
             .canonicalize()
             .unwrap_or_else(|_| task.root.clone());
         if task_root == canonical_root {
-            task.cancel.store(true, Ordering::Release);
+            request_cancel(task);
         }
     }
 }
@@ -752,10 +816,11 @@ mod tests {
             root: root.to_path_buf(),
             command: command.to_string(),
             started_at: 1_700_000_000_000,
-            cancel: AtomicBool::new(false),
+            control: BackgroundTaskControl::default(),
             state: Mutex::new(BackgroundTaskState {
                 status,
                 output: output.to_string(),
+                finished: status != BackgroundTaskStatus::Running,
             }),
             changed: Condvar::new(),
         }
@@ -876,5 +941,105 @@ mod tests {
         let error = cancel_background_task(&root, "session-a", "session:task:1")
             .expect_err("a worker task id must not reach the terminal registry");
         assert!(error.contains("not a Host-owned background terminal task"));
+    }
+
+    fn start_task_in(root: &Path, command: &str, session: &str) -> String {
+        let mut arguments = Map::new();
+        arguments.insert("command".into(), json!(command));
+        arguments.insert("background".into(), json!(true));
+        let started: Value = serde_json::from_str(
+            &start_background_terminal(root, &arguments, None, session)
+                .expect("background task starts"),
+        )
+        .expect("start result is JSON");
+        started["task_id"]
+            .as_str()
+            .expect("start result carries a task id")
+            .to_string()
+    }
+
+    /// The child is alive when the cancel arrives but exits on its own moments
+    /// later. `SIGKILL` makes that look like a normal exit to the collector, so a
+    /// status derived from `try_wait` reported `completed`; the cancel request
+    /// must win because the task was still running when the user asked to stop it.
+    #[test]
+    fn cancel_reports_cancelled_when_the_child_is_still_running() {
+        let root =
+            std::env::temp_dir().join(format!("melody-bg-race-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).expect("scratch workspace");
+        // Short enough that the natural exit lands inside the same collector
+        // poll as the kill, long enough that the cancel request arrives first.
+        let task_id = start_task_in(&root, "sleep 0.3", "session-owner");
+
+        let cancelled = cancel_background_task(&root, "session-owner", &task_id)
+            .expect("the owner may cancel its task");
+        assert_eq!(cancelled["status"].as_str(), Some("cancelled"));
+        assert_eq!(cancelled["command"].as_str(), Some("sleep 0.3"));
+
+        // The later poll must agree with the returned snapshot.
+        let listed = list_background_tasks(&root, "session-owner");
+        assert!(listed.iter().any(|entry| {
+            entry["task_id"].as_str() == Some(task_id.as_str())
+                && entry["status"].as_str() == Some("cancelled")
+        }));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The panel must never reach another session's task. The rejection text is
+    /// what the user sees in the row, so it is pinned here.
+    #[test]
+    fn cancel_from_another_session_is_rejected_with_the_ownership_message() {
+        let root =
+            std::env::temp_dir().join(format!("melody-bg-own-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).expect("scratch workspace");
+        let task_id = start_task_in(&root, "sleep 30", "session-owner");
+
+        let error = cancel_background_task(&root, "session-intruder", &task_id)
+            .expect_err("a foreign session must not cancel this task");
+        assert_eq!(
+            error,
+            "Background task does not belong to this session workspace"
+        );
+
+        // The owner can still stop it afterwards.
+        let cancelled = cancel_background_task(&root, "session-owner", &task_id)
+            .expect("the owner may cancel its task");
+        assert_eq!(cancelled["status"].as_str(), Some("cancelled"));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A task that already reached a terminal state keeps it: cancelling finished
+    /// work must not relabel it as stopped.
+    #[test]
+    fn cancel_keeps_the_terminal_status_of_a_finished_task() {
+        let root =
+            std::env::temp_dir().join(format!("melody-bg-done-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).expect("scratch workspace");
+        let task_id = start_task_in(&root, "true", "session-owner");
+
+        // The collector publishes status and `finished` under one lock, so a
+        // non-running status means the task has settled.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let settled = list_background_tasks(&root, "session-owner")
+                .iter()
+                .any(|entry| {
+                    entry["task_id"].as_str() == Some(task_id.as_str())
+                        && entry["status"].as_str() != Some("running")
+                });
+            if settled || Instant::now() >= deadline {
+                assert!(settled, "the short-lived command must finish on its own");
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let after_cancel = cancel_background_task(&root, "session-owner", &task_id)
+            .expect("cancelling finished work is not an error");
+        assert_eq!(after_cancel["status"].as_str(), Some("completed"));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

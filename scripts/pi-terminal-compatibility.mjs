@@ -195,7 +195,8 @@ export const checkPiTerminalCompatibility = ({
     if (
       backgroundTerminalTasks.cancellation === "host-owned-process-kill" &&
       (!hostTerminalTasks.includes("child.kill()") ||
-        !hostTerminalTasks.includes("task.cancel.store(true"))
+        !hostTerminalTasks.includes("fn request_cancel(") ||
+        !hostTerminalTasks.includes("task.control.cancel.store(true"))
     ) {
       failures.push("后台终端任务没有通过 Host 进程句柄执行取消。");
     }

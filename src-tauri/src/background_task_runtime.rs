@@ -115,4 +115,96 @@ mod tests {
         assert!(unknown.contains("unknown session session-b"));
         assert!(session_workspace(&database, "  ").is_err());
     }
+
+    /// The panel's cancel goes through session resolution first, so this is the
+    /// exact text a second session gets when it names the first session's task.
+    #[test]
+    fn a_second_session_cannot_cancel_the_first_sessions_task() {
+        let owner_root = std::env::temp_dir().join(format!(
+            "melody-bridge-own-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let intruder_root = std::env::temp_dir().join(format!(
+            "melody-bridge-other-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&owner_root).expect("owner workspace");
+        std::fs::create_dir_all(&intruder_root).expect("intruder workspace");
+
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch("CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT NOT NULL)")
+            .expect("sessions table");
+        connection
+            .execute(
+                "INSERT INTO sessions (id, cwd) VALUES (?1, ?2), (?3, ?4)",
+                (
+                    "session-owner",
+                    owner_root.to_string_lossy().as_ref(),
+                    "session-intruder",
+                    intruder_root.to_string_lossy().as_ref(),
+                ),
+            )
+            .expect("session rows");
+        let database = AppDatabase {
+            connection: Mutex::new(connection),
+        };
+
+        // Start through the same gateway a worker request takes, so the test
+        // covers the model-facing start path too.
+        let start = crate::pi_tool_gateway::resolve_request_with_permission(
+            &owner_root,
+            &serde_json::json!({
+                "sessionId": "session-owner",
+                "event": {
+                    "type": "tool.requested",
+                    "toolCallId": "call-start",
+                    "toolName": "run_terminal_command",
+                    "activity": {
+                        "approved": true,
+                        "arguments": { "command": "sleep 30", "background": true }
+                    }
+                }
+            }),
+            Some(true),
+        );
+        assert_eq!(start["resolution"]["status"].as_str(), Some("completed"));
+        let started: Value = serde_json::from_str(
+            start["resolution"]["output"]
+                .as_str()
+                .expect("start output is a JSON string"),
+        )
+        .expect("start output is JSON");
+        let task_id = started["task_id"]
+            .as_str()
+            .expect("start result carries a task id")
+            .to_string();
+
+        // The panel resolves the caller's workspace from SQLite and then checks
+        // ownership, so this is the exact sequence a second session triggers.
+        let intruder_root = session_workspace(&database, "session-intruder")
+            .expect("the intruder session resolves its own workspace");
+        let error = crate::pi_tool_gateway::cancel_background_terminal_task(
+            &intruder_root,
+            "session-intruder",
+            &task_id,
+        )
+        .expect_err("a second session must not stop this task");
+        assert_eq!(
+            error,
+            "Background task does not belong to this session workspace"
+        );
+
+        let owner_root = session_workspace(&database, "session-owner").expect("owner workspace");
+        let cancelled = crate::pi_tool_gateway::cancel_background_terminal_task(
+            &owner_root,
+            "session-owner",
+            &task_id,
+        )
+        .expect("the owner may stop it");
+        assert_eq!(cancelled["status"].as_str(), Some("cancelled"));
+
+        std::fs::remove_dir_all(&owner_root).ok();
+        std::fs::remove_dir_all(&intruder_root).ok();
+    }
 }
